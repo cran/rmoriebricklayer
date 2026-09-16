@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Provenance you can verify</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Provenance you can verify</h1>
+
+
+
+<p>A manifest with a SHA-256 in it proves the data was not corrupted. It
+proves nothing about who produced it, because anyone who can edit the
+data can recompute the digest and write it back.</p>
+<p>This vignette covers the three things that close that gap: signing a
+manifest, pinning a capsule chunk by chunk, and making the
+<em>history</em> of runs tamper-evident rather than only each run.</p>
+<div id="signing-a-shared-secret" class="section level2">
+<h2>Signing: a shared secret</h2>
+<p>The simplest case is one team, one secret.
+<code>capsule_sign()</code> with <code>scheme = &quot;hmac&quot;</code> produces
+an HMAC-SHA-256 tag: only a key holder can compute it, so only a key
+holder can produce a manifest that verifies.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>manifest <span class="ot">&lt;-</span> <span class="fu">paste0</span>(</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  <span class="st">&quot;source=https://example.org/extract.csv</span><span class="sc">\n</span><span class="st">&quot;</span>,</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>  <span class="st">&quot;sha256=&quot;</span>, <span class="fu">core_sha256</span>(<span class="st">&quot;id,value</span><span class="sc">\n</span><span class="st">1,2</span><span class="sc">\n</span><span class="st">&quot;</span>), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>,</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>  <span class="st">&quot;fetched=2026-09-12&quot;</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>)</span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>sig <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="fu">core_sha256</span>(manifest), <span class="at">key =</span> <span class="st">&quot;team-secret&quot;</span>,</span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a>                    <span class="at">scheme =</span> <span class="st">&quot;hmac&quot;</span>)</span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">core_sha256</span>(manifest), sig, <span class="st">&quot;team-secret&quot;</span>)</span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+<p>An edited manifest has a different digest, which the signature does
+not cover:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>edited <span class="ot">&lt;-</span> <span class="fu">sub</span>(<span class="st">&quot;fetched=2026-09-12&quot;</span>, <span class="st">&quot;fetched=2026-01-01&quot;</span>, manifest)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">core_sha256</span>(edited), sig, <span class="st">&quot;team-secret&quot;</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+<p>Do not carry raw key bytes around by hand. <code>derive_key()</code>
+stretches a passphrase into a full-width key with PBKDF2:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="co"># Fixed here so the vignette is reproducible. For a real key the salt</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="co"># comes from random_bytes(16), which reads the operating system&#39;s</span></span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a><span class="co"># CSPRNG rather than R&#39;s generator.</span></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>salt <span class="ot">&lt;-</span> <span class="st">&quot;9f2c41a7d8e05b36&quot;</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>key <span class="ot">&lt;-</span> <span class="fu">derive_key</span>(<span class="st">&quot;correct horse battery staple&quot;</span>, salt)</span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a><span class="fu">nchar</span>(key)</span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a><span class="co">#&gt; [1] 64</span></span></code></pre></div>
+<p>The salt is not secret and must be stored beside the capsule –
+without the same salt and iteration count, the key cannot be
+re-derived.</p>
+<p>HMAC is symmetric, so anyone who can <em>verify</em> can also
+<em>sign</em>. That is fine within one team and useless for
+publishing.</p>
+</div>
+<div id="signing-a-public-verifier-after-quantum" class="section level2">
+<h2>Signing: a public verifier, after quantum</h2>
+<p>For a verifier who should be able to check but not forge, the
+signature has to be asymmetric. The classical options (RSA, Ed25519)
+fall to Shor’s algorithm.</p>
+<p>Worth being precise about what that threatens. Hashing is fine:
+Grover’s algorithm only halves the security exponent, so SHA-256 retains
+roughly 2^128 preimage resistance, and HMAC with a 256-bit key is
+likewise fine. <strong>Signatures</strong> are the part that breaks.</p>
+<p><code>pqc_keygen()</code> builds a hash-based signing key – a Merkle
+tree over Winternitz one-time keys, the RFC 8391 construction, over the
+SHA-256 this package already ships. Its security rests on the hash
+function alone: no lattice assumption, no elliptic curve, and no new
+system dependency.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="co"># Small for the vignette; the default height 10 gives 1024 signatures.</span></span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>signing_key <span class="ot">&lt;-</span> <span class="fu">pqc_keygen</span>(<span class="at">height =</span> <span class="dv">3</span>)</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>signing_key</span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="co">#&gt; ── Signing key (post-quantum) ────────────────────────────────────</span></span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="co">#&gt;   scheme     xmss-sha256</span></span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt;   root       c32e64c161aeb7b6ba05cab02a7790745140c20a0a170323cb41a54d80d03a5a</span></span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a><span class="co">#&gt;   height     3</span></span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a><span class="co">#&gt;   used       0 of 8 signatures</span></span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a><span class="co">#&gt;   remaining  8</span></span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a><span class="co">#&gt;   secret     &lt;withheld&gt;</span></span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a><span class="co">#&gt;   ! one signature per index; never sign twice at one index</span></span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>Publish the public half. It carries no secret:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>pub <span class="ot">&lt;-</span> <span class="fu">signing_public_key</span>(signing_key)</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>pub</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a><span class="co">#&gt; ── Public verification key ───────────────────────────────────────</span></span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a><span class="co">#&gt;   scheme  xmss-sha256</span></span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a><span class="co">#&gt;   root    c32e64c161aeb7b6ba05cab02a7790745140c20a0a170323cb41a54d80d03a5a</span></span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a><span class="co">#&gt;   height  3</span></span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>s1 <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="fu">core_sha256</span>(manifest), signing_key)</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">core_sha256</span>(manifest), s1, pub)</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a></span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a><span class="co"># A verifier holding only `pub` cannot forge one.</span></span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">core_sha256</span>(edited), s1, pub)</span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+<div id="one-signature-per-index-and-no-more" class="section level3">
+<h3>One signature per index, and no more</h3>
+<p>A Winternitz key signs <strong>once</strong>. Signing two different
+messages at one leaf index leaks enough chain material to forge a third.
+So the key is stateful, and <code>capsule_sign()</code> returns the
+advanced state for you to carry forward:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>signing_key <span class="ot">&lt;-</span> s1<span class="sc">$</span>key_state</span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>signing_key<span class="sc">$</span>next_index</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a><span class="co">#&gt; [1] 1</span></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a></span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a>s2 <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="fu">core_sha256</span>(<span class="st">&quot;a second manifest&quot;</span>), signing_key)</span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">core_sha256</span>(<span class="st">&quot;a second manifest&quot;</span>), s2, pub)</span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+<p>An exhausted key is an error rather than a silent wrap-around:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>k <span class="ot">&lt;-</span> <span class="fu">pqc_keygen</span>(<span class="at">height =</span> <span class="dv">1</span>)          <span class="co"># signs exactly 2 messages</span></span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>k <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="st">&quot;one&quot;</span>, k)<span class="sc">$</span>key_state</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>k <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="st">&quot;two&quot;</span>, k)<span class="sc">$</span>key_state</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a><span class="fu">capsule_sign</span>(<span class="st">&quot;three&quot;</span>, k)</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a><span class="co">#&gt; ! this key is exhausted: a height-1 key signs 2 messages and all of them are used. Generate a new key -- reusing an index would break the signature scheme.</span></span></code></pre></div>
+<p>On the standardised schemes: ML-DSA (FIPS 204) and SLH-DSA (FIPS 205)
+are implemented here too, at every parameter set both standards define –
+three for ML-DSA, twelve for SLH-DSA – with no system dependency, so the
+list <code>pqc_backends()</code> reports is the same on every machine.
+<code>fips_keygen()</code> takes any of them, <code>fips_key()</code>
+wraps key material that came from elsewhere, and both are stateless: one
+key signs any number of messages.</p>
+<p>What makes that defensible is the cross-check rather than care. In
+deterministic mode this package and OpenSSL 3.5 produce the same bytes
+for every parameter set, which is a test a subtly wrong implementation
+cannot pass: it would have to be wrong in exactly the same way, in a
+construction where a single misplaced field changes every output.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="fu">pqc_backends</span>()</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a><span class="co">#&gt;  [1] &quot;xmss-sha256&quot;        &quot;ML-DSA-44&quot;          &quot;ML-DSA-65&quot;         </span></span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a><span class="co">#&gt;  [4] &quot;ML-DSA-87&quot;          &quot;SLH-DSA-SHA2-128s&quot;  &quot;SLH-DSA-SHA2-128f&quot; </span></span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a><span class="co">#&gt;  [7] &quot;SLH-DSA-SHA2-192s&quot;  &quot;SLH-DSA-SHA2-192f&quot;  &quot;SLH-DSA-SHA2-256s&quot; </span></span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a><span class="co">#&gt; [10] &quot;SLH-DSA-SHA2-256f&quot;  &quot;SLH-DSA-SHAKE-128s&quot; &quot;SLH-DSA-SHAKE-128f&quot;</span></span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a><span class="co">#&gt; [13] &quot;SLH-DSA-SHAKE-192s&quot; &quot;SLH-DSA-SHAKE-192f&quot; &quot;SLH-DSA-SHAKE-256s&quot;</span></span>
+<span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a><span class="co">#&gt; [16] &quot;SLH-DSA-SHAKE-256f&quot;</span></span></code></pre></div>
+</div>
+</div>
+<div id="signing-something-a-verifier-can-check" class="section level2">
+<h2>Signing something a verifier can check</h2>
+<p><code>capsule_sign()</code> signs a string, which proves the string
+was signed and leaves three things implicit: which key, which scheme,
+which bytes. A verifier handed a directory still has to be told all
+three, and a check that depends on being told what to check is a
+formality.</p>
+<p><code>capsule_attest()</code> records them inside the signed
+payload.</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>m <span class="ot">&lt;-</span> <span class="fu">make_manifest</span>(<span class="fu">list</span>(<span class="at">dataset =</span> <span class="st">&quot;otis&quot;</span>, <span class="at">rows =</span> <span class="dv">1200</span><span class="dt">L</span>),</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>                   <span class="at">environment =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>key <span class="ot">&lt;-</span> <span class="fu">fips_keygen</span>(<span class="st">&quot;ML-DSA-65&quot;</span>)</span>
+<span id="cb10-4"><a href="#cb10-4" tabindex="-1"></a>att <span class="ot">&lt;-</span> <span class="fu">capsule_attest</span>(m, key, <span class="at">note =</span> <span class="st">&quot;counts as published&quot;</span>)</span>
+<span id="cb10-5"><a href="#cb10-5" tabindex="-1"></a><span class="fu">capsule_check_attestation</span>(att, m)</span>
+<span id="cb10-6"><a href="#cb10-6" tabindex="-1"></a><span class="co">#&gt; ── Attestation check: OK ─────────────────────────────────────────</span></span>
+<span id="cb10-7"><a href="#cb10-7" tabindex="-1"></a><span class="co">#&gt;   attestation_complete   ok    </span></span>
+<span id="cb10-8"><a href="#cb10-8" tabindex="-1"></a><span class="co">#&gt;   manifest_digest        ok    efa1b7387f225380245de0b5170999e87ad4044f3e8f</span></span>
+<span id="cb10-9"><a href="#cb10-9" tabindex="-1"></a><span class="co">#&gt;   signature              ok    </span></span>
+<span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>The check needs the attestation and the manifest, nothing else.
+Change either – or edit the note, which is covered by the signature
+because it is part of the digest – and it fails:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>m2 <span class="ot">&lt;-</span> m</span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>m2<span class="sc">$</span>meta<span class="sc">$</span>rows <span class="ot">&lt;-</span> <span class="dv">1201</span><span class="dt">L</span></span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a><span class="fu">capsule_check_attestation</span>(att, m2)<span class="sc">$</span>ok</span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+<p>What it does not establish is that the key belongs to whoever you
+think: an attestation is only as good as the channel the public key
+arrived on. Pass <code>key_expected</code> when you know which key
+should have signed.</p>
+</div>
+<div id="the-number-in-the-manifest-is-the-number" class="section level2">
+<h2>The number in the manifest is the number</h2>
+<p>A manifest is meant to be checked against later. That only works if
+it records what actually happened, at the precision it happened:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>one_third <span class="ot">&lt;-</span> <span class="fu">make_manifest</span>(<span class="fu">list</span>(<span class="at">x =</span> <span class="dv">1</span> <span class="sc">/</span> <span class="dv">3</span>), <span class="at">environment =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a>back <span class="ot">&lt;-</span> <span class="fu">bricklayer_json_from_json</span>(<span class="fu">manifest_canonical</span>(one_third))</span>
+<span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a><span class="fu">identical</span>(back<span class="sc">$</span>meta<span class="sc">$</span>x, <span class="dv">1</span> <span class="sc">/</span> <span class="dv">3</span>)</span>
+<span id="cb12-4"><a href="#cb12-4" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+<p>Sign <code>manifest_digest()</code> rather than the pretty JSON. R
+lists keep insertion order, so building <code>meta</code> before
+<code>results</code> or the other way round gives different bytes for
+the same content; the canonical form sorts the keys, so the digest
+depends on what the manifest says and not on how a script assembled
+it.</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a><span class="fu">identical</span>(</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a>  <span class="fu">manifest_digest</span>(<span class="fu">make_manifest</span>(<span class="fu">list</span>(<span class="at">a =</span> <span class="dv">1</span>, <span class="at">b =</span> <span class="dv">2</span>), <span class="at">environment =</span> <span class="cn">FALSE</span>)),</span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a>  <span class="fu">manifest_digest</span>(<span class="fu">make_manifest</span>(<span class="fu">list</span>(<span class="at">b =</span> <span class="dv">2</span>, <span class="at">a =</span> <span class="dv">1</span>), <span class="at">environment =</span> <span class="cn">FALSE</span>)))</span>
+<span id="cb13-4"><a href="#cb13-4" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+</div>
+<div id="whether-the-finding-survives" class="section level2">
+<h2>Whether the finding survives</h2>
+<p>Everything above is about the record being intact. None of it says
+the number means anything: a capsule can be signed, hashed, chained and
+reproduced byte for byte while reporting an artefact. That is a separate
+question and it needs controls that can fail.</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>d <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">x =</span> <span class="fu">rnorm</span>(<span class="dv">200</span>))</span>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a>d<span class="sc">$</span>y <span class="ot">&lt;-</span> <span class="fl">0.8</span> <span class="sc">*</span> d<span class="sc">$</span>x <span class="sc">+</span> <span class="fu">rnorm</span>(<span class="dv">200</span>)</span>
+<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a><span class="fu">capsule_falsify</span>(d, <span class="cf">function</span>(z) <span class="fu">cor</span>(z<span class="sc">$</span>x, z<span class="sc">$</span>y), <span class="at">treatment =</span> <span class="st">&quot;x&quot;</span>,</span>
+<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a>                <span class="at">n =</span> <span class="dv">199</span>, <span class="at">seed =</span> <span class="dv">42</span>)</span>
+<span id="cb14-6"><a href="#cb14-6" tabindex="-1"></a><span class="co">#&gt; ── Falsification controls ────────────────────────────────────────</span></span>
+<span id="cb14-7"><a href="#cb14-7" tabindex="-1"></a><span class="co">#&gt;   observed statistic  0.5812737</span></span>
+<span id="cb14-8"><a href="#cb14-8" tabindex="-1"></a><span class="co">#&gt;   permutations        199 (seed 42)</span></span>
+<span id="cb14-9"><a href="#cb14-9" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span>
+<span id="cb14-10"><a href="#cb14-10" tabindex="-1"></a><span class="co">#&gt;   permutation            ok    p = 0.005 with 199 usable permutations; </span></span>
+<span id="cb14-11"><a href="#cb14-11" tabindex="-1"></a><span class="co">#&gt;   placebo                ok    a permuted exposure gives 0.0702711, aga</span></span>
+<span id="cb14-12"><a href="#cb14-12" tabindex="-1"></a><span class="co">#&gt;   random_common_cause    ok    adding a column of noise moved the stati</span></span>
+<span id="cb14-13"><a href="#cb14-13" tabindex="-1"></a><span class="co">#&gt;   subset_stability       ok    the middle 95% of 199 subsets spans [0.5</span></span>
+<span id="cb14-14"><a href="#cb14-14" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>Four controls, each for a different way of being wrong: permuting the
+exposure destroys the association, so the statistic should fall to its
+null; a column of noise cannot matter, so the statistic should not move;
+a placebo exposure should show nothing; and random subsets should
+agree.</p>
+<p>They can fail, which is the point. A constant fails the permutation
+test and nothing else, because everything else about a constant is
+perfectly stable:</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="fu">capsule_falsify</span>(d, <span class="cf">function</span>(z) <span class="fl">0.5</span>, <span class="at">treatment =</span> <span class="st">&quot;x&quot;</span>, <span class="at">n =</span> <span class="dv">199</span>,</span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>                <span class="at">seed =</span> <span class="dv">42</span>)<span class="sc">$</span>controls[, <span class="fu">c</span>(<span class="st">&quot;control&quot;</span>, <span class="st">&quot;passed&quot;</span>)]</span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a><span class="co">#&gt;               control passed</span></span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a><span class="co">#&gt; 1         permutation  FALSE</span></span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a><span class="co">#&gt; 2             placebo   TRUE</span></span>
+<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a><span class="co">#&gt; 3 random_common_cause   TRUE</span></span>
+<span id="cb15-7"><a href="#cb15-7" tabindex="-1"></a><span class="co">#&gt; 4    subset_stability   TRUE</span></span></code></pre></div>
+<p>Note what the permutation control reports alongside its p-value: the
+smallest p-value the design could have produced. With 199 permutations
+that floor is 0.005, and with 19 it is 0.05 – so a p of 0.05 from 19
+permutations is not weak evidence, it is no evidence at all.</p>
+</div>
+<div id="re-deriving-the-numbers-not-just-checking-them" class="section level2">
+<h2>Re-deriving the numbers, not just checking them</h2>
+<p><code>verify_capsule()</code> reads a manifest and confirms it is
+consistent with itself. That catches an edited manifest and cannot catch
+one that was wrong when it was written, because a manifest written from
+the wrong data is perfectly consistent too.</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>d <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">x =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">10</span>)</span>
+<span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a>man <span class="ot">&lt;-</span> <span class="fu">make_manifest</span>(<span class="fu">list</span>(<span class="at">dataset =</span> <span class="st">&quot;demo&quot;</span>), <span class="at">environment =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a>man <span class="ot">&lt;-</span> <span class="fu">record</span>(man, <span class="st">&quot;mean_x&quot;</span>, <span class="at">observed =</span> <span class="fu">mean</span>(d<span class="sc">$</span>x), <span class="at">expected =</span> <span class="fl">5.5</span>)</span>
+<span id="cb16-4"><a href="#cb16-4" tabindex="-1"></a><span class="co">#&gt;   mean_x                                       observed = 5.5000       expected = 5.5000       [PASS]</span></span>
+<span id="cb16-5"><a href="#cb16-5" tabindex="-1"></a>man <span class="ot">&lt;-</span> <span class="fu">record</span>(man, <span class="st">&quot;n&quot;</span>, <span class="at">observed =</span> <span class="fu">nrow</span>(d), <span class="at">expected =</span> <span class="dv">10</span>)</span>
+<span id="cb16-6"><a href="#cb16-6" tabindex="-1"></a><span class="co">#&gt;   n                                            observed = 10.0000      expected = 10.0000      [PASS]</span></span>
+<span id="cb16-7"><a href="#cb16-7" tabindex="-1"></a></span>
+<span id="cb16-8"><a href="#cb16-8" tabindex="-1"></a><span class="fu">manifest_recompute</span>(man, d, <span class="fu">list</span>(<span class="at">mean_x =</span> <span class="cf">function</span>(z) <span class="fu">mean</span>(z<span class="sc">$</span>x),</span>
+<span id="cb16-9"><a href="#cb16-9" tabindex="-1"></a>                                <span class="at">n =</span> <span class="cf">function</span>(z) <span class="fu">nrow</span>(z)))</span>
+<span id="cb16-10"><a href="#cb16-10" tabindex="-1"></a><span class="co">#&gt; ── Recomputation: everything checked and matched ─────────────────</span></span>
+<span id="cb16-11"><a href="#cb16-11" tabindex="-1"></a><span class="co">#&gt;   mean_x                   MATCH      |recorded - recomputed| = 0</span></span>
+<span id="cb16-12"><a href="#cb16-12" tabindex="-1"></a><span class="co">#&gt;   n                        MATCH      |recorded - recomputed| = 0</span></span>
+<span id="cb16-13"><a href="#cb16-13" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>Recompute only some of them and the rest are reported as unchecked
+rather than passed over, which is the difference between a clean bill of
+health and a partial one:</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="fu">manifest_recompute</span>(man, d, <span class="fu">list</span>(<span class="at">n =</span> <span class="cf">function</span>(z) <span class="fu">nrow</span>(z)))</span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a><span class="co">#&gt; ── Recomputation: see below ──────────────────────────────────────</span></span>
+<span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a><span class="co">#&gt;   n                        MATCH      |recorded - recomputed| = 0</span></span>
+<span id="cb17-4"><a href="#cb17-4" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span>
+<span id="cb17-5"><a href="#cb17-5" tabindex="-1"></a><span class="co">#&gt;   1 recorded result(s) NOT recomputed: mean_x</span></span>
+<span id="cb17-6"><a href="#cb17-6" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>For anything stochastic, record the generator state rather than the
+seed. <code>set.seed(1)</code> reproduces a run only if everything
+before it does too – one extra draw anywhere upstream shifts every later
+value:</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>m2 <span class="ot">&lt;-</span> <span class="fu">manifest_record_seed</span>(<span class="fu">make_manifest</span>(<span class="fu">list</span>(<span class="at">a =</span> <span class="dv">1</span>),</span>
+<span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>                                         <span class="at">environment =</span> <span class="cn">FALSE</span>))</span>
+<span id="cb18-4"><a href="#cb18-4" tabindex="-1"></a>first <span class="ot">&lt;-</span> <span class="fu">runif</span>(<span class="dv">3</span>)</span>
+<span id="cb18-5"><a href="#cb18-5" tabindex="-1"></a><span class="fu">invisible</span>(<span class="fu">runif</span>(<span class="dv">1000</span>))          <span class="co"># any amount of other work</span></span>
+<span id="cb18-6"><a href="#cb18-6" tabindex="-1"></a><span class="fu">manifest_restore_seed</span>(m2)</span>
+<span id="cb18-7"><a href="#cb18-7" tabindex="-1"></a><span class="fu">identical</span>(<span class="fu">runif</span>(<span class="dv">3</span>), first)</span>
+<span id="cb18-8"><a href="#cb18-8" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+</div>
+<div id="saying-in-advance-what-you-will-report" class="section level2">
+<h2>Saying in advance what you will report</h2>
+<p>The falsification controls above are worth much more when the
+statistics were named before the data was looked at. A declaration makes
+the two ways of departing from a plan visible, and they are different
+failures:</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>plan <span class="ot">&lt;-</span> <span class="fu">prereg_declare</span>(<span class="fu">c</span>(</span>
+<span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a>  <span class="at">ate =</span> <span class="st">&quot;use of force is higher in the exposed division&quot;</span>,</span>
+<span id="cb19-3"><a href="#cb19-3" tabindex="-1"></a>  <span class="at">n_rows =</span> <span class="st">&quot;the extract has the row count the source publishes&quot;</span>))</span>
+<span id="cb19-4"><a href="#cb19-4" tabindex="-1"></a></span>
+<span id="cb19-5"><a href="#cb19-5" tabindex="-1"></a><span class="co"># a declared outcome that was not reported</span></span>
+<span id="cb19-6"><a href="#cb19-6" tabindex="-1"></a><span class="fu">prereg_check</span>(plan, <span class="st">&quot;n_rows&quot;</span>)</span>
+<span id="cb19-7"><a href="#cb19-7" tabindex="-1"></a><span class="co">#&gt; ── Against the declaration of 2026-09-16T15:13:01Z: departures below </span></span>
+<span id="cb19-8"><a href="#cb19-8" tabindex="-1"></a><span class="co">#&gt;   declared but not reported (outcome switching): ate</span></span>
+<span id="cb19-9"><a href="#cb19-9" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span>
+<span id="cb19-10"><a href="#cb19-10" tabindex="-1"></a></span>
+<span id="cb19-11"><a href="#cb19-11" tabindex="-1"></a><span class="co"># statistics reported that were never declared</span></span>
+<span id="cb19-12"><a href="#cb19-12" tabindex="-1"></a><span class="fu">prereg_check</span>(plan, <span class="fu">c</span>(<span class="st">&quot;ate&quot;</span>, <span class="st">&quot;n_rows&quot;</span>, <span class="st">&quot;by_year&quot;</span>, <span class="st">&quot;by_precinct&quot;</span>))</span>
+<span id="cb19-13"><a href="#cb19-13" tabindex="-1"></a><span class="co">#&gt; ── Against the declaration of 2026-09-16T15:13:01Z: departures below </span></span>
+<span id="cb19-14"><a href="#cb19-14" tabindex="-1"></a><span class="co">#&gt;   reported but not declared (2 addition(s)): by_year, by_precinct</span></span>
+<span id="cb19-15"><a href="#cb19-15" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>That second case is why a nominal p-value needs correcting. Run the
+permutation control over several statistics and the smallest is not the
+finding:</p>
+<div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a><span class="fu">falsify_family</span>(<span class="fu">c</span>(<span class="at">ate =</span> <span class="fl">0.02</span>, <span class="at">by_year =</span> <span class="fl">0.3</span>, <span class="at">by_precinct =</span> <span class="fl">0.4</span>,</span>
+<span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a>                 <span class="at">by_shift =</span> <span class="fl">0.6</span>, <span class="at">by_month =</span> <span class="fl">0.7</span>), <span class="at">method =</span> <span class="st">&quot;holm&quot;</span>)</span>
+<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a><span class="co">#&gt; ── Family of 5, corrected by holm at alpha 0.05 ──────────────────</span></span>
+<span id="cb20-4"><a href="#cb20-4" tabindex="-1"></a><span class="co">#&gt;   ate                    p 0.02       adjusted 0.1        </span></span>
+<span id="cb20-5"><a href="#cb20-5" tabindex="-1"></a><span class="co">#&gt;   by_year                p 0.3        adjusted 1          </span></span>
+<span id="cb20-6"><a href="#cb20-6" tabindex="-1"></a><span class="co">#&gt;   by_precinct            p 0.4        adjusted 1          </span></span>
+<span id="cb20-7"><a href="#cb20-7" tabindex="-1"></a><span class="co">#&gt;   by_shift               p 0.6        adjusted 1          </span></span>
+<span id="cb20-8"><a href="#cb20-8" tabindex="-1"></a><span class="co">#&gt;   by_month               p 0.7        adjusted 1          </span></span>
+<span id="cb20-9"><a href="#cb20-9" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>And for the confounder nobody measured, the E-value says how strong
+it would have to be to explain the result away – with both the exposure
+and the outcome:</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a><span class="fu">evalue_rr</span>(<span class="dv">2</span>, <span class="at">lo =</span> <span class="fl">1.4</span>, <span class="at">hi =</span> <span class="fl">2.9</span>)</span>
+<span id="cb21-2"><a href="#cb21-2" tabindex="-1"></a><span class="co">#&gt; evalue_point evalue_limit </span></span>
+<span id="cb21-3"><a href="#cb21-3" tabindex="-1"></a><span class="co">#&gt;     3.414214     2.148331</span></span></code></pre></div>
+</div>
+<div id="one-file-to-hand-someone" class="section level2">
+<h2>One file to hand someone</h2>
+<p>A bundle carries a digest of every file, the manifest digest, and an
+attestation over both. The file digests are inside the signature, which
+is the point: a list of hashes that is not itself signed can be
+rewritten to match whatever the files now say.</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>dir <span class="ot">&lt;-</span> <span class="fu">tempfile</span>()</span>
+<span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a><span class="fu">dir.create</span>(dir)</span>
+<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a><span class="fu">write.csv</span>(<span class="fu">data.frame</span>(<span class="at">x =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>), <span class="fu">file.path</span>(dir, <span class="st">&quot;data.csv&quot;</span>),</span>
+<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a>          <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a>b <span class="ot">&lt;-</span> <span class="fu">capsule_bundle</span>(dir, man, key, <span class="at">note =</span> <span class="st">&quot;as published&quot;</span>)</span>
+<span id="cb22-6"><a href="#cb22-6" tabindex="-1"></a><span class="fu">capsule_bundle_verify</span>(<span class="fu">attr</span>(b, <span class="st">&quot;path&quot;</span>), dir, <span class="at">manifest =</span> man)</span>
+<span id="cb22-7"><a href="#cb22-7" tabindex="-1"></a><span class="co">#&gt; ── Bundle check: OK ──────────────────────────────────────────────</span></span>
+<span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a><span class="co">#&gt;   file:data.csv                  ok    95aecaa7399a39092c9e716ce1e18bb1c606</span></span>
+<span id="cb22-9"><a href="#cb22-9" tabindex="-1"></a><span class="co">#&gt;   no_unlisted_files              ok    </span></span>
+<span id="cb22-10"><a href="#cb22-10" tabindex="-1"></a><span class="co">#&gt;   attestation:attestation_comple ok    </span></span>
+<span id="cb22-11"><a href="#cb22-11" tabindex="-1"></a><span class="co">#&gt;   attestation:manifest_digest    ok    d67295f68aeab30e618739c83f7eac7f56f9</span></span>
+<span id="cb22-12"><a href="#cb22-12" tabindex="-1"></a><span class="co">#&gt;   attestation:signature          ok    </span></span>
+<span id="cb22-13"><a href="#cb22-13" tabindex="-1"></a><span class="co">#&gt;   manifest_digest                ok    5f711161c72a5bcf5b5918d69a6a59fbe38a</span></span>
+<span id="cb22-14"><a href="#cb22-14" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>Files sitting in the directory that the bundle does not mention are
+reported as well: a signed list of what should be there says nothing
+about what else was put beside it.</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a><span class="fu">unlink</span>(dir, <span class="at">recursive =</span> <span class="cn">TRUE</span>)</span></code></pre></div>
+</div>
+<div id="when-not-just-in-what-order" class="section level2">
+<h2>When, not just in what order</h2>
+<p>The chain proves the order of a sequence of manifests. It does not
+prove that any of them existed at a particular time – the whole chain
+can be built in an afternoon and dated however one likes. An RFC 3161
+timestamp token from a third party supplies the date, and
+<code>timestamp_verify()</code> checks three separate things: that the
+token is about these bytes, what time it asserts, and that the
+authority’s signature holds.</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>res <span class="ot">&lt;-</span> <span class="fu">timestamp_verify</span>(<span class="st">&quot;response.tsr&quot;</span>, <span class="at">data =</span> <span class="st">&quot;manifest.json&quot;</span>)</span>
+<span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>res<span class="sc">$</span>time</span>
+<span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>res<span class="sc">$</span>checks</span></code></pre></div>
+<p>What it does not check, and this is the difference between it and a
+browser’s padlock: whether the certificate should be trusted. There is
+no chain building, no validity dates, no revocation and no check of the
+timeStamping key usage. Pass the certificate you have independently
+decided to trust, and read a pass as “this key said so” rather than
+“this is true”.</p>
+</div>
+<div id="pinning-chunk-by-chunk" class="section level2">
+<h2>Pinning chunk by chunk</h2>
+<p>A single digest over a file tells you it changed. A Merkle tree over
+its chunks tells you <em>which</em> chunk changed, and lets you prove
+one chunk belongs without re-reading the rest.</p>
+<div class="sourceCode" id="cb25"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a>chunks <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;id,value&quot;</span>, <span class="st">&quot;1,2&quot;</span>, <span class="st">&quot;3,4&quot;</span>, <span class="st">&quot;5,6&quot;</span>)</span>
+<span id="cb25-2"><a href="#cb25-2" tabindex="-1"></a>root <span class="ot">&lt;-</span> <span class="fu">merkle_root</span>(chunks)</span>
+<span id="cb25-3"><a href="#cb25-3" tabindex="-1"></a>root</span>
+<span id="cb25-4"><a href="#cb25-4" tabindex="-1"></a><span class="co">#&gt; [1] &quot;43bb94e5930a98ec80fc2e06d6a9227fde4174f74e7dd15e710c97f4de80e0ab&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb26"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" tabindex="-1"></a><span class="co"># Editing one chunk moves exactly one leaf.</span></span>
+<span id="cb26-2"><a href="#cb26-2" tabindex="-1"></a>edited_chunks <span class="ot">&lt;-</span> chunks</span>
+<span id="cb26-3"><a href="#cb26-3" tabindex="-1"></a>edited_chunks[<span class="dv">3</span>] <span class="ot">&lt;-</span> <span class="st">&quot;3,5&quot;</span></span>
+<span id="cb26-4"><a href="#cb26-4" tabindex="-1"></a><span class="fu">which</span>(<span class="fu">merkle_leaves</span>(chunks) <span class="sc">!=</span> <span class="fu">merkle_leaves</span>(edited_chunks))</span>
+<span id="cb26-5"><a href="#cb26-5" tabindex="-1"></a><span class="co">#&gt; [1] 3</span></span></code></pre></div>
+<div class="sourceCode" id="cb27"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" tabindex="-1"></a><span class="co"># Prove chunk 3 belongs, holding only it and log2(n) sibling digests.</span></span>
+<span id="cb27-2"><a href="#cb27-2" tabindex="-1"></a>proof <span class="ot">&lt;-</span> <span class="fu">merkle_proof</span>(chunks, <span class="dv">3</span>)</span>
+<span id="cb27-3"><a href="#cb27-3" tabindex="-1"></a>proof</span>
+<span id="cb27-4"><a href="#cb27-4" tabindex="-1"></a><span class="co">#&gt; $sibling</span></span>
+<span id="cb27-5"><a href="#cb27-5" tabindex="-1"></a><span class="co">#&gt; [1] &quot;e96f71a6079688ae6f7063cb93d59d5d80d15287032b2b777d77c0f6e15452e2&quot;</span></span>
+<span id="cb27-6"><a href="#cb27-6" tabindex="-1"></a><span class="co">#&gt; [2] &quot;a5996cc23ea660aef0bc1260431c976e7d451cceb94cab2bafa8ff2ff09ddc4c&quot;</span></span>
+<span id="cb27-7"><a href="#cb27-7" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb27-8"><a href="#cb27-8" tabindex="-1"></a><span class="co">#&gt; $side</span></span>
+<span id="cb27-9"><a href="#cb27-9" tabindex="-1"></a><span class="co">#&gt; [1] &quot;right&quot; &quot;left&quot;</span></span>
+<span id="cb27-10"><a href="#cb27-10" tabindex="-1"></a><span class="fu">merkle_verify</span>(chunks[<span class="dv">3</span>], proof, root)</span>
+<span id="cb27-11"><a href="#cb27-11" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb27-12"><a href="#cb27-12" tabindex="-1"></a><span class="fu">merkle_verify</span>(<span class="st">&quot;3,5&quot;</span>, proof, root)</span>
+<span id="cb27-13"><a href="#cb27-13" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+<p><code>chunk_file()</code> produces the chunks from a file.</p>
+<p>An unpaired node at an odd level is <em>promoted</em> rather than
+hashed against a duplicate of itself. That is a correctness requirement,
+not a preference: duplicating the last leaf lets two different chunk
+lists produce the same root, which is the CVE-2012-2459 weakness.</p>
+<div class="sourceCode" id="cb28"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" tabindex="-1"></a><span class="fu">merkle_root</span>(<span class="fu">c</span>(<span class="st">&quot;a&quot;</span>, <span class="st">&quot;b&quot;</span>, <span class="st">&quot;c&quot;</span>)) <span class="sc">==</span> <span class="fu">merkle_root</span>(<span class="fu">c</span>(<span class="st">&quot;a&quot;</span>, <span class="st">&quot;b&quot;</span>, <span class="st">&quot;c&quot;</span>, <span class="st">&quot;c&quot;</span>))</span>
+<span id="cb28-2"><a href="#cb28-2" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+</div>
+<div id="the-history-not-just-the-run" class="section level2">
+<h2>The history, not just the run</h2>
+<p>Every manifest above verifies on its own. That says nothing about
+whether any were <em>removed</em> – delete an inconvenient run and the
+remaining manifests are all still perfectly valid.</p>
+<p>A chain fixes that by linking each entry to the digest of the one
+before:</p>
+<div class="sourceCode" id="cb29"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" tabindex="-1"></a>chain <span class="ot">&lt;-</span> <span class="fu">chain_new</span>()</span>
+<span id="cb29-2"><a href="#cb29-2" tabindex="-1"></a>chain <span class="ot">&lt;-</span> <span class="fu">chain_append</span>(chain, <span class="st">&quot;manifest for run 1&quot;</span>, <span class="at">label =</span> <span class="st">&quot;run-1&quot;</span>)</span>
+<span id="cb29-3"><a href="#cb29-3" tabindex="-1"></a>chain <span class="ot">&lt;-</span> <span class="fu">chain_append</span>(chain, <span class="st">&quot;manifest for run 2&quot;</span>, <span class="at">label =</span> <span class="st">&quot;run-2&quot;</span>)</span>
+<span id="cb29-4"><a href="#cb29-4" tabindex="-1"></a>chain <span class="ot">&lt;-</span> <span class="fu">chain_append</span>(chain, <span class="st">&quot;manifest for run 3&quot;</span>, <span class="at">label =</span> <span class="st">&quot;run-3&quot;</span>)</span>
+<span id="cb29-5"><a href="#cb29-5" tabindex="-1"></a>chain</span>
+<span id="cb29-6"><a href="#cb29-6" tabindex="-1"></a><span class="co">#&gt; ── Manifest chain ────────────────────────────────────────────────</span></span>
+<span id="cb29-7"><a href="#cb29-7" tabindex="-1"></a><span class="co">#&gt;   ✓ chain intact</span></span>
+<span id="cb29-8"><a href="#cb29-8" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb29-9"><a href="#cb29-9" tabindex="-1"></a><span class="co">#&gt;   entries  3</span></span>
+<span id="cb29-10"><a href="#cb29-10" tabindex="-1"></a><span class="co">#&gt;   head     2afe0e270d2b1fbbc080dd4624540c181e5b8458aaecf247ccb8c38dc4c387da</span></span>
+<span id="cb29-11"><a href="#cb29-11" tabindex="-1"></a><span class="co">#&gt;   seal     de28f9277b3f9f4cb3b1a7dd80e556d0c6e1568723f1395732f9d087ee7f7353</span></span>
+<span id="cb29-12"><a href="#cb29-12" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb29-13"><a href="#cb29-13" tabindex="-1"></a><span class="co">#&gt;     1  run-1            7947c9201969a6793f9daf05</span></span>
+<span id="cb29-14"><a href="#cb29-14" tabindex="-1"></a><span class="co">#&gt;     2  run-2            9dbaa6d33259f974f30ff33e</span></span>
+<span id="cb29-15"><a href="#cb29-15" tabindex="-1"></a><span class="co">#&gt;     3  run-3            2afe0e270d2b1fbbc080dd46</span></span>
+<span id="cb29-16"><a href="#cb29-16" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<div class="sourceCode" id="cb30"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" tabindex="-1"></a><span class="co"># Deleting an entry from the middle breaks the links, and names where.</span></span>
+<span id="cb30-2"><a href="#cb30-2" tabindex="-1"></a>tampered <span class="ot">&lt;-</span> chain</span>
+<span id="cb30-3"><a href="#cb30-3" tabindex="-1"></a>tampered<span class="sc">$</span>entries[[<span class="dv">2</span>]] <span class="ot">&lt;-</span> <span class="cn">NULL</span></span>
+<span id="cb30-4"><a href="#cb30-4" tabindex="-1"></a><span class="fu">chain_verify</span>(tampered)</span>
+<span id="cb30-5"><a href="#cb30-5" tabindex="-1"></a><span class="co">#&gt; ✗ chain broken at entry 2 of 2</span></span></code></pre></div>
+<div id="sign-the-seal-not-the-head" class="section level3">
+<h3>Sign the seal, not the head</h3>
+<p>Two failure modes, and neither single value catches both:</p>
+<ul>
+<li>Deleting from the <strong>middle</strong> leaves the last entry’s
+stored digest untouched, so the head is unchanged – but
+<code>chain_verify()</code> fails.</li>
+<li>Truncating from the <strong>end</strong> leaves a valid prefix that
+<code>chain_verify()</code> accepts – but the head changes.</li>
+</ul>
+<div class="sourceCode" id="cb31"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" tabindex="-1"></a>truncated <span class="ot">&lt;-</span> chain</span>
+<span id="cb31-2"><a href="#cb31-2" tabindex="-1"></a>truncated<span class="sc">$</span>entries[[<span class="dv">3</span>]] <span class="ot">&lt;-</span> <span class="cn">NULL</span></span>
+<span id="cb31-3"><a href="#cb31-3" tabindex="-1"></a></span>
+<span id="cb31-4"><a href="#cb31-4" tabindex="-1"></a><span class="fu">c</span>(<span class="at">head_unchanged_by_middle_deletion =</span></span>
+<span id="cb31-5"><a href="#cb31-5" tabindex="-1"></a>    <span class="fu">chain_head</span>(tampered) <span class="sc">==</span> <span class="fu">chain_head</span>(chain),</span>
+<span id="cb31-6"><a href="#cb31-6" tabindex="-1"></a>  <span class="at">links_accept_truncation =</span> <span class="fu">chain_verify</span>(truncated)<span class="sc">$</span>valid)</span>
+<span id="cb31-7"><a href="#cb31-7" tabindex="-1"></a><span class="co">#&gt; head_unchanged_by_middle_deletion           links_accept_truncation </span></span>
+<span id="cb31-8"><a href="#cb31-8" tabindex="-1"></a><span class="co">#&gt;                              TRUE                              TRUE</span></span></code></pre></div>
+<p><code>chain_seal()</code> folds the entry count and every link digest
+into one value, which covers both. It is the thing to sign:</p>
+<div class="sourceCode" id="cb32"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" tabindex="-1"></a>seal_sig <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="fu">chain_seal</span>(chain), signing_key)</span>
+<span id="cb32-2"><a href="#cb32-2" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">chain_seal</span>(chain), seal_sig, pub)</span>
+<span id="cb32-3"><a href="#cb32-3" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb32-4"><a href="#cb32-4" tabindex="-1"></a></span>
+<span id="cb32-5"><a href="#cb32-5" tabindex="-1"></a><span class="co"># The truncated chain seals to a different value.</span></span>
+<span id="cb32-6"><a href="#cb32-6" tabindex="-1"></a><span class="fu">capsule_verify</span>(<span class="fu">chain_seal</span>(truncated), seal_sig, pub)</span>
+<span id="cb32-7"><a href="#cb32-7" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span>
+<span id="cb32-8"><a href="#cb32-8" tabindex="-1"></a></span>
+<span id="cb32-9"><a href="#cb32-9" tabindex="-1"></a><span class="co"># A chain whose links disagree has no seal to offer at all.</span></span>
+<span id="cb32-10"><a href="#cb32-10" tabindex="-1"></a><span class="fu">chain_seal</span>(tampered)</span>
+<span id="cb32-11"><a href="#cb32-11" tabindex="-1"></a><span class="co">#&gt; [1] NA</span></span></code></pre></div>
+</div>
+</div>
+<div id="what-is-verified-and-what-is-not" class="section level2">
+<h2>What is verified, and what is not</h2>
+<p>Every primitive with a published test vector is checked against it:
+SHA-512 against FIPS 180-4, HMAC-SHA-256 against RFC 4231, PBKDF2
+against the published vectors, BLAKE2b against RFC 7693, CRC-32 against
+the ITU V.42 check value.</p>
+<p>The XMSS signature scheme is the exception. No official RFC 8391
+known-answer vectors ship with the RFC itself, which carries only XDR
+formats. The check is instead made against the <strong>reference
+implementation</strong>: the whole 2500-byte signature for
+XMSS-SHA2_10_256 – index, randomiser, WOTS+ signature and authentication
+path – is byte-identical to what
+<code>github.com/XMSS/xmss-reference</code> produces from the same key
+material, and those vectors are embedded in the test suite so the check
+needs no network. A signature written here can therefore be handed to
+another XMSS implementation as bytes.</p>
+<p>It is verified against its security properties as well: a genuine
+signature verifies, and every tampering of the message, the signature,
+the authentication path, the leaf index or the key fails. The scheme is
+not <em>certified</em>, which is a statement about process rather than
+about the bytes.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

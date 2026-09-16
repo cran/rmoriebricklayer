@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Statistics for a published administrative table</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Statistics for a published administrative
+table</h1>
+
+
+
+<p>An open-data extract from a criminal-justice system has a particular
+shape: a handful of fiscal years, counts rather than measurements,
+categories reported as bands rather than values, and a region code with
+no geometry attached. The general-purpose toolkits assume none of that.
+This vignette covers the functions that do.</p>
+<p>The running example is the shape Ontario’s inmate datasets have – one
+row per placement, keyed on the fiscal year’s end year, with banded
+counts and a region.</p>
+<div id="bands" class="section level2">
+<h2>Bands</h2>
+<p>Published categories are intervals. Anything computed from them rests
+on an assumption about where inside each band the mass sits, and on a
+second assumption about where the open top band ends.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>bands <span class="ot">&lt;-</span> <span class="fu">parse_bands</span>(<span class="fu">c</span>(<span class="st">&quot;1&quot;</span>, <span class="st">&quot;2 to 5&quot;</span>, <span class="st">&quot;6 to 10&quot;</span>, <span class="st">&quot;Greater than 10&quot;</span>))</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>bands</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="co">#&gt;             label lower upper open_lower open_upper</span></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="co">#&gt; 1               1     1     1      FALSE      FALSE</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="co">#&gt; 2          2 to 5     2     5      FALSE      FALSE</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="co">#&gt; 3         6 to 10     6    10      FALSE      FALSE</span></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="co">#&gt; 4 Greater than 10    11    NA      FALSE       TRUE</span></span></code></pre></div>
+<p>Note what the bounds say. <code>&quot;Greater than 10&quot;</code> starts at
+11, because the quantity is a count of placements;
+<code>&quot;10 or more&quot;</code> would start at 10. One whole placement
+separates the two readings, and only the label says which was meant.</p>
+<p>The representative value needs a rule, and the open band needs a
+cap:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="fu">band_values</span>(bands)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="co">#&gt;             label lower upper open_lower open_upper value assumed</span></span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a><span class="co">#&gt; 1               1     1     1      FALSE      FALSE   1.0   FALSE</span></span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a><span class="co">#&gt; 2          2 to 5     2     5      FALSE      FALSE   3.5   FALSE</span></span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a><span class="co">#&gt; 3         6 to 10     6    10      FALSE      FALSE   8.0   FALSE</span></span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a><span class="co">#&gt; 4 Greater than 10    11    NA      FALSE       TRUE  16.5    TRUE</span></span></code></pre></div>
+<p>The last row is marked <code>assumed</code>, because a band with no
+upper bound has no midpoint. Everything downstream inherits that
+assumption, so measure how much it matters:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>counts <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1200</span>, <span class="dv">430</span>, <span class="dv">110</span>, <span class="dv">38</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="fu">band_sensitivity</span>(bands, counts)</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a><span class="co">#&gt; ── Sensitivity to the open top band&#39;s assumed cap ──────────────── </span></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a><span class="co">#&gt;        cap     value</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a><span class="co">#&gt;   11.55000 0.4254708</span></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a><span class="co">#&gt;   15.09841 0.4346095</span></span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a><span class="co">#&gt;   19.73696 0.4461100</span></span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a><span class="co">#&gt;   25.80058 0.4604302</span></span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a><span class="co">#&gt;   33.72707 0.4780278</span></span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a><span class="co">#&gt;   44.08875 0.4993060</span></span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a><span class="co">#&gt;   57.63375 0.5245371</span></span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a><span class="co">#&gt;   75.34008 0.5537719</span></span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a><span class="co">#&gt;   98.48616 0.5867522</span></span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a><span class="co">#&gt;  128.74322 0.6228545</span></span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a><span class="co">#&gt;  168.29590 0.6610951</span></span>
+<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a><span class="co">#&gt;  220.00000 0.7002144</span></span>
+<span id="cb3-17"><a href="#cb3-17" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb3-18"><a href="#cb3-18" tabindex="-1"></a><span class="co">#&gt;   span over the caps tried: 0.2747 (53.7% of the typical value)</span></span>
+<span id="cb3-19"><a href="#cb3-19" tabindex="-1"></a><span class="co">#&gt;   The statistic moves by more than a tenth of itself across the</span></span>
+<span id="cb3-20"><a href="#cb3-20" tabindex="-1"></a><span class="co">#&gt;   caps tried, so it is a property of the assumption as much as</span></span>
+<span id="cb3-21"><a href="#cb3-21" tabindex="-1"></a><span class="co">#&gt;   of the data. Report the range, not a single figure.</span></span>
+<span id="cb3-22"><a href="#cb3-22" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>Read the span, not the middle row. A statistic that moves by more
+than a tenth of itself across plausible caps is a property of the
+assumption as much as of the data, and the honest report is the
+range.</p>
+</div>
+<div id="concentration" class="section level2">
+<h2>Concentration</h2>
+<p>The recurring question is whether a few individuals account for most
+of the total.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>placements <span class="ot">&lt;-</span> <span class="fu">expand_bands</span>(bands, counts, <span class="at">open_upper_cap =</span> <span class="dv">25</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="fu">gini</span>(placements)</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a><span class="co">#&gt; [1] 0.4585838</span></span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="fu">top_share</span>(placements, <span class="fu">c</span>(<span class="fl">0.01</span>, <span class="fl">0.05</span>, <span class="fl">0.1</span>))</span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="co">#&gt;   fraction units      share</span></span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt; 1     0.01    18 0.07589599</span></span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a><span class="co">#&gt; 2     0.05    89 0.25579761</span></span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a><span class="co">#&gt; 3     0.10   178 0.39095807</span></span></code></pre></div>
+<p>Gini has a ceiling that depends on the number of units: for
+<code>n</code> units the maximum is <code>1 - 1/n</code>, not 1. A Gini
+of 0.9 means something different across ten units than across ten
+thousand.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="fu">c</span>(<span class="at">ten =</span> <span class="dv">1</span> <span class="sc">-</span> <span class="dv">1</span> <span class="sc">/</span> <span class="dv">10</span>, <span class="at">thousand =</span> <span class="dv">1</span> <span class="sc">-</span> <span class="dv">1</span> <span class="sc">/</span> <span class="dv">1000</span>)</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a><span class="co">#&gt;      ten thousand </span></span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a><span class="co">#&gt;    0.900    0.999</span></span></code></pre></div>
+<p>If the tail looks heavy, fit it rather than asserting it – and read
+the goodness-of-fit distance before the exponent:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">hill_tail_index</span>(placements, <span class="at">x_min =</span> <span class="dv">1</span>)</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a><span class="fu">c</span>(<span class="at">alpha =</span> <span class="fu">round</span>(fit<span class="sc">$</span>alpha, <span class="dv">2</span>), <span class="at">ks =</span> <span class="fu">round</span>(fit<span class="sc">$</span>ks, <span class="dv">3</span>),</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="at">reliable =</span> fit<span class="sc">$</span>reliable)</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a><span class="co">#&gt;    alpha       ks reliable </span></span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a><span class="co">#&gt;    2.100    0.044    1.000</span></span></code></pre></div>
+<p>A large <code>ks</code> means the tail is not a power law, whatever
+<code>alpha</code> came out as. The estimator maximises the exact
+discrete likelihood: the closed-form continuity correction usually
+quoted is an asymptotic approximation in the threshold, and at a
+threshold of one – where counts start – it is badly biased.</p>
+</div>
+<div id="trend-across-a-handful-of-years" class="section level2">
+<h2>Trend across a handful of years</h2>
+<p>Five annual points support a rank test and a resistant slope. They do
+not support a model with an autocorrelation structure.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>y <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">402</span>, <span class="dv">377</span>, <span class="dv">190</span>, <span class="dv">268</span>, <span class="dv">331</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>tt <span class="ot">&lt;-</span> <span class="fu">trend_test</span>(y)</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a><span class="fu">c</span>(<span class="at">tau =</span> tt<span class="sc">$</span>tau, <span class="at">p =</span> <span class="fu">round</span>(tt<span class="sc">$</span>p_value, <span class="dv">4</span>), <span class="at">slope =</span> tt<span class="sc">$</span>slope)</span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="co">#&gt;      tau        p    slope </span></span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a><span class="co">#&gt;  -0.4000   0.4833 -21.3750</span></span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a>tt<span class="sc">$</span>method</span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a><span class="co">#&gt; [1] &quot;Mann-Kendall, exact over all 120 orderings&quot;</span></span></code></pre></div>
+<p>The p-value is exact, by enumerating all 120 orderings. For counts,
+the trend is better expressed as a multiplicative change per year:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>ct <span class="ot">&lt;-</span> <span class="fu">count_trend</span>(y)</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a><span class="fu">c</span>(<span class="at">rate_ratio =</span> <span class="fu">round</span>(ct<span class="sc">$</span>rate_ratio, <span class="dv">3</span>),</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>  <span class="at">lower =</span> <span class="fu">round</span>(ct<span class="sc">$</span>lower, <span class="dv">3</span>), <span class="at">upper =</span> <span class="fu">round</span>(ct<span class="sc">$</span>upper, <span class="dv">3</span>),</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>  <span class="at">dispersion =</span> <span class="fu">round</span>(ct<span class="sc">$</span>dispersion, <span class="dv">2</span>))</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a><span class="co">#&gt; rate_ratio      lower      upper dispersion </span></span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a><span class="co">#&gt;      0.923      0.776      1.098     24.390</span></span></code></pre></div>
+<p>The dispersion is reported because a Poisson interval assumes it is
+one. Above 1.5 the interval is widened to the quasi-Poisson one rather
+than being left too narrow.</p>
+<div id="did-it-change-when-the-policy-changed" class="section level3">
+<h3>Did it change when the policy changed?</h3>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>sc <span class="ot">&lt;-</span> <span class="fu">step_change</span>(<span class="fu">c</span>(<span class="dv">100</span>, <span class="dv">104</span>, <span class="dv">98</span>, <span class="dv">60</span>, <span class="dv">63</span>, <span class="dv">58</span>), <span class="at">x =</span> <span class="dv">2018</span><span class="sc">:</span><span class="dv">2023</span>)</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a><span class="fu">c</span>(<span class="at">after =</span> sc<span class="sc">$</span>break_after, <span class="at">before =</span> sc<span class="sc">$</span>before, <span class="at">after_mean =</span> sc<span class="sc">$</span>after,</span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>  <span class="at">p =</span> <span class="fu">round</span>(sc<span class="sc">$</span>p_value, <span class="dv">4</span>))</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a><span class="co">#&gt;      after     before after_mean          p </span></span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a><span class="co">#&gt; 2020.00000  100.66667   60.33333    0.10120</span></span></code></pre></div>
+<p>The p-value comes from the permutation distribution of the
+<strong>maximum</strong> over splits, not from the best split’s own
+test. That distinction is the difference between a change-point test and
+a way of finding a break in noise. It also has a consequence worth
+stating plainly: six points cannot produce a p-value below about 0.1,
+however clean the step, because only 72 of the 720 orderings separate
+three low values from three high ones.</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>(<span class="dv">1</span> <span class="sc">+</span> <span class="dv">2</span> <span class="sc">*</span> <span class="fu">factorial</span>(<span class="dv">3</span>)<span class="sc">^</span><span class="dv">2</span>) <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">+</span> <span class="fu">factorial</span>(<span class="dv">6</span>))</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a><span class="co">#&gt; [1] 0.1012483</span></span></code></pre></div>
+</div>
+</div>
+<div id="points-and-the-regions-that-contain-them" class="section level2">
+<h2>Points, and the regions that contain them</h2>
+<p>Before a regional count means anything, something has to have decided
+which region each facility is in. That decision is a region map: built
+once, from coordinates and a boundary file, and then read by everything
+downstream.</p>
+<p>Which is exactly why recomputing the downstream tables cannot check
+it. An error in the region map reproduces perfectly in every table built
+on it, because those tables are where it is read. The region map has to
+be checked on its own terms.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>cw <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>  <span class="at">facility =</span> <span class="fu">c</span>(<span class="st">&quot;North Jail&quot;</span>, <span class="st">&quot;South Jail&quot;</span>, <span class="st">&quot;Hill Jail&quot;</span>, <span class="st">&quot;Lake Jail&quot;</span>),</span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a>  <span class="at">region   =</span> <span class="fu">c</span>(<span class="st">&quot;3557&quot;</span>, <span class="st">&quot;3520&quot;</span>, <span class="st">&quot;3553&quot;</span>, <span class="st">&quot;3520&quot;</span>),</span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a>  <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span></span>
+<span id="cb11-5"><a href="#cb11-5" tabindex="-1"></a>)</span>
+<span id="cb11-6"><a href="#cb11-6" tabindex="-1"></a>pop <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb11-7"><a href="#cb11-7" tabindex="-1"></a>  <span class="at">region     =</span> <span class="fu">c</span>(<span class="st">&quot;3557&quot;</span>, <span class="st">&quot;3520&quot;</span>, <span class="st">&quot;3553&quot;</span>, <span class="st">&quot;3552&quot;</span>, <span class="st">&quot;3519&quot;</span>),</span>
+<span id="cb11-8"><a href="#cb11-8" tabindex="-1"></a>  <span class="at">population =</span> <span class="fu">c</span>(<span class="dv">114094</span>, <span class="dv">3025647</span>, <span class="dv">171568</span>, <span class="dv">22746</span>, <span class="dv">1173334</span>),</span>
+<span id="cb11-9"><a href="#cb11-9" tabindex="-1"></a>  <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span></span>
+<span id="cb11-10"><a href="#cb11-10" tabindex="-1"></a>)</span></code></pre></div>
+<p><code>region_map_integrity()</code> finds the failures that a
+comparison against published output cannot, because they would be
+present on both sides of it: a facility assigned two regions, a facility
+assigned none, a region code that belongs to a different province.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a><span class="fu">region_map_integrity</span>(cw, <span class="st">&quot;facility&quot;</span>, <span class="st">&quot;region&quot;</span>, <span class="at">regions =</span> pop<span class="sc">$</span>region)</span>
+<span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a><span class="co">#&gt;                                         check observed expected pass</span></span>
+<span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a><span class="co">#&gt; 1         units assigned more than one region        0        0 TRUE</span></span>
+<span id="cb12-4"><a href="#cb12-4" tabindex="-1"></a><span class="co">#&gt; 2                    units assigned no region        0        0 TRUE</span></span>
+<span id="cb12-5"><a href="#cb12-5" tabindex="-1"></a><span class="co">#&gt; 3 region codes not in the reference geography        0        0 TRUE</span></span></code></pre></div>
+<p>Every check is written so that zero is the passing value, which is
+what makes the frame safe to record directly into a manifest.</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a>bad <span class="ot">&lt;-</span> cw</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a>bad<span class="sc">$</span>region[<span class="dv">3</span>] <span class="ot">&lt;-</span> <span class="st">&quot;2406&quot;</span>          <span class="co"># a code from another province</span></span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a><span class="fu">region_map_integrity</span>(bad, <span class="st">&quot;facility&quot;</span>, <span class="st">&quot;region&quot;</span>, <span class="at">regions =</span> pop<span class="sc">$</span>region)</span>
+<span id="cb13-4"><a href="#cb13-4" tabindex="-1"></a><span class="co">#&gt;                                         check observed expected  pass</span></span>
+<span id="cb13-5"><a href="#cb13-5" tabindex="-1"></a><span class="co">#&gt; 1         units assigned more than one region        0        0  TRUE</span></span>
+<span id="cb13-6"><a href="#cb13-6" tabindex="-1"></a><span class="co">#&gt; 2                    units assigned no region        0        0  TRUE</span></span>
+<span id="cb13-7"><a href="#cb13-7" tabindex="-1"></a><span class="co">#&gt; 3 region codes not in the reference geography        1        0 FALSE</span></span></code></pre></div>
+<div id="recomputing-is-not-the-same-as-checking" class="section level3">
+<h3>Recomputing is not the same as checking</h3>
+<p><code>region_map_compare()</code> matches a recomputed region map
+against the published one and compares them cell by cell. Numeric
+columns go through <code>all.equal()</code>, so a coordinate that
+survived a round trip through text is not reported as a change.</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>recomputed <span class="ot">&lt;-</span> cw</span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>recomputed<span class="sc">$</span>region[<span class="dv">2</span>] <span class="ot">&lt;-</span> <span class="st">&quot;3519&quot;</span></span>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="fu">region_map_compare</span>(cw, recomputed, <span class="st">&quot;facility&quot;</span>)</span>
+<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a><span class="co">#&gt;   column cells mismatched                                       first</span></span>
+<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a><span class="co">#&gt; 1   rows     4          0                                            </span></span>
+<span id="cb14-6"><a href="#cb14-6" tabindex="-1"></a><span class="co">#&gt; 2 region     4          1 South Jail: published 3520, recomputed 3519</span></span></code></pre></div>
+<p>That is worth having, and it is worth being clear about what it
+establishes: the recomputation reproduced the published assignment. Run
+the same method against the same boundary file and a
+<em>definitional</em> error reproduces perfectly too. Both sides move
+together.</p>
+</div>
+<div id="a-second-route-can-disagree" class="section level3">
+<h3>A second route can disagree</h3>
+<p>The check that can catch an error in the original method is one that
+does not use that method. Derive the region a different way – from a
+place name, a postal geography, an administrative lookup – and
+compare.</p>
+<p>A name-based route is the usual second route, and it has understood
+weaknesses. Names collide. In Ontario, census division 3552 is named
+“Sudbury” and is a thinly populated district; census division 3553 is
+named “Greater Sudbury” and is the city inside it. A facility in the
+city has a postal address in Sudbury, and a name route sends it to the
+district.</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>route <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;North Jail&quot;</span> <span class="ot">=</span> <span class="st">&quot;3557&quot;</span>, <span class="st">&quot;South Jail&quot;</span> <span class="ot">=</span> <span class="st">&quot;3520&quot;</span>,</span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>           <span class="st">&quot;Hill Jail&quot;</span> <span class="ot">=</span> <span class="st">&quot;3552&quot;</span>, <span class="st">&quot;Lake Jail&quot;</span> <span class="ot">=</span> <span class="st">&quot;3520&quot;</span>)</span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a><span class="fu">region_map_second_route</span>(cw, <span class="st">&quot;facility&quot;</span>, <span class="st">&quot;region&quot;</span>, route,</span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a>                       <span class="at">known =</span> <span class="st">&quot;Hill Jail&quot;</span>)</span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a><span class="co">#&gt;        unit primary second known</span></span>
+<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a><span class="co">#&gt; 1 Hill Jail    3553   3552  TRUE</span></span></code></pre></div>
+<p>The known-bad case is listed by NAME rather than allowed for by
+widening a tolerance, and the distinction matters. A tolerance of “one
+disagreement is acceptable” would swallow a second, different
+disagreement silently. Naming it means <code>sum(!x$known)</code> stays
+the number that must be zero.</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>route[<span class="st">&quot;South Jail&quot;</span>] <span class="ot">&lt;-</span> <span class="st">&quot;3599&quot;</span>    <span class="co"># an assignment nobody documented</span></span>
+<span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a>d <span class="ot">&lt;-</span> <span class="fu">region_map_second_route</span>(cw, <span class="st">&quot;facility&quot;</span>, <span class="st">&quot;region&quot;</span>, route,</span>
+<span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a>                            <span class="at">known =</span> <span class="st">&quot;Hill Jail&quot;</span>)</span>
+<span id="cb16-4"><a href="#cb16-4" tabindex="-1"></a>d</span>
+<span id="cb16-5"><a href="#cb16-5" tabindex="-1"></a><span class="co">#&gt;         unit primary second known</span></span>
+<span id="cb16-6"><a href="#cb16-6" tabindex="-1"></a><span class="co">#&gt; 1 South Jail    3520   3599 FALSE</span></span>
+<span id="cb16-7"><a href="#cb16-7" tabindex="-1"></a><span class="co">#&gt; 2  Hill Jail    3553   3552  TRUE</span></span>
+<span id="cb16-8"><a href="#cb16-8" tabindex="-1"></a><span class="fu">sum</span>(<span class="sc">!</span>d<span class="sc">$</span>known)</span>
+<span id="cb16-9"><a href="#cb16-9" tabindex="-1"></a><span class="co">#&gt; [1] 1</span></span></code></pre></div>
+<p>Facilities the route does not cover are skipped rather than counted
+as disagreements, so a partial second route is still usable. Record how
+many it covered: a route that quietly stops matching anything leaves the
+disagreement check passing over an empty set.</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="fu">length</span>(route)</span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a><span class="co">#&gt; [1] 4</span></span></code></pre></div>
+<p><code>region_map_from_points()</code> does the geometric recompute,
+projecting the points onto the boundary file’s own coordinate system
+rather than the reverse, since reprojecting polygons moves their edges.
+It needs <code>sf</code> and a boundary file and returns
+<code>NULL</code> without either, so a verification script records the
+check as unavailable instead of failing over an optional dependency. It
+also returns <code>n_regions</code> rather than silently resolving it:
+any value but 1 means the point fell outside the geography, or the
+boundaries overlap.</p>
+</div>
+<div id="the-coverage-share-is-not-a-denominator" class="section level3">
+<h3>The coverage share is not a denominator</h3>
+<p>With the region map checked, the obvious next step is a rate per
+region. <code>region_coverage()</code> reports the ingredients and,
+every time it prints, declines to supply that rate.</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>units <span class="ot">&lt;-</span> <span class="fu">vapply</span>(pop<span class="sc">$</span>region, <span class="cf">function</span>(r) <span class="fu">sum</span>(cw<span class="sc">$</span>region <span class="sc">==</span> r), <span class="fu">numeric</span>(<span class="dv">1</span>))</span>
+<span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>cov <span class="ot">&lt;-</span> <span class="fu">region_coverage</span>(pop<span class="sc">$</span>region, pop<span class="sc">$</span>population, units)</span>
+<span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>cov</span>
+<span id="cb18-4"><a href="#cb18-4" tabindex="-1"></a><span class="co">#&gt; ── 4 units in 3 of 5 regions ───────────────────────────────────── </span></span>
+<span id="cb18-5"><a href="#cb18-5" tabindex="-1"></a><span class="co">#&gt;   those regions hold 3,311,309 of 4,507,389 residents (73.5%)</span></span>
+<span id="cb18-6"><a href="#cb18-6" tabindex="-1"></a><span class="co">#&gt;   2 regions hold none; 1,196,080 residents (26.5%) live there</span></span>
+<span id="cb18-7"><a href="#cb18-7" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb18-8"><a href="#cb18-8" tabindex="-1"></a><span class="co">#&gt;  region population units has_unit  pop_share</span></span>
+<span id="cb18-9"><a href="#cb18-9" tabindex="-1"></a><span class="co">#&gt;    3520    3025647     2     TRUE 67.1263785</span></span>
+<span id="cb18-10"><a href="#cb18-10" tabindex="-1"></a><span class="co">#&gt;    3553     171568     1     TRUE  3.8063722</span></span>
+<span id="cb18-11"><a href="#cb18-11" tabindex="-1"></a><span class="co">#&gt;    3557     114094     1     TRUE  2.5312659</span></span>
+<span id="cb18-12"><a href="#cb18-12" tabindex="-1"></a><span class="co">#&gt;    3519    1173334     0    FALSE 26.0313454</span></span>
+<span id="cb18-13"><a href="#cb18-13" tabindex="-1"></a><span class="co">#&gt;    3552      22746     0    FALSE  0.5046381</span></span>
+<span id="cb18-14"><a href="#cb18-14" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb18-15"><a href="#cb18-15" tabindex="-1"></a><span class="co">#&gt;   The covered share is context, not a denominator: units serve</span></span>
+<span id="cb18-16"><a href="#cb18-16" tabindex="-1"></a><span class="co">#&gt;   catchments, so a rate over these regions alone would take its</span></span>
+<span id="cb18-17"><a href="#cb18-17" tabindex="-1"></a><span class="co">#&gt;   numerator from the whole territory and is inflated.</span></span>
+<span id="cb18-18"><a href="#cb18-18" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<p>Two of the five regions hold no facility at all. It is tempting to
+read their population as uncovered, and to build a regional rate on the
+population of the regions that do hold one. Both readings are wrong, for
+the same reason.</p>
+<p>A facility serves a catchment: an administrative fact about where
+people are sent from, which a coordinate does not state and cannot
+imply. Some geographies were never meant to have one facility each. So
+summing the populations of facility-holding regions gives a denominator
+covering part of the territory while the numerator counts people drawn
+from all of it. Every rate built that way is inflated, and inflated
+unevenly – a dense region holding one facility and a sparse region
+holding seven distort it in opposite directions.</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>a <span class="ot">&lt;-</span> <span class="fu">attr</span>(cov, <span class="st">&quot;coverage&quot;</span>)</span>
+<span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a><span class="fu">c</span>(<span class="at">covered =</span> a<span class="sc">$</span>covered_population, <span class="at">uncovered =</span> a<span class="sc">$</span>uncovered_population,</span>
+<span id="cb19-3"><a href="#cb19-3" tabindex="-1"></a>  <span class="at">share =</span> <span class="fu">round</span>(a<span class="sc">$</span>covered_share, <span class="dv">1</span>))</span>
+<span id="cb19-4"><a href="#cb19-4" tabindex="-1"></a><span class="co">#&gt;   covered uncovered     share </span></span>
+<span id="cb19-5"><a href="#cb19-5" tabindex="-1"></a><span class="co">#&gt; 3311309.0 1196080.0      73.5</span></span></code></pre></div>
+<p>Where the numerator and the denominator have to cover the same
+people, the defensible figure is the whole-territory one. That is the
+next section.</p>
+</div>
+</div>
+<div id="regions" class="section level2">
+<h2>Regions</h2>
+<p>A region code is an areal unit, not a coordinate. Three things go
+wrong with a table of regional counts: the regions hold different
+numbers of people, they hold different <em>kinds</em> of people, and a
+small region’s rate is mostly noise.</p>
+<div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>d <span class="ot">&lt;-</span> <span class="fu">expand.grid</span>(</span>
+<span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a>  <span class="at">region =</span> <span class="fu">c</span>(<span class="st">&quot;Central&quot;</span>, <span class="st">&quot;Eastern&quot;</span>, <span class="st">&quot;Northern&quot;</span>, <span class="st">&quot;Toronto&quot;</span>, <span class="st">&quot;Western&quot;</span>),</span>
+<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a>  <span class="at">age =</span> <span class="fu">c</span>(<span class="st">&quot;18 to 24&quot;</span>, <span class="st">&quot;25 to 49&quot;</span>, <span class="st">&quot;50+&quot;</span>),</span>
+<span id="cb20-4"><a href="#cb20-4" tabindex="-1"></a>  <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span></span>
+<span id="cb20-5"><a href="#cb20-5" tabindex="-1"></a>)</span>
+<span id="cb20-6"><a href="#cb20-6" tabindex="-1"></a>d<span class="sc">$</span>pop <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="fu">c</span>(<span class="dv">4000</span>, <span class="dv">3000</span>, <span class="dv">800</span>, <span class="dv">5000</span>, <span class="dv">2500</span>), <span class="dv">3</span>) <span class="sc">*</span></span>
+<span id="cb20-7"><a href="#cb20-7" tabindex="-1"></a>  <span class="fu">rep</span>(<span class="fu">c</span>(<span class="fl">0.3</span>, <span class="fl">0.55</span>, <span class="fl">0.15</span>), <span class="at">each =</span> <span class="dv">5</span>)</span>
+<span id="cb20-8"><a href="#cb20-8" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">13</span>)</span>
+<span id="cb20-9"><a href="#cb20-9" tabindex="-1"></a>rate <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">Central =</span> <span class="fl">0.006</span>, <span class="at">Eastern =</span> <span class="fl">0.011</span>, <span class="at">Northern =</span> <span class="fl">0.010</span>,</span>
+<span id="cb20-10"><a href="#cb20-10" tabindex="-1"></a>          <span class="at">Toronto =</span> <span class="fl">0.016</span>, <span class="at">Western =</span> <span class="fl">0.012</span>)</span>
+<span id="cb20-11"><a href="#cb20-11" tabindex="-1"></a>d<span class="sc">$</span>n <span class="ot">&lt;-</span> <span class="fu">rpois</span>(<span class="fu">nrow</span>(d), <span class="at">lambda =</span> d<span class="sc">$</span>pop <span class="sc">*</span> rate[d<span class="sc">$</span>region])</span></code></pre></div>
+<p>Indirect standardisation handles the second problem: the expected
+count is what each region would have under the overall rate in every age
+band, given its own age composition.</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a>e <span class="ot">&lt;-</span> <span class="fu">expected_counts</span>(d<span class="sc">$</span>n, d<span class="sc">$</span>pop, d<span class="sc">$</span>region, <span class="at">strata =</span> d<span class="sc">$</span>age)</span>
+<span id="cb21-2"><a href="#cb21-2" tabindex="-1"></a>e</span>
+<span id="cb21-3"><a href="#cb21-3" tabindex="-1"></a><span class="co">#&gt;       area observed population  expected</span></span>
+<span id="cb21-4"><a href="#cb21-4" tabindex="-1"></a><span class="co">#&gt; 1  Central       17       4000 48.366013</span></span>
+<span id="cb21-5"><a href="#cb21-5" tabindex="-1"></a><span class="co">#&gt; 2  Eastern       36       3000 36.274510</span></span>
+<span id="cb21-6"><a href="#cb21-6" tabindex="-1"></a><span class="co">#&gt; 3 Northern        9        800  9.673203</span></span>
+<span id="cb21-7"><a href="#cb21-7" tabindex="-1"></a><span class="co">#&gt; 4  Toronto       86       5000 60.457516</span></span>
+<span id="cb21-8"><a href="#cb21-8" tabindex="-1"></a><span class="co">#&gt; 5  Western       37       2500 30.228758</span></span></code></pre></div>
+<p>The expected counts total the observed ones. That identity is what
+makes them a standardisation rather than a prediction.</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a><span class="fu">c</span>(<span class="at">observed =</span> <span class="fu">sum</span>(e<span class="sc">$</span>observed), <span class="at">expected =</span> <span class="fu">sum</span>(e<span class="sc">$</span>expected))</span>
+<span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a><span class="co">#&gt; observed expected </span></span>
+<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a><span class="co">#&gt;      185      185</span></span></code></pre></div>
+<p>The ratio, with an exact interval – the counts here are small, and a
+normal approximation on a count of six is a decoration rather than an
+interval:</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a><span class="fu">sir</span>(e<span class="sc">$</span>observed, e<span class="sc">$</span>expected, e<span class="sc">$</span>area)</span>
+<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a><span class="co">#&gt;       area observed  expected       sir     lower     upper excess</span></span>
+<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a><span class="co">#&gt; 1  Central       17 48.366013 0.3514865 0.2047538 0.5627639   TRUE</span></span>
+<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a><span class="co">#&gt; 2  Eastern       36 36.274510 0.9924324 0.6950875 1.3739448  FALSE</span></span>
+<span id="cb23-5"><a href="#cb23-5" tabindex="-1"></a><span class="co">#&gt; 3 Northern        9  9.673203 0.9304054 0.4254406 1.7661993  FALSE</span></span>
+<span id="cb23-6"><a href="#cb23-6" tabindex="-1"></a><span class="co">#&gt; 4  Toronto       86 60.457516 1.4224865 1.1378056 1.7567592   TRUE</span></span>
+<span id="cb23-7"><a href="#cb23-7" tabindex="-1"></a><span class="co">#&gt; 5  Western       37 30.228758 1.2240000 0.8618090 1.6871228  FALSE</span></span></code></pre></div>
+<p>And the third problem. A league table of rates ranks the small
+regions to both ends by construction, so borrow strength across
+regions:</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a><span class="fu">eb_rates</span>(e<span class="sc">$</span>observed, e<span class="sc">$</span>expected, e<span class="sc">$</span>area)</span>
+<span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a><span class="co">#&gt;       area observed  expected       sir        eb  shrinkage       nu    alpha</span></span>
+<span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a><span class="co">#&gt; 1  Central       17 48.366013 0.3514865 0.4301763 0.12133873 6.679104 6.679104</span></span>
+<span id="cb24-4"><a href="#cb24-4" tabindex="-1"></a><span class="co">#&gt; 2  Eastern       36 36.274510 0.9924324 0.9936092 0.15549575 6.679104 6.679104</span></span>
+<span id="cb24-5"><a href="#cb24-5" tabindex="-1"></a><span class="co">#&gt; 3 Northern        9  9.673203 0.9304054 0.9588313 0.40845028 6.679104 6.679104</span></span>
+<span id="cb24-6"><a href="#cb24-6" tabindex="-1"></a><span class="co">#&gt; 4  Toronto       86 60.457516 1.4224865 1.3804553 0.09948526 6.679104 6.679104</span></span>
+<span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a><span class="co">#&gt; 5  Western       37 30.228758 1.2240000 1.1834634 0.18096698 6.679104 6.679104</span></span></code></pre></div>
+<p><code>shrinkage</code> is how far each estimate was pulled toward the
+overall rate. It is governed by the expected count, which is to say by
+how much information the region carries – not by how extreme its ratio
+was.</p>
+<p>The funnel plot shows the reader the same thing directly: what range
+a region’s ratio could take, given its size, if it were no different
+from anywhere else.</p>
+<div class="sourceCode" id="cb25"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a><span class="fu">funnel_limits</span>(<span class="fu">c</span>(<span class="dv">5</span>, <span class="dv">20</span>, <span class="dv">50</span>, <span class="dv">200</span>))</span>
+<span id="cb25-2"><a href="#cb25-2" tabindex="-1"></a><span class="co">#&gt;   expected level lower upper</span></span>
+<span id="cb25-3"><a href="#cb25-3" tabindex="-1"></a><span class="co">#&gt; 1        5 0.950 0.200 2.000</span></span>
+<span id="cb25-4"><a href="#cb25-4" tabindex="-1"></a><span class="co">#&gt; 2       20 0.950 0.600 1.450</span></span>
+<span id="cb25-5"><a href="#cb25-5" tabindex="-1"></a><span class="co">#&gt; 3       50 0.950 0.740 1.280</span></span>
+<span id="cb25-6"><a href="#cb25-6" tabindex="-1"></a><span class="co">#&gt; 4      200 0.950 0.865 1.140</span></span>
+<span id="cb25-7"><a href="#cb25-7" tabindex="-1"></a><span class="co">#&gt; 5        5 0.998 0.000 2.600</span></span>
+<span id="cb25-8"><a href="#cb25-8" tabindex="-1"></a><span class="co">#&gt; 6       20 0.998 0.400 1.750</span></span>
+<span id="cb25-9"><a href="#cb25-9" tabindex="-1"></a><span class="co">#&gt; 7       50 0.998 0.600 1.460</span></span>
+<span id="cb25-10"><a href="#cb25-10" tabindex="-1"></a><span class="co">#&gt; 8      200 0.998 0.790 1.225</span></span></code></pre></div>
+<div id="autocorrelation-if-you-have-a-neighbour-list" class="section level3">
+<h3>Autocorrelation, if you have a neighbour list</h3>
+<div class="sourceCode" id="cb26"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" tabindex="-1"></a>nb <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="dv">2</span><span class="dt">L</span>, <span class="dv">4</span><span class="dt">L</span>), <span class="fu">c</span>(<span class="dv">1</span><span class="dt">L</span>, <span class="dv">3</span><span class="dt">L</span>), <span class="fu">c</span>(<span class="dv">2</span><span class="dt">L</span>, <span class="dv">5</span><span class="dt">L</span>), <span class="fu">c</span>(<span class="dv">1</span><span class="dt">L</span>, <span class="dv">5</span><span class="dt">L</span>), <span class="fu">c</span>(<span class="dv">3</span><span class="dt">L</span>, <span class="dv">4</span><span class="dt">L</span>))</span>
+<span id="cb26-2"><a href="#cb26-2" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb26-3"><a href="#cb26-3" tabindex="-1"></a>mi <span class="ot">&lt;-</span> <span class="fu">morans_i</span>(e<span class="sc">$</span>observed <span class="sc">/</span> e<span class="sc">$</span>expected, nb, <span class="at">n_perm =</span> <span class="dv">999</span><span class="dt">L</span>)</span>
+<span id="cb26-4"><a href="#cb26-4" tabindex="-1"></a><span class="fu">c</span>(<span class="at">I =</span> <span class="fu">round</span>(mi<span class="sc">$</span>I, <span class="dv">3</span>), <span class="at">expectation =</span> <span class="fu">round</span>(mi<span class="sc">$</span>expectation, <span class="dv">3</span>),</span>
+<span id="cb26-5"><a href="#cb26-5" tabindex="-1"></a>  <span class="at">p =</span> mi<span class="sc">$</span>p_value)</span>
+<span id="cb26-6"><a href="#cb26-6" tabindex="-1"></a><span class="co">#&gt;           I expectation           p </span></span>
+<span id="cb26-7"><a href="#cb26-7" tabindex="-1"></a><span class="co">#&gt;      -0.292      -0.250       0.842</span></span></code></pre></div>
+<p>The neighbour list has to be supplied. An extract keyed on a region
+ships no geometry, and a guessed adjacency would make the answer a
+property of the guess. Note too that the null expectation is
+<code>-1/(n - 1)</code>, not zero: with five regions, a small negative
+<code>I</code> is what independence looks like.</p>
+<div class="sourceCode" id="cb27"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" tabindex="-1"></a><span class="sc">-</span><span class="dv">1</span> <span class="sc">/</span> (<span class="dv">5</span> <span class="sc">-</span> <span class="dv">1</span>)</span>
+<span id="cb27-2"><a href="#cb27-2" tabindex="-1"></a><span class="co">#&gt; [1] -0.25</span></span></code></pre></div>
+</div>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

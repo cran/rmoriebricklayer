@@ -4,20 +4,28 @@
 \alias{write_manifest_json}
 \title{Write a Manifest to JSON}
 \usage{
-write_manifest_json(manifest, path)
+write_manifest_json(manifest, path, canonical = FALSE)
 }
 \arguments{
-\item{manifest}{A manifest as returned by \code{\link[=make_manifest]{make_manifest()}} / built up
-with \code{\link[=record]{record()}}.}
+\item{manifest}{A manifest as returned by
+\code{\link[=make_manifest]{make_manifest()}} / built up with
+\code{\link[=record]{record()}}.}
 
 \item{path}{Destination path for the JSON file.}
+
+\item{canonical}{Write the canonical form rather than
+the pretty-printed one: one line, keys sorted, which is what
+\code{\link[=manifest_digest]{manifest_digest()}} hashes. Use it when
+the file itself has to be byte-stable rather than read by a person.}
 }
 \value{
 The \code{path}, returned invisibly.
 }
 \description{
-Serializes a manifest to a pretty-printed JSON file with the native
-JSON codec (\code{\link[=bricklayer_json_to_json]{bricklayer_json_to_json()}}); no jsonlite needed.
+Serializes a manifest to a pretty-printed JSON file with the native JSON
+codec (
+\code{\link[=bricklayer_json_to_json]{bricklayer_json_to_json()}}) ; no
+jsonlite needed.
 }
 \examples{
 man <- make_manifest(list(project = "demo"), environment = FALSE)
@@ -25,7 +33,7 @@ man <- record(man, "row_count", observed = 20, expected = 20)
 path <- write_manifest_json(man, tempfile(fileext = ".json"))
 file.exists(path)
 
-# Round-trips back through jsonlite.
+# Round-trips back through the package's own codec.
 back <- bricklayer_json_from_json(path, simplifyVector = FALSE)
 back$results$row_count$status        # "PASS"
 }
