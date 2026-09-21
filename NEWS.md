@@ -1,3 +1,207 @@
+# rmoriebricklayer 0.5.1
+
+## Categorical integrity: labels that cannot be swapped quietly
+
+The Ontario Human Rights Commission's 2020 report *A Disparate Impact*
+stated that Black civilians in Toronto were 30 to 58 times as likely as
+White civilians to experience police use of force; the corrected figure
+(OHRC correction of 26 January 2023, after Maria Jung's independent review)
+is 4 to 5 times, because the four race codes had been rotated during a
+transfer from SPSS to R (White read as Black, Black as other racialized,
+other racialized as unknown, unknown as White), and the transfer took the
+blame for two and a half years. Thirteen functions make that
+class of error impossible to commit silently and easy to name after the
+fact: `guard_recode()` maps by name and refuses anything unmapped,
+`decode_codes()` decodes imported integer codes against an explicit
+dictionary, `guard_levels()` fixes levels and the reference group,
+`audit_categories()` flags the import hazards, `verify_recode()` proves
+a recode by cross-tabulation, `verify_marginals()` checks recoded counts
+against published counts and names the label permutation that would
+explain a mismatch, `odds_ratio_check()` recomputes reported odds ratios
+under every relabelling of the table and names the one that reproduces
+them, `guard_binary()` stops a factor reaching a numeric treatment slot,
+and `recode_manifest()` with `write_recode_manifest()` and
+`verify_recode_manifest()` records the chain, signs it with a
+[capsule_sign()] key, and verifies it later. The same guards ship in
+rmorie and morie (both arms), verified three-way. New vignette:
+*Categorical integrity*.
+
+The transfer itself is guarded and, when blamed, examined. `relabel()`
+maps old labels to new ones BY NAME and refuses a positional vector of
+labels, which is the one-line idiom (`levels(f) <- sort(labels)`) that
+produces exactly the documented rotation from codes 1 to 4.
+`decode_labelled()` decodes a haven-style labelled import by code, with
+the levels in code order. `transfer_verify()` takes what the source
+program printed (its code book and its frequency table) and refuses an
+import that does not reproduce both. `relabel_forensics()` names which
+mechanical step (alphabetical, reversed, rotated, frequency-ordered,
+string-sorted codes) reproduces an observed permutation, so a transfer can
+be exonerated, or not, from the code book alone: no import routine sorts
+value labels onto codes. `audit_categories()` also flags code-prefixed
+labels such as "1. White".
+
+## gcc-UBSAN clean
+
+CRAN's gcc-UBSAN run on 0.5.0 reported two undefined operations, both
+fixed: ML-KEM's Montgomery reduction multiplied two 16-bit unsigned
+values in `int` (overflow above 2^15); it now multiplies in `uint32_t`.
+HMAC with an empty key passed a null pointer to `memcpy` for zero bytes;
+the copy is skipped.
+
+## Capsule bundle staging
+
+The bundle built by `make_bundle.sh` runs on a machine with none of the
+family packages installed, so every internal name a staged file calls has
+to be staged too. Three were not: the input guards the libraries now
+call, the seed helper behind the synthetic-data route, and the compiled
+`core_sha256()` behind `manifest_digest()`. The first two files are now
+staged; `manifest_digest()`, `.rmbl_read_json()` and the describe table
+fall back to the pure-R implementations when the compiled ones are
+absent, with the same numbers. `dev/bundle_symbol_scan.R` now runs inside
+the build and fails it on any called-but-unstaged name, so the class
+cannot recur. `setup_and_run.R --synthetic` (or `OTIS_MRP_SYNTHETIC=1`)
+takes the synthetic route without a prompt, and the exhausted-downloads
+message names that route by its real menu number.
+
+## Every export, degenerate inputs and known answers
+
+* `verify_capsule()` failed on every intact capsule: the pinned digest
+  arrives from provenance JSON as a length-1 list and was compared to the
+  computed string with `identical()`. `verify_sha256()` now coerces the
+  digest and compares case-insensitively.
+* `core_ipw_weights()` refuses a treatment that is not coded 0/1 (a 1/2
+  coding used to send every unit down the control branch) and a
+  propensity outside [0, 1] (previously clipped to the trim bound); a
+  missing treatment or propensity gives a missing weight.
+* Input contracts on the exported primitives: numeric kernels refuse
+  character, list and data-frame input instead of coercing to NA; the
+  hash functions all map `NA` to `NA`; signatures, HMAC and key derivation
+  need character or raw messages; stock-and-flow measures refuse `Inf` and
+  numeric dates; band parsers need character labels; rule constructors
+  need a column name; manifests need lists; the download, wayback,
+  revocation and capsule verifiers need non-empty paths, and
+  `verify_capsule()` an existing directory.
+* `sir()` reports `excess` only when the interval lies above one, plus
+  `deficit` and `significant`; `published_bounds()` labels a bare `NA`
+  `"missing"` instead of `"exact"`.
+* `examples/otis-mrp/analysis.R` prefers rmorie for the DML recompute, as
+  its header says, and falls back to DoubleML.
+
+## Third stress round
+
+* `core_cor()`: the shared kernel now uses the centred two-pass formula
+  and clamps to [-1, 1]. The one-pass expansion was wrong at the second
+  decimal for a spread of 1e-7 of the mean, NaN by 1e-8, and returned
+  |r| > 1 at 1e-15; `cor(x, x)` could come back -1.
+* `verify_marginals()` and `transfer_verify()` gain `strict`. The default
+  still errors on a mismatch; with `strict = FALSE` the result comes back
+  with `ok = FALSE`, the `permutation` that explains the counts, a
+  `message`, and (for `transfer_verify()`) `reasons`, so
+  `relabel_forensics()` is reachable from the public path. The documented
+  `ok = FALSE` was previously unreachable.
+* `audit_categories()` flags leading/trailing whitespace including
+  non-breaking spaces, whitespace-variant duplicates, empty-string
+  labels, missing-value sentinels stored as labels ("NA", "N/A", "NULL",
+  ...), and a reference level that is any of those. Five such columns
+  used to pass as "no hazards detected", two of them with the invisible
+  variant as the reference level.
+* `relabel_forensics()` reports an identity permutation as "no
+  permutation to explain" instead of naming a mechanism.
+* `scan_adjust()` refuses p-values outside [0, 1] instead of adjusting
+  them and calling a negative value significant.
+
+## trend_test() no longer stalls beyond a few hundred periods
+
+The Sen confidence interval enumerated every pairwise slope in an R
+double loop that grew a vector one element at a time, so a series of
+2,000 periods took minutes and a long one never returned. The slopes are
+now enumerated and sorted in C (`n` of 3,000 runs in seconds, identical
+interval), and `trend_test()` refuses more than 20,000 periods with a
+message giving the memory the pairwise slopes would need.
+
+## Functions that seed the RNG leave the caller's stream alone
+
+`drift_calibrate()`, `capsule_power()`, `capsule_falsify()`,
+`falsify_family()`, the synthetic-data generator and the trend bootstrap
+seeded the session and left it seeded, so a user who had set a seed for
+reproducibility got identical downstream draws whatever seed they chose.
+Each now seeds for its own call and restores the caller's stream on exit;
+the seeded results are unchanged.
+
+## core_moments() and json_gzip_decode() at the extremes
+
+`core_moments()` squared its first value on the first step of the
+single-pass update, so any input above the square root of the largest
+double gave NaN for every statistic, and raised raw deviations to the
+fourth power, which overflowed beyond about 1e77. It now takes two passes
+on deviations scaled by their largest magnitude; the definitions and the
+results on ordinary data are unchanged, and the shape statistics are NaN
+only when the variance is zero. The streaming accumulator behind
+`rmbl_moments_acc_add()` no longer squares its first value either.
+
+`json_gzip_decode()` refuses input that is not a gzip member (fewer than
+18 bytes or not starting 1f 8b) with a clear error. It used to pass the
+bytes straight to `memDecompress()`, which in R 4.6 dumps core on an
+empty vector, so `json_gzip_decode("")` crashed the session.
+
+## core_mean() no longer overflows where base R does not
+
+The shared numeric core summed naively, so `core_mean(rep(1e308, 3))` was
+`Inf` and `core_mean(rep(1e120, 3))` was off by 1.4e104; `core_var()`,
+`core_sd()` and `core_moments()` inherited it, returning 3e208 for the
+variance of three identical values. The core now uses base R's algorithm
+(extended precision sum plus one corrective pass) with a running mean as
+the fallback when the sum overflows although every input is finite, and
+the same fix ships in rmorie, which carries a copy of the header. Results
+on ordinary data are bit-identical to `mean()`.
+
+## One call for a published table
+
+`analyse_table()` runs the questions asked of every published table of
+counts (what is in it, what changed and how sure, rates if there is an
+exposure, trend, drift against the prior capsule) and returns one object;
+`report_analysis()` writes it as Markdown or a single HTML file;
+`use_capsule_template()` writes a capsule folder whose `analysis.R` runs
+as written. A getting-started vignette walks the shipped OTIS table
+through it in twenty lines.
+
+## Uncertainty the release itself introduces
+
+`published_bounds()` turns rounded (`rounding = 5`, nearest or Statistics
+Canada random rounding) and suppressed (`"x"`, `"<5"`) cells into the
+interval of observed counts that could have produced them;
+`change_envelope()` carries that interval through a difference, a percent
+change or a rate exactly; `yoy_bounds()` adds it to a `yoy()` table with
+a combined interval that is the union of the sampling interval and the
+envelope. No confidence interval covers this uncertainty, so it was
+previously invisible.
+
+## Many comparisons, and screens that fire on nothing
+
+`yoy_pvalues()` gives the exact conditional-binomial test that matches
+the `yoy()` interval; `scan_adjust()` adjusts a `yoy()` or `rate_change()`
+scan for multiple comparisons (Benjamini-Hochberg by default) and marks
+what survives; `rate_change()` now returns `previous_count` and
+`previous_population` so the test is exact given the exposures.
+`drift_calibrate()` estimates how often `capsule_drift()`'s screens fire
+on identical data by splitting one release into random halves, per
+column and family-wise, with the per-screen alpha that would hold the
+family-wise rate.
+
+## Encoding handling no longer depends on the session locale
+
+`ascii_fallback()` and `to_ascii()` test the bytes with `validUTF8()` and
+drop invalid ones with an explicit UTF-8-to-UTF-8 `iconv()`. The previous
+guard went through `enc2utf8()`, which under a C locale re-encodes invalid
+bytes as Latin-1 instead of flagging them, so the fallback returned them
+untouched. `bricklayer_json_minify()` and `bricklayer_json_prettify()`
+declare their result as UTF-8 (`paste()` had dropped the mark, so
+`nchar(x, "chars")` over-counted in a C locale). Found by an independent
+C-locale check of 0.5.0; the check matrix now includes a C-locale cell.
+The JSON byte-order-mark test and strip work on the bytes, so a C locale
+no longer warns "unable to translate '<U+FEFF>...'" or "invalid char
+string in output conversion" while validating or minifying JSON.
+
 # rmoriebricklayer 0.5.0
 
 ## Point locations and the regions that contain them

@@ -522,21 +522,28 @@ move:</p>
 <span id="cb12-6"><a href="#cb12-6" tabindex="-1"></a></span>
 <span id="cb12-7"><a href="#cb12-7" tabindex="-1"></a><span class="fu">rate_change</span>(d, stops, residents, year, <span class="at">by =</span> <span class="st">&quot;division&quot;</span>, <span class="at">per =</span> <span class="st">&quot;100k&quot;</span>)</span>
 <span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="co">#&gt; ── Change in rate per 100,000, lag 1, 95% exact conditional interval  </span></span>
-<span id="cb12-9"><a href="#cb12-9" tabindex="-1"></a><span class="co">#&gt;  division year count population     rate previous_rate rate_ratio pct_change</span></span>
-<span id="cb12-10"><a href="#cb12-10" tabindex="-1"></a><span class="co">#&gt;     North 2021   400     120000 333.3333            NA         NA         NA</span></span>
-<span id="cb12-11"><a href="#cb12-11" tabindex="-1"></a><span class="co">#&gt;     North 2022   430     122000 352.4590      333.3333  1.0573770   5.737705</span></span>
-<span id="cb12-12"><a href="#cb12-12" tabindex="-1"></a><span class="co">#&gt;     North 2023   455     125000 364.0000      352.4590  1.0327442   3.274419</span></span>
-<span id="cb12-13"><a href="#cb12-13" tabindex="-1"></a><span class="co">#&gt;     South 2021    70      41000 170.7317            NA         NA         NA</span></span>
-<span id="cb12-14"><a href="#cb12-14" tabindex="-1"></a><span class="co">#&gt;     South 2022    66      41500 159.0361      170.7317  0.9314974  -6.850258</span></span>
-<span id="cb12-15"><a href="#cb12-15" tabindex="-1"></a><span class="co">#&gt;     South 2023    61      42000 145.2381      159.0361  0.9132395  -8.676046</span></span>
-<span id="cb12-16"><a href="#cb12-16" tabindex="-1"></a><span class="co">#&gt;   pct_lower pct_upper                 flag</span></span>
-<span id="cb12-17"><a href="#cb12-17" tabindex="-1"></a><span class="co">#&gt;          NA        NA no comparison period</span></span>
-<span id="cb12-18"><a href="#cb12-18" tabindex="-1"></a><span class="co">#&gt;   -7.937165  21.46533                 &lt;NA&gt;</span></span>
-<span id="cb12-19"><a href="#cb12-19" tabindex="-1"></a><span class="co">#&gt;   -9.679876  18.10199                 &lt;NA&gt;</span></span>
-<span id="cb12-20"><a href="#cb12-20" tabindex="-1"></a><span class="co">#&gt;          NA        NA no comparison period</span></span>
-<span id="cb12-21"><a href="#cb12-21" tabindex="-1"></a><span class="co">#&gt;  -34.473784  32.29053                 &lt;NA&gt;</span></span>
-<span id="cb12-22"><a href="#cb12-22" tabindex="-1"></a><span class="co">#&gt;  -36.596300  31.35600                 &lt;NA&gt;</span></span>
-<span id="cb12-23"><a href="#cb12-23" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
+<span id="cb12-9"><a href="#cb12-9" tabindex="-1"></a><span class="co">#&gt;  division year count population     rate previous_rate previous_count</span></span>
+<span id="cb12-10"><a href="#cb12-10" tabindex="-1"></a><span class="co">#&gt;     North 2021   400     120000 333.3333            NA             NA</span></span>
+<span id="cb12-11"><a href="#cb12-11" tabindex="-1"></a><span class="co">#&gt;     North 2022   430     122000 352.4590      333.3333            400</span></span>
+<span id="cb12-12"><a href="#cb12-12" tabindex="-1"></a><span class="co">#&gt;     North 2023   455     125000 364.0000      352.4590            430</span></span>
+<span id="cb12-13"><a href="#cb12-13" tabindex="-1"></a><span class="co">#&gt;     South 2021    70      41000 170.7317            NA             NA</span></span>
+<span id="cb12-14"><a href="#cb12-14" tabindex="-1"></a><span class="co">#&gt;     South 2022    66      41500 159.0361      170.7317             70</span></span>
+<span id="cb12-15"><a href="#cb12-15" tabindex="-1"></a><span class="co">#&gt;     South 2023    61      42000 145.2381      159.0361             66</span></span>
+<span id="cb12-16"><a href="#cb12-16" tabindex="-1"></a><span class="co">#&gt;  previous_population rate_ratio pct_change  pct_lower pct_upper</span></span>
+<span id="cb12-17"><a href="#cb12-17" tabindex="-1"></a><span class="co">#&gt;                   NA         NA         NA         NA        NA</span></span>
+<span id="cb12-18"><a href="#cb12-18" tabindex="-1"></a><span class="co">#&gt;               120000  1.0573770   5.737705  -7.937165  21.46533</span></span>
+<span id="cb12-19"><a href="#cb12-19" tabindex="-1"></a><span class="co">#&gt;               122000  1.0327442   3.274419  -9.679876  18.10199</span></span>
+<span id="cb12-20"><a href="#cb12-20" tabindex="-1"></a><span class="co">#&gt;                   NA         NA         NA         NA        NA</span></span>
+<span id="cb12-21"><a href="#cb12-21" tabindex="-1"></a><span class="co">#&gt;                41000  0.9314974  -6.850258 -34.473784  32.29053</span></span>
+<span id="cb12-22"><a href="#cb12-22" tabindex="-1"></a><span class="co">#&gt;                41500  0.9132395  -8.676046 -36.596300  31.35600</span></span>
+<span id="cb12-23"><a href="#cb12-23" tabindex="-1"></a><span class="co">#&gt;                  flag</span></span>
+<span id="cb12-24"><a href="#cb12-24" tabindex="-1"></a><span class="co">#&gt;  no comparison period</span></span>
+<span id="cb12-25"><a href="#cb12-25" tabindex="-1"></a><span class="co">#&gt;                  &lt;NA&gt;</span></span>
+<span id="cb12-26"><a href="#cb12-26" tabindex="-1"></a><span class="co">#&gt;                  &lt;NA&gt;</span></span>
+<span id="cb12-27"><a href="#cb12-27" tabindex="-1"></a><span class="co">#&gt;  no comparison period</span></span>
+<span id="cb12-28"><a href="#cb12-28" tabindex="-1"></a><span class="co">#&gt;                  &lt;NA&gt;</span></span>
+<span id="cb12-29"><a href="#cb12-29" tabindex="-1"></a><span class="co">#&gt;                  &lt;NA&gt;</span></span>
+<span id="cb12-30"><a href="#cb12-30" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
 <p>North’s count rose, and so did its population, so the rate change is
 smaller than the count change – which is the whole reason to look at the
 rate. The interval conditions on the two counts and corrects for the

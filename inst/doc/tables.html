@@ -662,12 +662,18 @@ makes them a standardisation rather than a prediction.</p>
 normal approximation on a count of six is a decoration rather than an
 interval:</p>
 <div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a><span class="fu">sir</span>(e<span class="sc">$</span>observed, e<span class="sc">$</span>expected, e<span class="sc">$</span>area)</span>
-<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a><span class="co">#&gt;       area observed  expected       sir     lower     upper excess</span></span>
-<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a><span class="co">#&gt; 1  Central       17 48.366013 0.3514865 0.2047538 0.5627639   TRUE</span></span>
-<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a><span class="co">#&gt; 2  Eastern       36 36.274510 0.9924324 0.6950875 1.3739448  FALSE</span></span>
-<span id="cb23-5"><a href="#cb23-5" tabindex="-1"></a><span class="co">#&gt; 3 Northern        9  9.673203 0.9304054 0.4254406 1.7661993  FALSE</span></span>
-<span id="cb23-6"><a href="#cb23-6" tabindex="-1"></a><span class="co">#&gt; 4  Toronto       86 60.457516 1.4224865 1.1378056 1.7567592   TRUE</span></span>
-<span id="cb23-7"><a href="#cb23-7" tabindex="-1"></a><span class="co">#&gt; 5  Western       37 30.228758 1.2240000 0.8618090 1.6871228  FALSE</span></span></code></pre></div>
+<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a><span class="co">#&gt;       area observed  expected       sir     lower     upper excess deficit</span></span>
+<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a><span class="co">#&gt; 1  Central       17 48.366013 0.3514865 0.2047538 0.5627639  FALSE    TRUE</span></span>
+<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a><span class="co">#&gt; 2  Eastern       36 36.274510 0.9924324 0.6950875 1.3739448  FALSE   FALSE</span></span>
+<span id="cb23-5"><a href="#cb23-5" tabindex="-1"></a><span class="co">#&gt; 3 Northern        9  9.673203 0.9304054 0.4254406 1.7661993  FALSE   FALSE</span></span>
+<span id="cb23-6"><a href="#cb23-6" tabindex="-1"></a><span class="co">#&gt; 4  Toronto       86 60.457516 1.4224865 1.1378056 1.7567592   TRUE   FALSE</span></span>
+<span id="cb23-7"><a href="#cb23-7" tabindex="-1"></a><span class="co">#&gt; 5  Western       37 30.228758 1.2240000 0.8618090 1.6871228  FALSE   FALSE</span></span>
+<span id="cb23-8"><a href="#cb23-8" tabindex="-1"></a><span class="co">#&gt;   significant</span></span>
+<span id="cb23-9"><a href="#cb23-9" tabindex="-1"></a><span class="co">#&gt; 1        TRUE</span></span>
+<span id="cb23-10"><a href="#cb23-10" tabindex="-1"></a><span class="co">#&gt; 2       FALSE</span></span>
+<span id="cb23-11"><a href="#cb23-11" tabindex="-1"></a><span class="co">#&gt; 3       FALSE</span></span>
+<span id="cb23-12"><a href="#cb23-12" tabindex="-1"></a><span class="co">#&gt; 4        TRUE</span></span>
+<span id="cb23-13"><a href="#cb23-13" tabindex="-1"></a><span class="co">#&gt; 5       FALSE</span></span></code></pre></div>
 <p>And the third problem. A league table of rates ranks the small
 regions to both ends by construction, so borrow strength across
 regions:</p>

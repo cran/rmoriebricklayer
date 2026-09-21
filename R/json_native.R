@@ -304,6 +304,10 @@ bricklayer_json_base64url_enc <- function(input) {
 #' @rdname rmbl_base64
 #' @export
 bricklayer_json_base64url_dec <- function(input) {
+  input <- .rmbl_text_input(input, "input", allow_raw = FALSE)
+  if (any(grepl("[^A-Za-z0-9_=-]", gsub("[\r\n]", "", input)))) {
+    stop("`input` is not base64url text", call. = FALSE)
+  }
   text <- gsub("[\r\n]", "", chartr("-_", "+/", input))[[1]]
   mod <- nchar(text) %% 4L
   if (mod > 0L) text <- paste0(text, strrep("=", 4L - mod))
@@ -659,7 +663,9 @@ bricklayer_json_base64url_dec <- function(input) {
 #' @param factor As in jsonlite.
 #' @param complex As in jsonlite.
 #' @param raw As in jsonlite.
-#' @param null As in jsonlite.
+#' @param null As in jsonlite: `NULL` is written as `{}` by default
+#'   (a round trip gives an empty list). Pass `null = "null"` for a
+#'   JSON null; [bricklayer_json_serialize] round-trips `NULL` exactly.
 #' @param na As in jsonlite.
 #' @param auto_unbox As in jsonlite.
 #' @param digits As in jsonlite.
@@ -722,7 +728,6 @@ bricklayer_json_unbox <- function(x) {
   class(obj) <- c("scalar", class(obj))
   obj
 }
-
 
 # Decimal to double, correctly rounded, independent of the platform's
 # C library.
@@ -787,7 +792,7 @@ bricklayer_json_unbox <- function(x) {
 .rmbl_json_parse <- function(txt, bigint_as_char = FALSE) {
   s <- paste(txt, collapse = "\n")
   s <- enc2utf8(s)
-  if (startsWith(s, "\ufeff")) {
+  if (.rmbl_has_bom(s)) {
     warning("JSON string contains (illegal) UTF8 byte-order-mark!", call. = FALSE)
     s <- substring(s, 2L)
   }
@@ -1198,16 +1203,32 @@ bricklayer_json_write_json <- function(x, path, ...) {
   invisible(path)
 }
 
+# A byte-order mark is three bytes; test and strip it on the bytes so a
+# C locale never has to translate U+FEFF to its native encoding (that
+# translation is what raised "unable to translate '<U+FEFF>...'" and
+# "invalid char string in output conversion").
+.rmbl_has_bom <- function(s) {
+  r <- charToRaw(s)
+  length(r) >= 3L && identical(r[1:3], as.raw(c(0xef, 0xbb, 0xbf)))
+}
+.rmbl_strip_bom <- function(s) {
+  if (!.rmbl_has_bom(s)) return(s)
+  out <- rawToChar(charToRaw(s)[-(1:3)])
+  Encoding(out) <- "UTF-8"
+  out
+}
+
 #' Validate JSON text
 #'
 #' @param txt character; lines are joined with newlines.
 #' @return `TRUE`, or `FALSE` with attributes `err` and
 #' `offset`.
+
 #' @noRd
 bricklayer_json_validate <- function(txt) {
   stopifnot(is.character(txt))
   txt <- paste(txt, collapse = "\n")
-  if (startsWith(txt, "\ufeff"))
+  if (.rmbl_has_bom(txt))
     return(structure(FALSE, err = "JSON string contains UTF8 byte-order-mark."))
   res <- tryCatch({
     .rmbl_json_parse(txt)
@@ -1228,7 +1249,7 @@ bricklayer_json_validate <- function(txt) {
 #' @noRd
 .rmbl_json_reformat <- function(txt, pretty, indent_string = "    ") {
   s <- paste(txt, collapse = "\n")
-  if (startsWith(s, "\ufeff")) s <- substring(s, 2L)
+  s <- .rmbl_strip_bom(s)
   ch <- strsplit(s, "", fixed = TRUE)[[1]]
   n <- length(ch)
   i <- 1L
@@ -1403,7 +1424,12 @@ bricklayer_json_validate <- function(txt) {
     if (pretty && state == "complete") emit("\n")
   }
   if (state != "complete") bad("unexpected end of input")
-  structure(paste(out, collapse = ""), class = "json")
+  # paste() drops the encoding mark; JSON is UTF-8 by definition (RFC 8259
+  # section 8.1), so declare it. Declare, do not convert: enc2utf8() under a
+  # C locale would re-encode the bytes as Latin-1.
+  res <- paste(out, collapse = "")
+  Encoding(res) <- "UTF-8"
+  structure(res, class = "json")
 }
 
 #' Indent JSON text (jsonlite's prettify)

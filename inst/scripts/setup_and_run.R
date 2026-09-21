@@ -20,6 +20,7 @@
 ## USAGE:
 ##   Rscript setup_and_run.R              # interactive
 ##   Rscript setup_and_run.R --quick      # non-interactive (defaults)
+##   Rscript setup_and_run.R --synthetic  # offline, fake data, no prompts
 ##   Rscript setup_and_run.R --data PATH  # explicit data path
 ##   Rscript setup_and_run.R --help
 ##
@@ -40,6 +41,10 @@ script_dir <- (function() {
 args <- commandArgs(trailingOnly = TRUE)
 QUICK_MODE <- any(args %in% c("-q", "--quick"))
 HELP_MODE  <- any(args %in% c("-h", "--help"))
+## --synthetic (or OTIS_MRP_SYNTHETIC=1): take the synthetic-data route
+## without a prompt, so an offline or unattended run can exercise it.
+SYNTH_ARG  <- any(args %in% "--synthetic") ||
+  nzchar(Sys.getenv("OTIS_MRP_SYNTHETIC", ""))
 ## No terminal on stdin (CI, reviewer harness, piped run): prompts would
 ## silently take their defaults anyway, so make that explicit and honest.
 AUTO_QUICK <- FALSE
@@ -62,7 +67,8 @@ if (HELP_MODE) {
 
 ## ---------- Source libraries ----------
 LIB_DIR <- script_dir  # libs may be next to setup_and_run.R after bundle build
-for (lib in c("json_native.R", "sha256_native.R",
+for (lib in c("aaa_input_guards.R", "aaa_local_seed.R",
+              "json_native.R", "sha256_native.R",
               "lib_interactive.R", "lib_helpers.R", "lib_data_loader.R",
               "lib_synthetic.R", "lib_manifest.R",
               "yoy.R", "rate.R")) {
@@ -88,6 +94,13 @@ PROJECT_LICENCE <- cfg$project$licence      %||% "AGPL-3.0-or-later"
 ANALYSIS_R      <- file.path(script_dir,
                              cfg$analysis$r_script %||% "analysis.R")
 REQ_PKGS        <- unlist(cfg$r_packages) %||% c()
+## Opt-in stages have their own dependencies; probe them up front when the
+## stage is switched on, so a missing package is reported here and not
+## thirty seconds into the run.
+dml_on <- tolower(Sys.getenv("OTIS_DML_RECOMPUTE", "")) %in%
+  c("1", "yes", "true", "y")
+if (nzchar(Sys.getenv("OTIS_REGION_MAP_SHP", "")))
+  REQ_PKGS <- unique(c(REQ_PKGS, "sf"))
 
 ## ---------- Banner + OS detection ----------
 OS_KIND <- detect_os()
@@ -165,6 +178,34 @@ if (length(REQ_PKGS) > 0L) {
 } else {
   say("  (No packages declared in config$r_packages.)")
 }
+## The published DML estimates were produced with DoubleML + mlr3, so that
+## is the route the recompute reproduces; rmorie's morie_otis_irm_dml() is
+## the same estimator in ~10 s and is used only when DoubleML is absent.
+if (dml_on) {
+  fb <- c("DoubleML", "mlr3", "mlr3learners")
+  fb_missing <- fb[!vapply(fb, requireNamespace, logical(1),
+                           quietly = TRUE)]
+  if (length(fb_missing) == 0L) {
+    say("  \u2713 OTIS_DML_RECOMPUTE: DoubleML, mlr3 and mlr3learners present",
+        " (the published route; ~24 min, ~6 GB RAM).")
+  } else if (requireNamespace("rmorie", quietly = TRUE)) {
+    say("  OTIS_DML_RECOMPUTE: DoubleML route missing ",
+        paste(fb_missing, collapse = ", "),
+        "; rmorie is installed and its ~10 s implementation of the same")
+    say("  estimator will be used instead. For the published route:")
+    say("    install.packages(c(", paste0('"', fb, '"', collapse = ", "), "))")
+  } else {
+    say("  Missing for OTIS_DML_RECOMPUTE=1: ",
+        paste(fb_missing, collapse = ", "))
+    say("  This script does not install packages itself. Install them in R,")
+    say("  then re-run this script:")
+    say("    install.packages(c(", paste0('"', fb, '"', collapse = ", "), "))")
+    say("  Alternative: install.packages(\"rmorie\") gives the same estimator",
+        " in ~10 s.")
+    say("  Or unset OTIS_DML_RECOMPUTE: the 8 DML checks then record as INFO.")
+    quit(status = 3)
+  }
+}
 hr()
 
 ## ---------- 3. Locate input data ----------
@@ -222,7 +263,8 @@ if (!is.null(DATA_ARG)) {
       "Cancel and exit"
     )
     choice <- ask_menu("  How would you like to proceed?",
-                       menu_options, 3L, QUICK_MODE)
+                       menu_options, if (SYNTH_ARG) 4L else 3L,
+                       QUICK_MODE || SYNTH_ARG)
 
     if (choice == 1L) {
       hint_dir <- ask_save_location(
@@ -299,7 +341,7 @@ if (!is.null(DATA_ARG)) {
         say("  All download paths exhausted. Options:")
         say("    1) Re-run after disabling your VPN")
         say("    2) Download manually from: ", prov$dataset$catalogue_page)
-        say("    3) Try synthetic mode (no internet required)")
+        say("    4) Run on SYNTHETIC fake data (menu option 4, or --synthetic)")
         quit(status = 5)
       }
       input_path <- target
@@ -318,7 +360,7 @@ if (!is.null(DATA_ARG)) {
       say("  CANNOT verify any claim in the paper.")
       say("")
       if (!ask_yn("  Confirm — generate synthetic data and run on it?",
-                  "N", QUICK_MODE)) {
+                  if (SYNTH_ARG) "Y" else "N", QUICK_MODE || SYNTH_ARG)) {
         say("  Cancelled."); quit(status = 0)
       }
       save_dir <- ask_save_location(
@@ -440,7 +482,13 @@ if (file.exists(manifest_path)) {
 }
 hr()
 
-say("Step 5/5: Done.")
+if (exit_code != 0L || !file.exists(manifest_path)) {
+  say("Step 5/5: NOT completed (analysis exit code ", exit_code,
+      if (!file.exists(manifest_path)) "; no manifest.json written" else "",
+      "). See run.log in the results folder.")
+} else {
+  say("Step 5/5: Done.")
+}
 say("  Results folder: ", output_dir)
 say("  Plain-language summary: SUMMARY.txt in that folder.")
 

@@ -403,7 +403,7 @@ system dependency.</p>
 <span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>signing_key</span>
 <span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="co">#&gt; ── Signing key (post-quantum) ────────────────────────────────────</span></span>
 <span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="co">#&gt;   scheme     xmss-sha256</span></span>
-<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt;   root       c32e64c161aeb7b6ba05cab02a7790745140c20a0a170323cb41a54d80d03a5a</span></span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt;   root       1067231416dbf2d7c84b07535f83ebd4a830b669de8c4767fee234734d6a961d</span></span>
 <span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a><span class="co">#&gt;   height     3</span></span>
 <span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a><span class="co">#&gt;   used       0 of 8 signatures</span></span>
 <span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a><span class="co">#&gt;   remaining  8</span></span>
@@ -415,7 +415,7 @@ system dependency.</p>
 <span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>pub</span>
 <span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a><span class="co">#&gt; ── Public verification key ───────────────────────────────────────</span></span>
 <span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a><span class="co">#&gt;   scheme  xmss-sha256</span></span>
-<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a><span class="co">#&gt;   root    c32e64c161aeb7b6ba05cab02a7790745140c20a0a170323cb41a54d80d03a5a</span></span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a><span class="co">#&gt;   root    1067231416dbf2d7c84b07535f83ebd4a830b669de8c4767fee234734d6a961d</span></span>
 <span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a><span class="co">#&gt;   height  3</span></span>
 <span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
 <div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>s1 <span class="ot">&lt;-</span> <span class="fu">capsule_sign</span>(<span class="fu">core_sha256</span>(manifest), signing_key)</span>
@@ -609,13 +609,13 @@ failures:</p>
 <span id="cb19-4"><a href="#cb19-4" tabindex="-1"></a></span>
 <span id="cb19-5"><a href="#cb19-5" tabindex="-1"></a><span class="co"># a declared outcome that was not reported</span></span>
 <span id="cb19-6"><a href="#cb19-6" tabindex="-1"></a><span class="fu">prereg_check</span>(plan, <span class="st">&quot;n_rows&quot;</span>)</span>
-<span id="cb19-7"><a href="#cb19-7" tabindex="-1"></a><span class="co">#&gt; ── Against the declaration of 2026-09-16T15:13:01Z: departures below </span></span>
+<span id="cb19-7"><a href="#cb19-7" tabindex="-1"></a><span class="co">#&gt; ── Against the declaration of 2026-09-18T21:48:11Z: departures below </span></span>
 <span id="cb19-8"><a href="#cb19-8" tabindex="-1"></a><span class="co">#&gt;   declared but not reported (outcome switching): ate</span></span>
 <span id="cb19-9"><a href="#cb19-9" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span>
 <span id="cb19-10"><a href="#cb19-10" tabindex="-1"></a></span>
 <span id="cb19-11"><a href="#cb19-11" tabindex="-1"></a><span class="co"># statistics reported that were never declared</span></span>
 <span id="cb19-12"><a href="#cb19-12" tabindex="-1"></a><span class="fu">prereg_check</span>(plan, <span class="fu">c</span>(<span class="st">&quot;ate&quot;</span>, <span class="st">&quot;n_rows&quot;</span>, <span class="st">&quot;by_year&quot;</span>, <span class="st">&quot;by_precinct&quot;</span>))</span>
-<span id="cb19-13"><a href="#cb19-13" tabindex="-1"></a><span class="co">#&gt; ── Against the declaration of 2026-09-16T15:13:01Z: departures below </span></span>
+<span id="cb19-13"><a href="#cb19-13" tabindex="-1"></a><span class="co">#&gt; ── Against the declaration of 2026-09-18T21:48:11Z: departures below </span></span>
 <span id="cb19-14"><a href="#cb19-14" tabindex="-1"></a><span class="co">#&gt;   reported but not declared (2 addition(s)): by_year, by_precinct</span></span>
 <span id="cb19-15"><a href="#cb19-15" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>
 <p>That second case is why a nominal p-value needs correcting. Run the
@@ -653,7 +653,7 @@ rewritten to match whatever the files now say.</p>
 <span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a><span class="co">#&gt;   file:data.csv                  ok    95aecaa7399a39092c9e716ce1e18bb1c606</span></span>
 <span id="cb22-9"><a href="#cb22-9" tabindex="-1"></a><span class="co">#&gt;   no_unlisted_files              ok    </span></span>
 <span id="cb22-10"><a href="#cb22-10" tabindex="-1"></a><span class="co">#&gt;   attestation:attestation_comple ok    </span></span>
-<span id="cb22-11"><a href="#cb22-11" tabindex="-1"></a><span class="co">#&gt;   attestation:manifest_digest    ok    d67295f68aeab30e618739c83f7eac7f56f9</span></span>
+<span id="cb22-11"><a href="#cb22-11" tabindex="-1"></a><span class="co">#&gt;   attestation:manifest_digest    ok    99f9fdb29fb729a2fe99d2a592c6a48e5c90</span></span>
 <span id="cb22-12"><a href="#cb22-12" tabindex="-1"></a><span class="co">#&gt;   attestation:signature          ok    </span></span>
 <span id="cb22-13"><a href="#cb22-13" tabindex="-1"></a><span class="co">#&gt;   manifest_digest                ok    5f711161c72a5bcf5b5918d69a6a59fbe38a</span></span>
 <span id="cb22-14"><a href="#cb22-14" tabindex="-1"></a><span class="co">#&gt; ──────────────────────────────────────────────────────────────────</span></span></code></pre></div>

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Categorical integrity: labels that cannot be swapped quietly</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Categorical integrity: labels that cannot
+be swapped quietly</h1>
+
+
+
+<p>In August 2020 the Ontario Human Rights Commission published <em>A
+Disparate Impact</em>, whose multivariate tables said Black civilians in
+Toronto were 30 to 58 times as likely as White civilians to experience
+police use of force, and other racialized civilians 5 to 14 times. On 26
+January 2023 the Commission published a correction: the figures are 4 to
+5 times for Black civilians, and other racialized civilians were about
+40% <em>less</em> likely. Between the SPSS file and the R analysis the
+four race codes had been rotated one place (White read as Black, Black
+as other racialized, other racialized as unknown, unknown as White), so
+the largest group was being compared with the smallest. The independent
+review attributed the rotation to the transfer between the two packages.
+Nothing in either package rotates labels on its own; what was missing
+was a step that would have refused the rotation, or named it, on the
+day. This vignette is that step. Sources: OHRC, <em>Correction to A
+Disparate Impact</em> (2023-01-26); Jung, M. (2022), <em>Independent
+Expert Review of Part E of the Use of Force by the Toronto Police
+Service report</em>, submitted to the OHRC, December 2022.</p>
+<div id="the-reports-numbers-against-the-tables-labels" class="section level2">
+<h2>The report’s numbers against the table’s labels</h2>
+<p>Start with what a reader can check: a table of counts as labelled
+(the counts below are illustrative, shaped like the case: a large White
+group, a Black group with a real disparity, and a very small unknown
+group), the reference group, and the odds ratios a report states.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>tab <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">c</span>(<span class="dv">9000</span>, <span class="dv">120</span>, <span class="dv">2000</span>, <span class="dv">220</span>, <span class="dv">1500</span>, <span class="dv">60</span>, <span class="dv">4000</span>, <span class="dv">1</span>), <span class="at">ncol =</span> <span class="dv">2</span>, <span class="at">byrow =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>              <span class="at">dimnames =</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="st">&quot;White&quot;</span>, <span class="st">&quot;Black&quot;</span>, <span class="st">&quot;Other&quot;</span>, <span class="st">&quot;Unknown&quot;</span>), <span class="fu">c</span>(<span class="st">&quot;no&quot;</span>, <span class="st">&quot;yes&quot;</span>)))</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>tab</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="co">#&gt;           no yes</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="co">#&gt; White   9000 120</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="co">#&gt; Black   2000 220</span></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="co">#&gt; Other   1500  60</span></span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="co">#&gt; Unknown 4000   1</span></span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>ref <span class="ot">&lt;-</span> <span class="dv">120</span> <span class="sc">/</span> <span class="dv">9000</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="fu">odds_ratio_check</span>(tab, <span class="st">&quot;White&quot;</span>, <span class="fu">c</span>(<span class="at">Black =</span> <span class="dv">220</span> <span class="sc">/</span> <span class="dv">2000</span> <span class="sc">/</span> ref, <span class="at">Other =</span> <span class="dv">60</span> <span class="sc">/</span> <span class="dv">1500</span> <span class="sc">/</span> ref,</span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>                                 <span class="at">Unknown =</span> <span class="dv">1</span> <span class="sc">/</span> <span class="dv">4000</span> <span class="sc">/</span> ref))<span class="sc">$</span>verdict</span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a><span class="co">#&gt; [1] &quot;the reported odds ratios follow from the table as labelled&quot;</span></span></code></pre></div>
+<p>Now rotate the labels one place, as happened in the transfer, and
+read off the odds ratios a report would print:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>rotated <span class="ot">&lt;-</span> tab[<span class="fu">c</span>(<span class="st">&quot;Unknown&quot;</span>, <span class="st">&quot;White&quot;</span>, <span class="st">&quot;Black&quot;</span>, <span class="st">&quot;Other&quot;</span>), ]</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="fu">rownames</span>(rotated) <span class="ot">&lt;-</span> <span class="fu">rownames</span>(tab)</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>rref <span class="ot">&lt;-</span> rotated[<span class="st">&quot;White&quot;</span>, <span class="dv">2</span>] <span class="sc">/</span> rotated[<span class="st">&quot;White&quot;</span>, <span class="dv">1</span>]</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>reported <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">Black =</span> rotated[<span class="st">&quot;Black&quot;</span>, <span class="dv">2</span>] <span class="sc">/</span> rotated[<span class="st">&quot;Black&quot;</span>, <span class="dv">1</span>] <span class="sc">/</span> rref,</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>              <span class="at">Other =</span> rotated[<span class="st">&quot;Other&quot;</span>, <span class="dv">2</span>] <span class="sc">/</span> rotated[<span class="st">&quot;Other&quot;</span>, <span class="dv">1</span>] <span class="sc">/</span> rref,</span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>              <span class="at">Unknown =</span> rotated[<span class="st">&quot;Unknown&quot;</span>, <span class="dv">2</span>] <span class="sc">/</span> rotated[<span class="st">&quot;Unknown&quot;</span>, <span class="dv">1</span>] <span class="sc">/</span> rref)</span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a><span class="fu">round</span>(reported, <span class="dv">1</span>)</span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a><span class="co">#&gt;   Black   Other Unknown </span></span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a><span class="co">#&gt;    53.3   440.0   160.0</span></span>
+<span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a>r <span class="ot">&lt;-</span> <span class="fu">odds_ratio_check</span>(tab, <span class="st">&quot;White&quot;</span>, reported)</span>
+<span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a>r<span class="sc">$</span>consistent</span>
+<span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span>
+<span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a>r<span class="sc">$</span>matches</span>
+<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a><span class="co">#&gt;                                                          relabelling</span></span>
+<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a><span class="co">#&gt; 1 White -&gt; Black, Black -&gt; Other, Other -&gt; Unknown, Unknown -&gt; White</span></span>
+<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a><span class="co">#&gt;   outcome_columns_swapped</span></span>
+<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a><span class="co">#&gt; 1                   FALSE</span></span>
+<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a>r<span class="sc">$</span>verdict</span>
+<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a><span class="co">#&gt; [1] &quot;the reported odds ratios do NOT follow from the table as labelled; they are reproduced under a relabelling (White -&gt; Black, Black -&gt; Other, Other -&gt; Unknown, Unknown -&gt; White): the groups were mislabelled, not the software&quot;</span></span></code></pre></div>
+<p>The function tries every relabelling of the rows (and the two outcome
+columns) and names the one that reproduces the reported figures: here
+the one-place rotation, with the “White” odds actually those of the tiny
+unknown group, which is exactly how a real disparity of about 4 becomes
+a reported one of about 50. Numbers that no relabelling produces are
+reported as exactly that.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="fu">odds_ratio_check</span>(tab, <span class="st">&quot;White&quot;</span>, <span class="fu">c</span>(<span class="at">Black =</span> <span class="dv">36</span>, <span class="at">Other =</span> <span class="dv">4</span>, <span class="at">Unknown =</span> <span class="dv">1</span>))<span class="sc">$</span>verdict</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="co">#&gt; [1] &quot;the reported odds ratios follow from no relabelling of this table&quot;</span></span></code></pre></div>
+</div>
+<div id="codes-that-arrive-without-their-labels" class="section level2">
+<h2>Codes that arrive without their labels</h2>
+<p>Data exported from SPSS, Stata or SAS often lands as integer codes.
+<code>decode_codes()</code> needs the code-to-label dictionary written
+out and refuses a code it does not know; <code>audit_categories()</code>
+flags the columns that still look like codes.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>raw <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">race =</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">1</span>), <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="fu">audit_categories</span>(<span class="fu">data.frame</span>(<span class="at">race =</span> <span class="fu">factor</span>(raw<span class="sc">$</span>race)))</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a><span class="co">#&gt; Categorical audit: 1 column(s)</span></span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="co">#&gt;   race             factor     3 level(s), reference ‘1’</span></span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="co">#&gt;     !! HAZARD: all labels numeric-looking (1,2,3...): likely imported CODES whose value labels were lost; as.numeric() on this column returns level INDICES, not data</span></span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a>race <span class="ot">&lt;-</span> <span class="fu">decode_codes</span>(raw<span class="sc">$</span>race, <span class="fu">c</span>(<span class="st">&quot;1&quot;</span> <span class="ot">=</span> <span class="st">&quot;White&quot;</span>, <span class="st">&quot;2&quot;</span> <span class="ot">=</span> <span class="st">&quot;Black&quot;</span>, <span class="st">&quot;3&quot;</span> <span class="ot">=</span> <span class="st">&quot;Indigenous&quot;</span>))</span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a>race</span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a><span class="co">#&gt; [1] &quot;White&quot;      &quot;Black&quot;      &quot;Black&quot;      &quot;Indigenous&quot; &quot;White&quot;     </span></span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)</span></span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)$mapping</span></span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a><span class="co">#&gt;            1            2            3 </span></span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a><span class="co">#&gt;      &quot;White&quot;      &quot;Black&quot; &quot;Indigenous&quot; </span></span>
+<span id="cb4-13"><a href="#cb4-13" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-14"><a href="#cb4-14" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)$kept</span></span>
+<span id="cb4-15"><a href="#cb4-15" tabindex="-1"></a><span class="co">#&gt; character(0)</span></span>
+<span id="cb4-16"><a href="#cb4-16" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-17"><a href="#cb4-17" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)$checksum</span></span>
+<span id="cb4-18"><a href="#cb4-18" tabindex="-1"></a><span class="co">#&gt; [1] &quot;be0b0dcd1bb12223f6d28bc031e1accfd45a3f700d18c920b54d7d766905bdd0&quot;</span></span></code></pre></div>
+</div>
+<div id="a-recode-you-can-prove" class="section level2">
+<h2>A recode you can prove</h2>
+<p><code>guard_recode()</code> maps by name only and errors on anything
+unmapped; <code>verify_recode()</code> cross-tabulates before against
+after and errors unless each old label went to exactly one new label,
+the one the mapping declares; <code>guard_levels()</code> fixes the
+level order so the reference group is a decision, not an accident of the
+alphabet.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>x <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;W&quot;</span>, <span class="st">&quot;B&quot;</span>, <span class="st">&quot;W&quot;</span>, <span class="st">&quot;I&quot;</span>, <span class="st">&quot;B&quot;</span>)</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>y <span class="ot">&lt;-</span> <span class="fu">guard_recode</span>(x, <span class="fu">c</span>(<span class="at">W =</span> <span class="st">&quot;White&quot;</span>, <span class="at">B =</span> <span class="st">&quot;Black&quot;</span>, <span class="at">I =</span> <span class="st">&quot;Indigenous&quot;</span>))</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a><span class="fu">verify_recode</span>(x, y, <span class="fu">c</span>(<span class="at">W =</span> <span class="st">&quot;White&quot;</span>, <span class="at">B =</span> <span class="st">&quot;Black&quot;</span>, <span class="at">I =</span> <span class="st">&quot;Indigenous&quot;</span>))</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a><span class="fu">guard_levels</span>(y, <span class="fu">c</span>(<span class="st">&quot;White&quot;</span>, <span class="st">&quot;Black&quot;</span>, <span class="st">&quot;Indigenous&quot;</span>), <span class="at">reference =</span> <span class="st">&quot;White&quot;</span>)</span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a><span class="co">#&gt; [1] White      Black      White      Indigenous Black     </span></span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a><span class="co">#&gt; Levels: White Black Indigenous</span></span></code></pre></div>
+<p>And the swap, caught on the day:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a><span class="fu">verify_recode</span>(<span class="fu">c</span>(<span class="st">&quot;W&quot;</span>, <span class="st">&quot;B&quot;</span>), <span class="fu">c</span>(<span class="st">&quot;Black&quot;</span>, <span class="st">&quot;White&quot;</span>), <span class="fu">c</span>(<span class="at">W =</span> <span class="st">&quot;White&quot;</span>, <span class="at">B =</span> <span class="st">&quot;Black&quot;</span>))</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a><span class="co">#&gt; ! verify_recode: ‘B’ was mapped to ‘White’ but the declared mapping says ‘Black’. THIS is how groups get swapped; fix the recode before any model runs.</span></span></code></pre></div>
+</div>
+<div id="counts-against-what-was-published" class="section level2">
+<h2>Counts against what was published</h2>
+<p>If the release states how many rows each label has, the recode must
+reproduce those counts. When it does not, the function tries every
+permutation of the labels and says which one would make the counts
+match: the fingerprint of labels attached to the wrong groups.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="fu">verify_marginals</span>(y, <span class="fu">c</span>(<span class="at">White =</span> <span class="dv">2</span>, <span class="at">Black =</span> <span class="dv">2</span>, <span class="at">Indigenous =</span> <span class="dv">1</span>))</span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a><span class="fu">verify_marginals</span>(y, <span class="fu">c</span>(<span class="at">White =</span> <span class="dv">2</span>, <span class="at">Black =</span> <span class="dv">1</span>, <span class="at">Indigenous =</span> <span class="dv">2</span>))</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="co">#&gt; ! verify_marginals: recoded counts do not match the published counts. White: observed 2, published 2; Black: observed 2, published 1; Indigenous: observed 1, published 2. The observed counts match the published ones if the labels are permuted (Black -&gt; Indigenous, Indigenous -&gt; Black): the labels are attached to the wrong groups.</span></span></code></pre></div>
+</div>
+<div id="the-record" class="section level2">
+<h2>The record</h2>
+<p><code>recode_manifest()</code> writes down the mapping and its
+digest, the counts before and after, the checks that passed, and, with a
+key, a signature over the record. A later reader verifies the file
+against the data.</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>key <span class="ot">&lt;-</span> <span class="fu">pqc_keygen</span>(<span class="at">height =</span> <span class="dv">2</span>)</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>m <span class="ot">&lt;-</span> <span class="fu">recode_manifest</span>(x, y, <span class="fu">c</span>(<span class="at">W =</span> <span class="st">&quot;White&quot;</span>, <span class="at">B =</span> <span class="st">&quot;Black&quot;</span>, <span class="at">I =</span> <span class="st">&quot;Indigenous&quot;</span>),</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>                     <span class="at">published =</span> <span class="fu">c</span>(<span class="at">White =</span> <span class="dv">2</span>, <span class="at">Black =</span> <span class="dv">2</span>, <span class="at">Indigenous =</span> <span class="dv">1</span>),</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>                     <span class="at">key =</span> key, <span class="at">context =</span> <span class="st">&quot;vignette&quot;</span>)</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">write_recode_manifest</span>(m, <span class="fu">tempfile</span>(<span class="at">fileext =</span> <span class="st">&quot;.json&quot;</span>))</span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a><span class="fu">verify_recode_manifest</span>(p, x, y)[<span class="fu">c</span>(<span class="st">&quot;ok&quot;</span>, <span class="st">&quot;signature_ok&quot;</span>)]</span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a><span class="co">#&gt; $ok</span></span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co">#&gt; $signature_ok</span></span>
+<span id="cb8-11"><a href="#cb8-11" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+<p>Change the data or the file afterwards and verification says so, with
+the reason.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>y_swapped <span class="ot">&lt;-</span> <span class="fu">as.character</span>(y)</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>y_swapped[y_swapped <span class="sc">==</span> <span class="st">&quot;Black&quot;</span>] <span class="ot">&lt;-</span> <span class="st">&quot;Indigenous&quot;</span></span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a><span class="fu">verify_recode_manifest</span>(p, x, y_swapped)[<span class="fu">c</span>(<span class="st">&quot;ok&quot;</span>, <span class="st">&quot;reasons&quot;</span>)]</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a><span class="co">#&gt; $ok</span></span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a><span class="co">#&gt; [1] FALSE</span></span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a><span class="co">#&gt; $reasons</span></span>
+<span id="cb9-8"><a href="#cb9-8" tabindex="-1"></a><span class="co">#&gt; [1] &quot;verify_recode: ‘B’ was mapped to ‘Indigenous’ but the declared mapping says ‘Black’. THIS is how groups get swapped; fix the recode before any model runs.&quot;</span></span>
+<span id="cb9-9"><a href="#cb9-9" tabindex="-1"></a><span class="co">#&gt; [2] &quot;recoded counts differ from the manifest&quot;</span></span></code></pre></div>
+<p>Finally, the guard that stops a factor from reaching a numeric
+treatment slot, where <code>as.numeric()</code> would hand a model the
+level indices instead of the data:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a><span class="fu">guard_binary</span>(<span class="fu">c</span>(<span class="st">&quot;treated&quot;</span>, <span class="st">&quot;control&quot;</span>), <span class="st">&quot;treatment&quot;</span>)</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a><span class="co">#&gt; ! Column ‘treatment’ is categorical (‘treated’, ‘control’...). Refusing to coerce: as.numeric() on a factor returns level INDICES (1, 2, ...), not your data, and a mis-ordered level silently relabels every observation. Encode explicitly first, e.g. guard_recode() + as.integer(x == &quot;treated_label&quot;).</span></span></code></pre></div>
+</div>
+<div id="the-transfer-that-matters-spss-or-stata-sas-to-r" class="section level2">
+<h2>The transfer that matters: SPSS (or Stata, SAS) to R</h2>
+<p>The documented failure happened between two programs. The source
+stores each category as a code with a value label; the destination
+receives the codes, and the labels are re-attached in the analysis. The
+only faithful way to re-attach them is by code. Here is what arrives
+from a <code>.sav</code> file (haven keeps the labels as an attribute,
+label = code), and the two things the source program printed that make
+the import checkable: its code book and its frequency table.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>arrived <span class="ot">&lt;-</span> <span class="fu">structure</span>(<span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">4</span>, <span class="dv">1</span>, <span class="dv">3</span>, <span class="dv">1</span>, <span class="dv">2</span>),</span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>                     <span class="at">labels =</span> <span class="fu">c</span>(<span class="at">White =</span> <span class="dv">1</span>, <span class="at">Black =</span> <span class="dv">2</span>, <span class="at">Other =</span> <span class="dv">3</span>, <span class="at">Unknown =</span> <span class="dv">4</span>))</span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a>code_book <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;1&quot;</span> <span class="ot">=</span> <span class="st">&quot;White&quot;</span>, <span class="st">&quot;2&quot;</span> <span class="ot">=</span> <span class="st">&quot;Black&quot;</span>, <span class="st">&quot;3&quot;</span> <span class="ot">=</span> <span class="st">&quot;Other&quot;</span>, <span class="st">&quot;4&quot;</span> <span class="ot">=</span> <span class="st">&quot;Unknown&quot;</span>)</span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a>spss_frequencies <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">White =</span> <span class="dv">4</span>, <span class="at">Black =</span> <span class="dv">2</span>, <span class="at">Other =</span> <span class="dv">1</span>, <span class="at">Unknown =</span> <span class="dv">1</span>)</span>
+<span id="cb11-5"><a href="#cb11-5" tabindex="-1"></a>chk <span class="ot">&lt;-</span> <span class="fu">transfer_verify</span>(arrived, spss_frequencies, <span class="at">code_book =</span> code_book)</span>
+<span id="cb11-6"><a href="#cb11-6" tabindex="-1"></a>chk<span class="sc">$</span>ok</span>
+<span id="cb11-7"><a href="#cb11-7" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb11-8"><a href="#cb11-8" tabindex="-1"></a><span class="fu">levels</span>(chk<span class="sc">$</span>decoded)</span>
+<span id="cb11-9"><a href="#cb11-9" tabindex="-1"></a><span class="co">#&gt; [1] &quot;White&quot;   &quot;Black&quot;   &quot;Other&quot;   &quot;Unknown&quot;</span></span></code></pre></div>
+<p>The levels are in code order, not alphabetical order, because the
+code book says so. Now the idiom that produced the documented rotation:
+the labels, in the order R sorts them, assigned to the codes by
+position.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>f <span class="ot">&lt;-</span> <span class="fu">factor</span>(<span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>, <span class="dv">1</span>))</span>
+<span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a><span class="fu">levels</span>(f) <span class="ot">&lt;-</span> <span class="fu">sort</span>(<span class="fu">unname</span>(code_book))</span>
+<span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a><span class="fu">data.frame</span>(<span class="at">code =</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>, <span class="dv">1</span>), <span class="at">became =</span> <span class="fu">as.character</span>(f))</span>
+<span id="cb12-4"><a href="#cb12-4" tabindex="-1"></a><span class="co">#&gt;   code  became</span></span>
+<span id="cb12-5"><a href="#cb12-5" tabindex="-1"></a><span class="co">#&gt; 1    1   Black</span></span>
+<span id="cb12-6"><a href="#cb12-6" tabindex="-1"></a><span class="co">#&gt; 2    2   Other</span></span>
+<span id="cb12-7"><a href="#cb12-7" tabindex="-1"></a><span class="co">#&gt; 3    3 Unknown</span></span>
+<span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="co">#&gt; 4    4   White</span></span>
+<span id="cb12-9"><a href="#cb12-9" tabindex="-1"></a><span class="co">#&gt; 5    1   Black</span></span></code></pre></div>
+<p>Code 1 (White) became “Black”, 2 (Black) became “Other”, 3 (Other)
+became “Unknown”, 4 (Unknown) became “White”: the four-way rotation in
+the correction notice, from one line. <code>relabel()</code> refuses
+that line:</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a><span class="fu">relabel</span>(<span class="fu">factor</span>(<span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>, <span class="dv">1</span>)), <span class="fu">sort</span>(<span class="fu">unname</span>(code_book)))</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a><span class="co">#&gt; ! relabel: `mapping` must be NAMED (old label = new label). Assigning labels by POSITION is how four race codes were rotated in a published analysis (OHRC correction, 26 January 2023): the labels were in alphabetical order, the codes were not.</span></span>
+<span id="cb13-4"><a href="#cb13-4" tabindex="-1"></a><span class="fu">relabel</span>(<span class="fu">factor</span>(<span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>, <span class="dv">1</span>)), code_book)</span>
+<span id="cb13-5"><a href="#cb13-5" tabindex="-1"></a><span class="co">#&gt; [1] White   Black   Other   Unknown White  </span></span>
+<span id="cb13-6"><a href="#cb13-6" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)</span></span>
+<span id="cb13-7"><a href="#cb13-7" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)$mapping</span></span>
+<span id="cb13-8"><a href="#cb13-8" tabindex="-1"></a><span class="co">#&gt;       1       2       3       4 </span></span>
+<span id="cb13-9"><a href="#cb13-9" tabindex="-1"></a><span class="co">#&gt;   White   Black   Other Unknown </span></span>
+<span id="cb13-10"><a href="#cb13-10" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb13-11"><a href="#cb13-11" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)$kept</span></span>
+<span id="cb13-12"><a href="#cb13-12" tabindex="-1"></a><span class="co">#&gt; character(0)</span></span>
+<span id="cb13-13"><a href="#cb13-13" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb13-14"><a href="#cb13-14" tabindex="-1"></a><span class="co">#&gt; attr(,&quot;recode_audit&quot;)$checksum</span></span>
+<span id="cb13-15"><a href="#cb13-15" tabindex="-1"></a><span class="co">#&gt; [1] 3d394c3d6f779a313f8fbeecaf5bc4f104738096c07f03c48ab68d5eb52e8de4</span></span>
+<span id="cb13-16"><a href="#cb13-16" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb13-17"><a href="#cb13-17" tabindex="-1"></a><span class="co">#&gt; Levels: White Black Other Unknown</span></span></code></pre></div>
+<p>And <code>transfer_verify()</code> refuses the result if it somehow
+got past that, because the frequency table no longer matches by
+label:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a><span class="fu">transfer_verify</span>(<span class="fu">as.character</span>(f), <span class="fu">c</span>(<span class="at">White =</span> <span class="dv">2</span>, <span class="at">Black =</span> <span class="dv">1</span>, <span class="at">Other =</span> <span class="dv">1</span>, <span class="at">Unknown =</span> <span class="dv">1</span>))</span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="co">#&gt; ! verify_marginals: recoded counts do not match the published counts. White: observed 1, published 2; Black: observed 2, published 1; Other: observed 1, published 1; Unknown: observed 1, published 1. The observed counts match the published ones if the labels are permuted (White -&gt; Black, Black -&gt; White): the labels are attached to the wrong groups.</span></span></code></pre></div>
+</div>
+<div id="exonerating-the-software-or-not" class="section level2">
+<h2>Exonerating the software, or not</h2>
+<p>When a permutation is blamed on the transfer, the question to ask is
+which deterministic step, applied to the code book, yields exactly the
+permutation observed. <code>relabel_forensics()</code> tries the known
+ones.</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>observed <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">White =</span> <span class="st">&quot;Black&quot;</span>, <span class="at">Black =</span> <span class="st">&quot;Other&quot;</span>, <span class="at">Other =</span> <span class="st">&quot;Unknown&quot;</span>, <span class="at">Unknown =</span> <span class="st">&quot;White&quot;</span>)</span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a><span class="fu">relabel_forensics</span>(code_book, observed)</span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a><span class="co">#&gt; Mechanism(s) reproducing the observed permutation:</span></span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a><span class="co">#&gt;   * labels sorted alphabetically, assigned by code position</span></span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a><span class="co">#&gt;       White -&gt; Black, Black -&gt; Other, Other -&gt; Unknown, Unknown -&gt; White</span></span>
+<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a><span class="co">#&gt;   * labels sorted case-insensitively, assigned by code position</span></span>
+<span id="cb15-7"><a href="#cb15-7" tabindex="-1"></a><span class="co">#&gt;       White -&gt; Black, Black -&gt; Other, Other -&gt; Unknown, Unknown -&gt; White</span></span>
+<span id="cb15-8"><a href="#cb15-8" tabindex="-1"></a><span class="co">#&gt;   * rotation by 1 position(s)</span></span>
+<span id="cb15-9"><a href="#cb15-9" tabindex="-1"></a><span class="co">#&gt;       White -&gt; Black, Black -&gt; Other, Other -&gt; Unknown, Unknown -&gt; White</span></span>
+<span id="cb15-10"><a href="#cb15-10" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb15-11"><a href="#cb15-11" tabindex="-1"></a><span class="co">#&gt; The observed permutation is reproduced EXACTLY by: labels sorted alphabetically, assigned by code position; labels sorted case-insensitively, assigned by code position; rotation by 1 position(s). No import routine (haven, foreign, pandas, pyreadstat) reorders value labels; each carries them keyed by code. A transfer fault does not select the sort order of the labels. The step that did this was a positional relabel in the analysis, and it is reproducible from the code book alone.</span></span></code></pre></div>
+<p>No import routine in R or Python (haven, foreign, pandas, pyreadstat)
+sorts value labels onto codes; each keeps them keyed by code. A
+permutation that coincides with the alphabetical order of the labels was
+made by a positional relabel in the analysis, and anyone with the code
+book can reproduce it. A permutation that no mechanism reproduces points
+at a merge, a manual edit, or the file, and the function says so instead
+of guessing.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

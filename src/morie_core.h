@@ -61,11 +61,43 @@ inline const double kBig = 1e12;
 
 // --- summary statistics ------------------------------------------------------
 
+// Base R's algorithm: an extended-precision sum, then one corrective
+// pass over the residuals, so the result agrees with mean() to the last
+// bit on ordinary data. If the sum overflows although every input is
+// finite (rep(1e308, 3) on a platform whose long double is 64-bit), a
+// running mean, which cannot overflow, is used instead.
+// Running mean: cannot overflow on finite input. The update is written
+// as a/k - m/k rather than (a - m)/k because a - m itself overflows for
+// inputs of opposite sign near the largest double; each term here is
+// bounded by the largest |a|. mean() falls back to it when the
+// extended-precision sum overflows, which only happens where long double
+// is 64-bit, so it is also reachable directly (through
+// rmbl_mean_running()) and tested on every platform.
+inline double mean_running(const double *a, std::size_t n) {
+    if (n == 0) return std::nan("");
+    double m = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double k = static_cast<double>(i + 1);
+        m += a[i] / k - m / k;
+    }
+    return m;
+}
+
 inline double mean(const double *a, std::size_t n) {
     if (n == 0) return std::nan("");
-    double s = 0.0;
+    long double s = 0.0L;
     for (std::size_t i = 0; i < n; ++i) s += a[i];
-    return s / static_cast<double>(n);
+    s /= static_cast<long double>(n);
+    if (std::isfinite(static_cast<double>(s))) {
+        long double t = 0.0L;
+        for (std::size_t i = 0; i < n; ++i) t += (a[i] - s);
+        s += t / static_cast<long double>(n);
+        return static_cast<double>(s);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!std::isfinite(a[i])) return static_cast<double>(s);
+    }
+    return mean_running(a, n);
 }
 
 inline double variance(const double *a, std::size_t n, int ddof) {
@@ -83,22 +115,27 @@ inline double stddev(const double *a, std::size_t n, int ddof) {
     return std::sqrt(variance(a, n, ddof));
 }
 
+// Centred two-pass form. The one-pass n*sxy - sx*sy expansion cancels
+// catastrophically once the spread is small relative to the mean (wrong at
+// the 2nd decimal for CV 1e-7, NaN by 1e-8, |r| > 1 by 1e-15); the centred
+// sums are exact to rounding, and the result is clamped to [-1, 1] so that
+// rounding can never report a correlation outside the definition.
 inline double cor_pearson(const double *x, const double *y, std::size_t n) {
     if (n < 2) return std::nan("");
-    double sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0, sxy = 0.0;
+    const double mx = mean(x, n), my = mean(y, n);
+    if (!std::isfinite(mx) || !std::isfinite(my)) return std::nan("");
+    long double sxy = 0.0L, sxx = 0.0L, syy = 0.0L;
     for (std::size_t i = 0; i < n; ++i) {
-        const double a = x[i], b = y[i];
-        sx += a;
-        sy += b;
+        const long double a = x[i] - mx, b = y[i] - my;
+        sxy += a * b;
         sxx += a * a;
         syy += b * b;
-        sxy += a * b;
     }
-    const double dn = static_cast<double>(n);
-    const double num = dn * sxy - sx * sy;
-    const double den_sq = (dn * sxx - sx * sx) * (dn * syy - sy * sy);
-    if (den_sq <= 0.0) return std::nan("");
-    return num / std::sqrt(den_sq);
+    if (sxx <= 0.0L || syy <= 0.0L) return std::nan("");
+    long double r = sxy / std::sqrt(sxx * syy);
+    if (r > 1.0L) r = 1.0L;
+    if (r < -1.0L) r = -1.0L;
+    return static_cast<double>(r);
 }
 
 inline double euclid_dist(const double *a, const double *b, std::size_t n) {
@@ -159,11 +196,11 @@ inline void bootstrap_mean(const double *a, std::size_t n, std::size_t B,
     std::mt19937_64 rng(seed);
     std::uniform_int_distribution<std::size_t> idx(0, n - 1);
     for (std::size_t b = 0; b < B; ++b) {
-        double s = 0.0;
+        long double s = 0.0L;
         for (std::size_t i = 0; i < n; ++i) {
             s += a[idx(rng)];
         }
-        out[b] = s / static_cast<double>(n);
+        out[b] = static_cast<double>(s / static_cast<long double>(n));
     }
 }
 
