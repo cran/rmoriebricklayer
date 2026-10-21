@@ -5,17 +5,33 @@
 
 #' Multivariate outliers by Mahalanobis distance
 #'
+#' @description
+#' Finds the rows of a numeric table that are unusual as a combination of
+#' values, not just on one variable at a time, and gives each row a
+#' distance, a p-value and an outlier flag. Use it before modelling to find
+#' records that are probably data-entry or linkage errors.
+#'
+#' @details
 #' Ranks rows by how far they sit from the centre of the data ONCE THE
 #' CORRELATIONS ARE ACCOUNTED FOR, which is what a per-column check cannot
 #' do: a row can be unremarkable on every variable separately and still be
 #' impossible jointly -- a person 1.5 m tall weighing 140 kg is inside both
 #' marginal ranges and outside the cloud.
 #'
+#' With centre \eqn{c} and scatter matrix \eqn{S}, the squared distance of
+#' row \eqn{x} is \deqn{d^2 = (x - c)^\top S^{-1} (x - c).}
 #' Under multivariate normality the squared distance is chi-square on
-#' `p` degrees of freedom, which gives the p-value and the cut-off.
+#' `p` degrees of freedom (the number of numeric columns), which gives the
+#' p-value and the cut-off.
 #'
-#' `robust = TRUE` centres on the coordinate-wise median and scales by
-#' a MAD-based covariance instead of the mean and sample covariance. This
+#' `robust = TRUE` centres each column on its median and scales it by its
+#' MAD (\code{cmad()}, the 1.4826-scaled median absolute deviation;
+#' a column whose MAD is zero falls back to its standard deviation), then
+#' takes \eqn{S} as the sample covariance of the standardised data.
+#' `robust = FALSE` uses the column means and the sample covariance. The
+#' robust centre and scales resist outliers; the correlation shape in
+#' \eqn{S} is still a classical estimate, so this is not a high-breakdown
+#' estimator such as the minimum covariance determinant. The choice
 #' matters more than it sounds: outliers inflate the very covariance used
 #' to judge them, so with several of them the classical distance hides
 #' exactly the rows it is meant to find (the masking effect).
@@ -24,7 +40,12 @@
 #' is undefined there, and flooring the covariance's eigenvalues to make it
 #' invertible would return numbers governed by the floor rather than by the
 #' data. Drop the redundant column first --
-#' [top_correlations()] will identify it.
+#' [topcors()] will identify it.
+#'
+#' Errors: `data` neither a data frame nor a matrix; no numeric columns;
+#' no more complete rows than columns; collinear columns (smallest
+#' eigenvalue of \eqn{S} at most \eqn{10^{-8}} times the largest); `alpha`
+#' outside (0, 1). A progress indicator is shown in an interactive session.
 #'
 #' @param data A data frame or numeric matrix; non-numeric
 #' columns are dropped. Rows with any missing value are skipped, and
@@ -36,55 +57,71 @@
 #' `TRUE`) .
 #' @return A data frame of class `bricklayer_outliers` with
 #' `row`, `distance` (the square root of the squared Mahalanobis
-#' distance), `p_value` and `outlier`, ordered by descending
-#' distance.
+#' distance), `p_value`, `logpvalue` (the log of the chi-square upper
+#' tail, which keeps its information where `p_value` underflows to 0) and
+#' `outlier` (logical), ordered by descending distance, with skipped rows
+#' (`NA` distance) last. `row` is the row number in `data`. The attributes
+#' `robust` and `alpha` record the settings. The print method shows the
+#' number of flagged rows and the ten most distant.
 #' @references Mahalanobis PC (1936). On the generalised distance in
 #' statistics. *Proceedings of the National Institute of Sciences of
 #' India* 2(1), 49--55.
 #' @seealso
-#' [core_tukey_fences()] for the per-column
-#' version, [rule_within_n_mads()] to turn
+#' [ctkyfnc()] for the per-column
+#' version, [rulemad()] to turn
 #' it into a validation rule.
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' set.seed(1)
 #' n <- 200
 #' df <- data.frame(height = stats::rnorm(n, 170, 10))
 #' df$weight <- df$height * 0.5 + stats::rnorm(n, 0, 5)
 #'
-#' # A row that is ordinary on each variable but impossible jointly.
-#' df[1, ] <- list(height = 150, weight = 140)
+#' # A row that is ordinary on each variable but unlikely jointly:
+#' # short and heavy.
+#' df[1, ] <- list(height = 155, weight = 100)
 #'
-#' out <- mahalanobis_outliers(df)
+#' out <- mahaoutl(df)
 #' head(out, 3)
 #'
-#' # It is flagged, even though neither value is a marginal outlier.
+#' # It is flagged, although both values lie inside the other rows' ranges.
 #' out$row[1] == 1
-#' range(df$height)
-#' range(df$weight)
+#' range(df$height[-1])
+#' range(df$weight[-1])
 #'
-#' # The classical version can be fooled by the outliers it should find.
-#' mahalanobis_outliers(df, robust = FALSE)$distance[1] <
-#'   mahalanobis_outliers(df, robust = TRUE)$distance[1]
+#' # A cluster of bad rows drags the mean toward itself; the median and
+#' # MAD move less, so the robust distance of such a row is the larger.
+#' bad <- df
+#' bad[2:21, ] <- list(height = 150, weight = 110)
+#' dclassical <- mahaoutl(bad, robust = FALSE)
+#' drobust <- mahaoutl(bad, robust = TRUE)
+#' dclassical$distance[dclassical$row == 2] < drobust$distance[drobust$row == 2]
 #'
 #' # A duplicated column has no distance defined, and is refused.
 #' dup <- df
 #' dup$height2 <- dup$height
-#' try(mahalanobis_outliers(dup))
+#' try(mahaoutl(dup))
 #' @export
-mahalanobis_outliers <- function(data, alpha = 0.001, robust = TRUE) {
+#' @srrstats {G2.7} Accepts a data frame or a numeric matrix (a matrix goes through as.data.frame); subclasses of
+#'   data.frame are accepted by inheritance.
+#' @srrstats {G3.1} robust = TRUE (median/MAD) or FALSE (means and sample covariance); mtchdid also has covm =
+#'   "pooled"/"full".
+#' @srrstats {G3.1a} Both options are shown in @examples and in the missingness-and-outliers.Rmd and describe.Rmd
+#'   vignettes.
+#' @srrstats {G5.8d} No more complete rows than columns and collinear columns are refused (test-eda.R:270,
+#'   test-edge-cases.R:121).
+mahaoutl <- function(data, alpha = 0.001, robust = TRUE) {
   if (is.matrix(data)) data <- as.data.frame(data)
   if (!is.data.frame(data)) {
-    stop("`data` must be a data frame or a numeric matrix", call. = FALSE)
+    stop("mahaoutl: `data` must be a data frame or a numeric matrix", call. = FALSE)
   }
   num <- vapply(data, is.numeric, logical(1))
   if (!any(num)) stop("`data` has no numeric columns", call. = FALSE)
   X <- as.matrix(data[, num, drop = FALSE])
   storage.mode(X) <- "double"
   p <- ncol(X)
-  if (p < 1L) stop("`data` has no numeric columns", call. = FALSE)
-  alpha <- as.numeric(alpha)
+  alpha <- .rmbl_num(alpha, "alpha")
   if (length(alpha) != 1L || is.na(alpha) || alpha <= 0 || alpha >= 1) {
-    stop("`alpha` must be a single value strictly inside (0, 1)",
+    stop("mahaoutl: `alpha` must be a single value strictly inside (0, 1)",
          call. = FALSE)
   }
   ok <- stats::complete.cases(X)
@@ -93,10 +130,13 @@ mahalanobis_outliers <- function(data, alpha = 0.001, robust = TRUE) {
          call. = FALSE)
   }
   Xc <- X[ok, , drop = FALSE]
+  pg <- blprog("Mahalanobis distances", 0)
+  on.exit(pg$done(), add = TRUE)
+  pg$update(info = sprintf("centring %s rows", format(nrow(Xc), big.mark = ",")))
 
   if (isTRUE(robust)) {
-    centre <- apply(Xc, 2L, core_median)
-    scales <- apply(Xc, 2L, core_mad)
+    centre <- apply(Xc, 2L, cmed)
+    scales <- apply(Xc, 2L, cmad)
     # A zero MAD means no robust spread to divide by; fall back to the
     # classical scale for that column rather than dividing by zero.
     cls <- apply(Xc, 2L, stats::sd)
@@ -104,43 +144,48 @@ mahalanobis_outliers <- function(data, alpha = 0.001, robust = TRUE) {
     Z <- sweep(sweep(Xc, 2L, centre, "-"), 2L, scales, "/")
     # correlation of the robustly standardised data, so the shape comes
     # from the bulk rather than from the tails
-    S <- core_cov(Z)
+    S <- ccovm(Z)
   } else {
     centre <- colMeans(Xc)
-    scales <- rep(1, p)
-    Z <- sweep(Xc, 2L, centre, "-")
-    S <- core_cov(Z)
+    # the distance is affine invariant, so standardising by the classical
+    # scale changes nothing except the conditioning: columns of wildly
+    # different scale (1e160 against 1) are no longer read as collinear
+    # the range, not the standard deviation: squaring 1e160 overflows
+    scales <- apply(Xc, 2L, function(v) diff(range(v)))
+    scales <- ifelse(is.finite(scales) & scales > 0, scales, 1)
+    Z <- sweep(sweep(Xc, 2L, centre, "-"), 2L, scales, "/")
+    S <- ccovm(Z)
   }
   # Check the rank BEFORE repairing the covariance. .rmbl_make_pd floors
   # the eigenvalues, which would make an exactly singular S invertible
   # and hand back distances that are an artifact of the floor rather
   # than a property of the data. Collinear columns have no Mahalanobis
   # distance, and saying so beats inventing one.
+  pg$update(info = "covariance")
   ev <- tryCatch(eigen(S, symmetric = TRUE, only.values = TRUE)$values,
                  error = function(e) NULL)
   if (is.null(ev) ||
       min(ev) <= 1e-8 * max(abs(ev), .Machine$double.eps)) {
     stop("the columns are collinear, so no Mahalanobis distance is ",
-         "defined. Drop the redundant column(s) -- drop_constant() and ",
-         "top_correlations() will find them.", call. = FALSE)
+         "defined. Drop the redundant column(s) -- drpconst() and ",
+         "topcors() will find them.", call. = FALSE)
   }
-  S <- .rmbl_make_pd(S, 1e-8)
-  S_inv <- tryCatch(solve(S), error = function(e) NULL)
-  if (is.null(S_inv)) {
-    stop("the covariance of the supplied columns could not be inverted",
-         call. = FALSE)
-  }
+  S <- .rmbl_make_pd(S, 1e-8)   # positive definite by construction, so invertible
+  S_inv <- solve(S)
+  pg$update(info = "distances")
   d2 <- rowSums((Z %*% S_inv) * Z)
 
   out <- data.frame(row = which(ok), distance = sqrt(d2),
-                    p_value = 1 - core_gamma_cdf(p / 2, d2 / 2),
+                    p_value = stats::pchisq(d2, p, lower.tail = FALSE),
+                    logpvalue = stats::pchisq(d2, p, lower.tail = FALSE,
+                                                log.p = TRUE),
                     stringsAsFactors = FALSE)
   out$outlier <- out$p_value < alpha
   skipped <- which(!ok)
   if (length(skipped) > 0L) {
     out <- rbind(out, data.frame(row = skipped, distance = NA_real_,
-                                 p_value = NA_real_, outlier = NA,
-                                 stringsAsFactors = FALSE))
+                                 p_value = NA_real_, logpvalue = NA_real_,
+                                 outlier = NA, stringsAsFactors = FALSE))
   }
   out <- out[order(-out$distance, na.last = TRUE), , drop = FALSE]
   rownames(out) <- NULL
@@ -180,6 +225,7 @@ print.bricklayer_outliers <- function(x, ...) {
 
 #' Runs of consecutive missing values
 #'
+#' @description
 #' Finds the maximal stretches of consecutive `NA` in each column,
 #' with where each begins and how long it is.
 #'
@@ -190,17 +236,27 @@ print.bricklayer_outliers <- function(x, ...) {
 #' to fetch, or a period was never collected; scattered gaps say individual
 #' records failed. The rate cannot distinguish them.
 #'
-#' @param data A data frame.
-#' @param min_run Report only runs at least this long
-#' (default 2, since a run of 1 is an isolated gap).
-#' @return A data frame of class `bricklayer_runs` with `column`,
-#' `start`, `end` and `length`, longest first. Zero rows
+#' @details
+#' Each column's missingness indicator \code{is.na(x)} is run-length
+#' encoded with \code{rle()}; every run of `TRUE` with length at least
+#' `minrun` is reported. Rows are taken in their current order, so sort
+#' the data by time (or by download order) first. A list column counts an
+#' element as missing only when \code{is.na()} says so. Errors: `data` not a
+#' data frame or without columns, or with duplicated or empty names;
+#' `minrun` not a positive whole number.
+#'
+#' @param data A data frame, in the row order that carries meaning.
+#' @param minrun Whole number, default 2: report only runs at least this
+#' long (a run of 1 is an isolated gap).
+#' @return A data frame of class `bricklayer_runs` with `column`
+#' (character), `start` and `end` (integer row numbers, inclusive) and
+#' `length` (integer), longest first and then by column name. Zero rows
 #' when there are no qualifying runs.
 #' @seealso
-#' [missingness_pattern()] for which
+#' [misspat()] for which
 #' columns are missing together,
-#' [missingness_summary()] for the rates.
-#' @examples
+#' [misssmry()] for the rates.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # One long outage and two isolated gaps, with the same total count.
 #' df <- data.frame(
 #'   outage = c(1, 2, NA, NA, NA, NA, 7, 8),
@@ -208,20 +264,23 @@ print.bricklayer_outliers <- function(x, ...) {
 #' )
 #' sum(is.na(df$outage)) == sum(is.na(df$scattered))
 #'
-#' missing_runs(df)
+#' missruns(df)
 #'
 #' # Isolated gaps too, by lowering the threshold.
-#' missing_runs(df, min_run = 1)
+#' missruns(df, minrun = 1)
 #'
 #' # A complete column has no runs.
-#' missing_runs(data.frame(x = 1:5))
+#' missruns(data.frame(x = 1:5))
+#'
+#' try(missruns(df, minrun = 0))
 #' @export
-missing_runs <- function(data, min_run = 2L) {
-  if (!is.data.frame(data)) stop("`data` must be a data frame", call. = FALSE)
-  if (ncol(data) == 0L) stop("`data` has no columns", call. = FALSE)
-  min_run <- as.integer(min_run)
-  if (length(min_run) != 1L || is.na(min_run) || min_run < 1L) {
-    stop("`min_run` must be a single positive integer", call. = FALSE)
+missruns <- function(data, minrun = 2L) {
+  if (!is.data.frame(data)) stop("missruns: `data` must be a data frame", call. = FALSE)
+  .rmbl_df_names(data)
+  if (ncol(data) == 0L) stop("missruns: `data` has no columns", call. = FALSE)
+  minrun <- .rmbl_num(minrun, "minrun", integer = TRUE)
+  if (length(minrun) != 1L || is.na(minrun) || minrun < 1L) {
+    stop("`minrun` must be a single positive integer", call. = FALSE)
   }
   rows <- list()
   for (nm in names(data)) {
@@ -230,7 +289,7 @@ missing_runs <- function(data, min_run = 2L) {
     r <- rle(na)
     ends <- cumsum(r$lengths)
     starts <- ends - r$lengths + 1L
-    sel <- r$values & r$lengths >= min_run
+    sel <- r$values & r$lengths >= minrun
     if (!any(sel)) next
     rows[[length(rows) + 1L]] <- data.frame(
       column = nm, start = starts[sel], end = ends[sel],
@@ -264,6 +323,7 @@ print.bricklayer_runs <- function(x, ...) {
 
 #' Text map of where the missing values are
 #'
+#' @description
 #' Draws the missingness of a whole table as a grid, one character per cell
 #' block -- a console counterpart of `visdat::vis_miss()` that needs
 #' no graphics device, so it works over SSH, in a log, and inside a
@@ -275,32 +335,51 @@ print.bricklayer_runs <- function(x, ...) {
 #' are all instantly recognisable shapes that a column of percentages is
 #' not.
 #'
+#' @details
+#' The rows are split into at most `height` consecutive blocks of nearly
+#' equal size; each map line is one block, labelled with its first row
+#' number, and each map column is one column of `data`. A cell's shade is
+#' its block's proportion missing rounded to the nearest quarter: blank (0),
+#' light, medium, dark, full (1). Where the console cannot show Unicode the
+#' shades are \code{" .-+#"}. Column names are written vertically above the
+#' map, cut to `width` characters. A table with no rows prints
+#' \code{"(no rows)"}. Errors: `data` not a data frame or without columns;
+#' `height` not a positive whole number.
+#'
 #' @param data A data frame.
-#' @param height Maximum rows in the map (default 20).
-#' @param width Maximum characters per column label (default
-#' 12).
-#' @return A character vector of the map's lines, invisibly; printed as a
-#' side effect.
+#' @param height Whole number, default 20: the maximum number of lines
+#' (row blocks) in the map.
+#' @param width Whole number, default 12: column names are cut to this many
+#' characters in the vertical legend.
+#' @return A character vector of the map's lines, invisibly; the map is
+#' printed with \code{cat()} as a side effect.
 #' @seealso
-#' [missingness_pattern()],
-#' [missing_runs()]
-#' @examples
+#' [misspat()],
+#' [missruns()]
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' set.seed(1)
 #' df <- data.frame(
 #'   complete = 1:100,
 #'   block = c(rep(NA, 30), 31:100),
 #'   scattered = ifelse(stats::runif(100) < 0.3, NA, 1),
-#'   mostly_gone = c(1:10, rep(NA, 90))
+#'   mostlygone = c(1:10, rep(NA, 90))
 #' )
-#' missingness_map(df)
+#' missgrid(df)
+#'
+#' # a coarser map with short labels
+#' missgrid(df, height = 5, width = 4)
+#'
+#' try(missgrid(df, height = 0))
 #' @export
-missingness_map <- function(data, height = 20L, width = 12L) {
-  if (!is.data.frame(data)) stop("`data` must be a data frame", call. = FALSE)
-  if (ncol(data) == 0L) stop("`data` has no columns", call. = FALSE)
-  height <- as.integer(height)
+missgrid <- function(data, height = 20L, width = 12L) {
+  if (!is.data.frame(data)) stop("missgrid: `data` must be a data frame", call. = FALSE)
+  .rmbl_df_names(data)
+  if (ncol(data) == 0L) stop("missgrid: `data` has no columns", call. = FALSE)
+  height <- .rmbl_num(height, "height", integer = TRUE)
   if (length(height) != 1L || is.na(height) || height < 1L) {
     stop("`height` must be a single positive integer", call. = FALSE)
   }
+  width <- .rmbl_scalar(width, "width", 1, 10000, integer = TRUE)
   n <- nrow(data)
   shades <- if (.rmbl_unicode_ok()) {
     c(" ", "\u2591", "\u2592", "\u2593", "\u2588")

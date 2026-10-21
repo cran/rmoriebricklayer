@@ -6,9 +6,16 @@
 
 #' Cryptographically strong random bytes
 #'
-#' Reads the operating system's own random source -- `/dev/urandom` on
-#' Unix and macOS, `RtlGenRandom` on Windows -- rather than R's
-#' Mersenne Twister.
+#' @description
+#' Returns \code{n} random bytes that are suitable for keys, salts and
+#' nonces. Use it whenever a value must be unguessable; use
+#' \code{set.seed()} and \code{runif()} for simulations, where
+#' reproducibility is the point.
+#'
+#' @details
+#' Reads the operating system's own random source rather than R's
+#' Mersenne Twister: `/dev/urandom` on Unix and macOS, `RtlGenRandom` on
+#' Windows.
 #'
 #' This distinction matters for anything that becomes a key.
 #' [set.seed()] makes R's generator reproducible BY
@@ -20,53 +27,68 @@
 #' to a weaker generator, because a silent downgrade in a key is worse than
 #' an error.
 #'
-#' @param n Number of bytes (1 to 1048576).
-#' @return A raw vector of length `n`.
+#' Errors: \code{n} not a single whole number from 1 to 1,048,576 (1 MiB);
+#' no readable operating-system source.
+#'
+#' @param n Whole number from 1 to 1048576: the number of bytes.
+#' @return A raw vector of length `n`. Print it as hex with
+#' \code{paste(format(x), collapse = "")}.
 #' @seealso
-#' [derive_key()] to stretch a passphrase instead,
-#' [pqc_keygen()] which uses this for its seeds.
-#' @examples
-#' random_bytes(8)
+#' [drvkey()] to stretch a passphrase instead,
+#' [pqckg()] which uses this for its seeds.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#' rndbytes(8)
 #'
 #' # Independent between calls, unlike a seeded generator.
-#' identical(random_bytes(16), random_bytes(16))
+#' identical(rndbytes(16), rndbytes(16))
 #'
 #' # R's own stream is not consumed, so a seeded analysis is unaffected.
 #' set.seed(1)
 #' a <- stats::runif(1)
 #' set.seed(1)
-#' invisible(random_bytes(32))
+#' invisible(rndbytes(32))
 #' identical(stats::runif(1), a)
 #'
 #' # As hex, for a seed argument.
-#' paste(format(random_bytes(4)), collapse = "")
+#' paste(format(rndbytes(4)), collapse = "")
+#'
+#' try(rndbytes(0))
 #' @export
-random_bytes <- function(n) {
-  n <- as.integer(n)
+rndbytes <- function(n) {
+  n <- .rmbl_num(n, "n", integer = TRUE)
   if (length(n) != 1L || is.na(n) || n < 1L || n > 1048576L) {
     stop("`n` must be a single integer between 1 and 1048576", call. = FALSE)
   }
-  out <- .Call(C_rmbl_os_random, n)
+  out <- .rmbl_os_random(n)
   if (is.null(out)) {
     stop("no operating-system random source could be read. Refusing to ",
-         "fall back to R's generator, which is reproducible by design ",
-         "and unsuitable for a key: supply key material yourself.",
-         call. = FALSE)
+      "fall back to R's generator, which is reproducible by design ",
+      "and unsuitable for a key: supply key material yourself.",
+      call. = FALSE
+    )
   }
   out
 }
 
 #' Derive a key from a passphrase
 #'
+#' @description
+#' Turns a passphrase that a person can remember into a fixed-length key
+#' (32 bytes by default) for signing or encryption, in a way that makes
+#' guessing the passphrase slow. The same passphrase, salt and iteration
+#' count always give the same key, so the key need not be stored: it can be
+#' derived again when needed.
+#'
+#' @details
 #' PBKDF2-HMAC-SHA256 (RFC 8018): stretches a passphrase into a key of full
 #' width by iterating a keyed hash, so guessing the passphrase costs
-#' `iterations` times more than a single hash would.
+#' `iter` times more than a single hash would.
 #'
 #' The `salt` must be UNIQUE per key and need not be secret. Its job
 #' is to make precomputation useless: without one, a single table of common
 #' passphrases attacks every key at once.
 #'
-#' `iterations` is the cost knob. The default 100,000 is a reasonable
+#' `iter` is the cost knob. The default 100,000 is a reasonable
 #' 2020s floor for an interactive use; raise it for anything valuable, and
 #' record the value you used, since verification must repeat it exactly.
 #'
@@ -76,91 +98,125 @@ random_bytes <- function(n) {
 #' chose. PBKDF2 is here because it needs nothing beyond the bundled
 #' SHA-256, so it works wherever this package works.
 #'
-#' @param passphrase Passphrase, as a length-1 character
+#' The derivation runs in compiled code; at the default 100,000 iterations
+#' it takes a fraction of a second, and a busy indicator is shown in an
+#' interactive session. Errors: a passphrase or salt that is not a single
+#' non-missing string or a raw vector; `iter` below 1; `length`
+#' outside 1 to 1024.
+#'
+#' @param pass Passphrase, as a length-1 character
 #' or raw vector.
 #' @param salt Unique, non-secret salt (length-1 character or
-#' raw). Use [random_bytes()] to make one, and
+#' raw). Use [rndbytes()] to make one, and
 #' store it beside the key.
-#' @param iterations Iteration count (default 100000,
-#' minimum 1).
-#' @param length Derived key length in bytes (default 32).
-#' @return A length-1 character vector: the key as lowercase hex.
+#' @param iter Whole number, default 100000 (minimum 1): the PBKDF2
+#' iteration count. Verification must use the same value.
+#' @param length Whole number from 1 to 1024, default 32: the derived key
+#' length in bytes.
+#' @return A length-1 character vector: the key as lowercase hex
+#' (\code{2 * length} characters).
 #' @references Moriarty K, Kaliski B, Rusch A (2017). PKCS #5:
 #' Password-Based Cryptography Specification Version 2.1. RFC 8018.
 #'   \doi{10.17487/RFC8018}
 #' @seealso
-#' [random_bytes()],
-#' [core_hmac_sha256()],
-#' [capsule_sign()]
-#' @examples
+#' [rndbytes()],
+#' [chmac()],
+#' [cpssign()]
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # The published PBKDF2-HMAC-SHA256 vector: "password", "salt", 1 round.
-#' derive_key("password", "salt", iterations = 1)
+#' drvkey("password", "salt", iter = 1)
 #'
 #' # Deterministic, so verification can repeat it.
-#' identical(derive_key("pw", "s", 1000), derive_key("pw", "s", 1000))
+#' identical(drvkey("pw", "s", 1000), drvkey("pw", "s", 1000))
 #'
 #' # The salt, the passphrase and the iteration count all change the key.
-#' derive_key("pw", "salt-a", 1000) == derive_key("pw", "salt-b", 1000)
-#' derive_key("pw", "s", 1000) == derive_key("pw", "s", 2000)
+#' drvkey("pw", "salt-a", 1000) == drvkey("pw", "salt-b", 1000)
+#' drvkey("pw", "s", 1000) == drvkey("pw", "s", 2000)
 #'
 #' # Use it to sign a manifest from a passphrase rather than raw bytes.
-#' salt <- paste(format(random_bytes(16)), collapse = "")
-#' key <- derive_key("correct horse battery staple", salt)
-#' sig <- capsule_sign("manifest-digest", key, scheme = "hmac")
-#' capsule_verify("manifest-digest", sig, key)
+#' salt <- paste(format(rndbytes(16)), collapse = "")
+#' key <- drvkey("purple otter lantern", salt)
+#' sig <- cpssign("manifest-digest", key, scheme = "hmac")
+#' cpsvrf("manifest-digest", sig, key)
 #'
 #' # A longer key is a prefix-consistent extension of a shorter one.
-#' identical(substring(derive_key("pw", "s", 10, length = 64), 1, 64),
-#'           derive_key("pw", "s", 10, length = 32))
+#' identical(
+#'   substring(drvkey("pw", "s", 10, length = 64), 1, 64),
+#'   drvkey("pw", "s", 10, length = 32)
+#' )
+#'
+#' # a vector of passphrases is refused
+#' try(drvkey(c("a", "b"), "salt"))
 #' @export
-derive_key <- function(passphrase, salt, iterations = 100000L,
+drvkey <- function(pass, salt, iter = 100000L,
                        length = 32L) {
-  passphrase <- .rmbl_text_input(passphrase, "passphrase")
+  pass <- .rmbl_text_input(pass, "pass")
   salt <- .rmbl_text_input(salt, "salt")
-  if (!is.raw(passphrase)) {
-    passphrase <- as.character(passphrase)
-    if (base::length(passphrase) != 1L || is.na(passphrase)) {
-      stop("`passphrase` must be a length-1 character vector or raw vector",
-           call. = FALSE)
+  if (!is.raw(pass)) {
+    pass <- as.character(pass)
+    if (base::length(pass) != 1L || is.na(pass)) {
+      stop("`pass` must be a length-1 character vector or raw vector",
+        call. = FALSE
+      )
     }
   }
   if (!is.raw(salt)) {
     salt <- as.character(salt)
     if (base::length(salt) != 1L || is.na(salt)) {
       stop("`salt` must be a length-1 character vector or raw vector",
-           call. = FALSE)
+        call. = FALSE
+      )
     }
   }
-  iterations <- as.integer(iterations)
-  if (base::length(iterations) != 1L || is.na(iterations) ||
-      iterations < 1L) {
-    stop("`iterations` must be a single integer of at least 1", call. = FALSE)
+  iter <- .rmbl_num(iter, "iter", integer = TRUE)
+  if (base::length(iter) != 1L || is.na(iter) ||
+    iter < 1L) {
+    stop("`iter` must be a single integer of at least 1", call. = FALSE)
   }
-  length <- as.integer(length)
+  length <- .rmbl_num(length, "length", integer = TRUE)
   if (base::length(length) != 1L || is.na(length) || length < 1L ||
-      length > 1024L) {
+    length > 1024L) {
     stop("`length` must be a single integer between 1 and 1024",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
-  .Call(C_rmbl_pbkdf2, passphrase, salt, iterations, length)
+  .bl_busy(sprintf("deriving a key (%s PBKDF2 iterations)", format(iter, big.mark = ",")),
+           .Call(C_rmbl_pbkdf2, pass, salt, iter, length))
 }
 
 #' BLAKE2b digest, optionally keyed
 #'
+#' @description
+#' Computes the BLAKE2b hash of text or bytes as lowercase hex, with any
+#' digest length from 1 to 64 bytes. With a key it becomes a message
+#' authentication code: only someone holding the key can produce or check
+#' the digest. Use it for fingerprints and keyed checks inside your own
+#' workflow; use [csha256()] or
+#' [chmac()] where other tools
+#' must reproduce the value.
+#'
+#' @details
 #' BLAKE2b (RFC 7693): a modern cryptographic hash, faster than SHA-256 in
 #' software, that takes a key natively and produces any digest length from
 #' 1 to 64 bytes.
 #'
 #' The native key is the interesting part. A keyed BLAKE2b IS a message
 #' authentication code, with no HMAC wrapper and so no doubled hashing --
-#' `core_blake2b(msg, key = k)` does the job of
-#' [core_hmac_sha256()] at lower cost. Use
+#' `cblake2b(msg, key = k)` does the job of
+#' [chmac()] at lower cost. Use
 #' SHA-256 or HMAC where interoperability with other tools matters; use
 #' this where it does not and speed does.
 #'
+#' Character input is hashed element by element, as the bytes of each
+#' string; \code{NA} elements give \code{NA}. A raw vector is one message.
+#' The digest length is a parameter of BLAKE2b, so a 32-byte digest is not
+#' the first half of the 64-byte digest of the same input. Errors: `length`
+#' outside 1 to 64; a key that is not a single string or raw vector, or is
+#' longer than 64 bytes.
+#'
 #' @param x A character vector or a raw vector.
-#' @param key Optional key, at most 64 bytes. `NULL`
-#' (default) gives the plain digest.
+#' @param key Optional key: a single string or a raw vector of at most 64
+#' bytes. `NULL` (default) gives the plain digest.
 #' @param length Digest length in bytes, 1 to 64 (default 32,
 #' matching SHA-256's width).
 #' @return A character vector of lowercase hex digests -- one per element
@@ -169,55 +225,62 @@ derive_key <- function(passphrase, salt, iterations = 100000L,
 #' Hash and Message Authentication Code (MAC). RFC 7693.
 #'   \doi{10.17487/RFC7693}
 #' @seealso
-#' [core_sha256()],
-#' [core_sha512()],
-#' [core_hmac_sha256()]
-#' @examples
+#' [csha256()],
+#' [csha512()],
+#' [chmac()]
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # The RFC 7693 test vector for BLAKE2b-512 of "abc".
-#' core_blake2b("abc", length = 64)
+#' cblake2b("abc", length = 64)
 #'
 #' # 32 bytes by default, the same width as SHA-256.
-#' core_blake2b("abc")
-#' nchar(core_blake2b("abc"))
+#' cblake2b("abc")
+#' nchar(cblake2b("abc"))
 #'
 #' # Any digest length, which SHA-2 cannot do.
-#' core_blake2b("abc", length = 8)
+#' cblake2b("abc", length = 8)
 #'
 #' # Keyed, so it authenticates without an HMAC construction.
-#' core_blake2b("manifest", key = "secret")
-#' core_blake2b("manifest", key = "secret") ==
-#'   core_blake2b("manifest", key = "other")
+#' cblake2b("manifest", key = "secret")
+#' cblake2b("manifest", key = "secret") ==
+#'   cblake2b("manifest", key = "other")
 #'
 #' # Vectorised, and raw input hashes the same bytes.
-#' core_blake2b(c("a", "b"))
-#' identical(core_blake2b("abc"), core_blake2b(charToRaw("abc")))
+#' cblake2b(c("a", "b"))
+#' identical(cblake2b("abc"), cblake2b(charToRaw("abc")))
+#'
+#' try(cblake2b("abc", length = 65))
 #' @export
-core_blake2b <- function(x, key = NULL, length = 32L) {
+cblake2b <- function(x, key = NULL, length = 32L) {
+  .rmbl_no_fn(x = x, key = key)
   if (!is.raw(x) && !is.null(x) && any(is.na(x))) {
     x <- as.character(x)
     out <- rep(NA_character_, length(x))
     ok <- !is.na(x)
-    if (any(ok)) out[ok] <- core_blake2b(x[ok], key = key, length = length)
+    if (any(ok)) out[ok] <- cblake2b(x[ok], key = key, length = length)
     return(out)
   }
-  length <- as.integer(length)
+  length <- .rmbl_num(length, "length", integer = TRUE)
   if (base::length(length) != 1L || is.na(length) || length < 1L ||
-      length > 64L) {
+    length > 64L) {
     stop("`length` must be a single integer between 1 and 64", call. = FALSE)
   }
   if (!is.null(key) && !is.raw(key)) {
     key <- as.character(key)
     if (base::length(key) != 1L || is.na(key)) {
-      stop("`key` must be a length-1 character vector or a raw vector",
-           call. = FALSE)
+      stop("cblake2b: `key` must be a length-1 character vector or a raw vector",
+        call. = FALSE
+      )
     }
   }
-  if (is.raw(x)) return(.Call(C_rmbl_blake2b, x, key, length))
+  if (is.raw(x)) {
+    return(.Call(C_rmbl_blake2b, x, key, length))
+  }
   .Call(C_rmbl_blake2b, as.character(x), key, length)
 }
 
 #' Digest an arbitrary R object
 #'
+#' @description
 #' Fingerprints any R object by hashing its serialization, so a list, a
 #' data frame, a function or a fitted model all get a stable digest. The
 #' counterpart of `digest::digest()`, computed with this package's own
@@ -229,38 +292,59 @@ core_blake2b <- function(x, key = NULL, length = 32L) {
 #' merely print the same need not, because attributes are part of the
 #' serialization.
 #'
+#' @details
+#' The object is serialized with \code{serialize(x, NULL, version = 2,
+#' xdr = TRUE)} and the bytes are hashed with [csha256()],
+#' [csha512()], [cblake2b()]
+#' (32 bytes) or [ccrc32()]. CRC-32 is
+#' a checksum for accidental corruption, not a cryptographic hash. With a
+#' `key` the digest is HMAC-SHA-256 for `"sha256"` and keyed BLAKE2b for
+#' `"blake2b"`; a key with `"sha512"` or `"crc32"` is an error rather than
+#' a
+#' silently unkeyed digest. Objects that contain environments (functions,
+#' many fitted models) serialize their enclosing environments too, so
+#' their digest can change between sessions even when the code does not.
+#'
 #' @param x Any R object.
 #' @param algo `"sha256"` (default), `"sha512"`,
 #' `"blake2b"` or `"crc32"`.
-#' @param key Optional key, for `"blake2b"` only: gives a
-#' keyed fingerprint that only a key holder can reproduce.
-#' @return A length-1 character vector (or numeric for `"crc32"`) .
+#' @param key Optional key (a single string or raw vector), default `NULL`.
+#' Only for `"sha256"` (HMAC-SHA-256) and `"blake2b"` (keyed BLAKE2b): gives
+#' a keyed fingerprint that only a key holder can reproduce.
+#' @return A length-1 character vector of lowercase hex (64 characters for
+#' `"sha256"` and `"blake2b"`, 128 for `"sha512"`), or a length-1 numeric
+#' for `"crc32"`.
 #' @seealso
-#' [core_sha256()] for hashing text or bytes
+#' [csha256()] for hashing text or bytes
 #' directly,
-#' [bricklayer_json_serialize()]
-#' for a readable lossless form.
-#' @examples
-#' digest_object(list(a = 1L, b = "x"))
+#' [jsser()]
+#' for a readable form that keeps types and attributes.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#' dgstobj(list(a = 1L, b = "x"))
 #'
 #' # Stable across calls, and sensitive to any change.
-#' identical(digest_object(1:10), digest_object(1:10))
-#' digest_object(1:10) == digest_object(1:11)
+#' identical(dgstobj(1:10), dgstobj(1:10))
+#' dgstobj(1:10) == dgstobj(1:11)
 #'
 #' # Attributes are part of the object, so they are part of the digest.
-#' digest_object(matrix(1:6, nrow = 2)) == digest_object(1:6)
+#' dgstobj(matrix(1:6, nrow = 2)) == dgstobj(1:6)
 #'
 #' # Any of the hashes, and a keyed fingerprint.
-#' digest_object(mtcars, algo = "sha512")
-#' digest_object(mtcars, algo = "crc32")
-#' digest_object(mtcars, algo = "blake2b", key = "secret")
+#' dgstobj(mtcars, algo = "sha512")
+#' dgstobj(mtcars, algo = "crc32")
+#' dgstobj(mtcars, algo = "blake2b", key = "secret")
 #'
 #' # A data frame's digest pins the data, so it can go in a manifest.
-#' digest_object(data.frame(x = 1:3))
+#' dgstobj(data.frame(x = 1:3))
+#'
+#' # a key with an algorithm that has no keyed form is refused
+#' try(dgstobj(1:3, algo = "crc32", key = "secret"))
 #' @export
-digest_object <- function(x, algo = c("sha256", "sha512", "blake2b",
-                                      "crc32"), key = NULL) {
-  algo <- match.arg(algo)
+dgstobj <- function(x, algo = c(
+                            "sha256", "sha512", "blake2b",
+                            "crc32"
+                          ), key = NULL) {
+  algo <- .rmbl_arg(algo)
   bytes <- serialize(x, NULL, version = 2L, xdr = TRUE)
   if (!is.null(key)) {
     # A keyed digest authenticates; an unkeyed one only detects
@@ -269,16 +353,29 @@ digest_object <- function(x, algo = c("sha256", "sha512", "blake2b",
     # the weaker guarantee, so refuse instead.
     if (!algo %in% c("sha256", "blake2b")) {
       stop(sprintf(
-        "`key` is not supported for algo = \"%s\"; keyed digests are available for \"sha256\" (HMAC-SHA-256) and \"blake2b\"",
-        algo), call. = FALSE)
+        paste0("`key` is not supported for algo = \"%s\"; keyed digests are available for ",
+               "\"sha256\" (HMAC-SHA-256) and \"blake2b\""),
+        algo
+      ), call. = FALSE)
     }
     return(switch(algo,
-      sha256 = core_hmac_sha256(key, bytes),
-      blake2b = core_blake2b(bytes, key = key, length = 32L)))
+      sha256 = chmac(key, bytes),
+      blake2b = cblake2b(bytes, key = key, length = 32L)
+    ))
   }
   switch(algo,
-    sha256 = core_sha256(bytes),
-    sha512 = core_sha512(bytes),
-    crc32 = core_crc32(bytes),
-    blake2b = core_blake2b(bytes, length = 32L))
+    sha256 = csha256(bytes),
+    sha512 = csha512(bytes),
+    crc32 = ccrc32(bytes),
+    blake2b = cblake2b(bytes, length = 32L)
+  )
 }
+
+#' Reads random bytes from the operating system's source.
+#'
+#' NULL when no operating-system source could be read; rndbytes() refuses
+#' to fall back. One line so the refusal can be exercised without breaking the OS.
+#' @param n The number of bytes.
+#' @return A raw vector, or NULL when no source could be read.
+#' @noRd
+.rmbl_os_random <- function(n) .Call(C_rmbl_os_random, n)

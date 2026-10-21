@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Canonical home of the SIU parse/resolve core. The standalone `siu`
-// package (github.com/rootcoder007/siu) mirrors these sources; edit here
-// first, then resync the mirror.
+// Canonical home of the SIU parse/resolve core. rmorie (src/siu/) and morie
+// (morie.siu.native) carry ports of these sources; edit here first, then port.
 //
 // schema.hpp -- the panel-reviewed SIU field schema. Every field is handled
 // uniformly; `is_count` flags fields that must be COUNTED (0 is a real answer,
@@ -21,8 +20,10 @@ struct Field {
     std::string desc;   // what to look for, for a focused per-field read
 };
 
-// The canonical reviewed columns. `number_of_subject_officers` is the ONE
-// spelling written back (officers/officials/officils variants normalise to it).
+// The canonical reviewed columns. Reports say "subject officer" (before the SIU Act, 2019),
+// "subject official" (after it) and "SO" for either: one quantity, so ONE column,
+// `number_of_subject_officials` (the current legal term, as `number_of_witness_officials`);
+// officers/officials/officils variants normalise to it.
 inline const std::vector<Field>& schema() {
     static const std::vector<Field> kFields = {
         {"police_service", false,
@@ -41,7 +42,7 @@ inline const std::vector<Field>& schema() {
          "the count of distinct WITNESS officers/officials (WO)"},
         {"number_of_civilian_witnesses", true,
          "the count of distinct civilian witnesses (CW)"},
-        {"number_of_subject_officers", true,
+        {"number_of_subject_officials", true,
          "the count of distinct SUBJECT officers/officials (SO); a "
          "witness-officer-only investigation is 0"},
         {"age_affected", false,

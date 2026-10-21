@@ -53,6 +53,13 @@ const int kPolyW1Packed = 128;    /* gamma2 = (q-1)/32: 4 bits each */
 const int kPolyT1Packed = 320;    /* 10 bits each */
 const int kPolyT0Packed = 416;    /* 13 bits each */
 
+/* Constant-time testing hook (inst/ctcheck): a value the specification
+ * publishes anyway -- rho, the challenge, the hints and which samples were rejected -- is declared public to the checker here,
+ * so the branch that follows is not reported. A no-op in the package. */
+#ifndef RMBL_MLDSA_DECLASSIFY
+#define RMBL_MLDSA_DECLASSIFY(ptr, len) ((void)0)
+#endif
+
 /* a_i uniform on [0, q), three bytes at a time with the top bit
  * cleared. Returns how many coefficients were filled. */
 unsigned int rej_uniform(int32_t *a, unsigned int len,
@@ -79,18 +86,27 @@ unsigned int rej_eta(int32_t *a, unsigned int len,
     while (ctr < len && pos < buflen) {
         uint32_t t0 = buf[pos] & 0x0F;
         uint32_t t1 = buf[pos++] >> 4;
+        /* FIPS 204 RejBoundedPoly: whether a nibble is rejected is public
+         * (the rejected randomness is never used), the accepted value is
+         * not. Only the decision is declassified. */
 #if MLDSA_ETA == 2
-        if (t0 < 15) {
+        unsigned int ok0 = t0 < 15, ok1 = t1 < 15;
+        RMBL_MLDSA_DECLASSIFY(&ok0, sizeof ok0);
+        RMBL_MLDSA_DECLASSIFY(&ok1, sizeof ok1);
+        if (ok0) {
             t0 = t0 - (205 * t0 >> 10) * 5;
             a[ctr++] = 2 - static_cast<int32_t>(t0);
         }
-        if (t1 < 15 && ctr < len) {
+        if (ok1 && ctr < len) {
             t1 = t1 - (205 * t1 >> 10) * 5;
             a[ctr++] = 2 - static_cast<int32_t>(t1);
         }
 #else
-        if (t0 < 9) a[ctr++] = 4 - static_cast<int32_t>(t0);
-        if (t1 < 9 && ctr < len) a[ctr++] = 4 - static_cast<int32_t>(t1);
+        unsigned int ok0 = t0 < 9, ok1 = t1 < 9;
+        RMBL_MLDSA_DECLASSIFY(&ok0, sizeof ok0);
+        RMBL_MLDSA_DECLASSIFY(&ok1, sizeof ok1);
+        if (ok0) a[ctr++] = 4 - static_cast<int32_t>(t0);
+        if (ok1 && ctr < len) a[ctr++] = 4 - static_cast<int32_t>(t1);
 #endif
     }
     return ctr;
@@ -109,9 +125,11 @@ void poly_uniform(int32_t a[256], const unsigned char rho[32],
     rmbl_keccak_init(&st, 168, 0x1f);
     rmbl_keccak_absorb(&st, ext, 34);
     rmbl_keccak_finalize(&st);
-    unsigned char buf[168 * 5];
-    rmbl_keccak_squeeze(&st, buf, sizeof buf);
-    unsigned int ctr = rej_uniform(a, 256, buf, sizeof buf);
+    /* one SHAKE128 block at a time: the stream, and so the polynomial, is the one five blocks at
+     * once gave, and the loop that tops it up is the loop itself (a sixth block was a branch no
+     * seed is known to reach: 256 of 280 candidates accept with probability 1 - 1e-40) */
+    unsigned char buf[168];
+    unsigned int ctr = 0;
     while (ctr < 256) {
         rmbl_keccak_squeeze(&st, buf, 168);
         ctr += rej_uniform(a + ctr, 256 - ctr, buf, 168);
@@ -121,16 +139,19 @@ void poly_uniform(int32_t a[256], const unsigned char rho[32],
 void poly_uniform_eta(int32_t a[256], const unsigned char seed[64],
                       uint16_t nonce) {
     unsigned char ext[66];
+    rmbl_ct::Guard ge(ext, sizeof ext);
     std::memcpy(ext, seed, 64);
     ext[64] = static_cast<unsigned char>(nonce & 0xff);
     ext[65] = static_cast<unsigned char>(nonce >> 8);
     RmblKeccak st;
+    rmbl_ct::Guard gst(&st, sizeof st);
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, ext, 66);
     rmbl_keccak_finalize(&st);
-    unsigned char buf[136 * 2];
-    rmbl_keccak_squeeze(&st, buf, sizeof buf);
-    unsigned int ctr = rej_eta(a, 256, buf, sizeof buf);
+    /* one SHAKE256 block at a time, the same stream as two blocks at once (see poly_uniform) */
+    unsigned char buf[136];
+    rmbl_ct::Guard gb(buf, sizeof buf);
+    unsigned int ctr = 0;
     while (ctr < 256) {
         rmbl_keccak_squeeze(&st, buf, 136);
         ctr += rej_eta(a + ctr, 256 - ctr, buf, 136);
@@ -182,12 +203,17 @@ void polyz_unpack(int32_t r[256], const unsigned char *a) {
 
 void poly_uniform_gamma1(int32_t a[256], const unsigned char seed[64],
                          uint16_t nonce) {
+    /* rho'' and the packed y it expands to are secret, as in
+     * poly_uniform_eta() above (review of 1.0.0, M8) */
     unsigned char ext[66];
+    rmbl_ct::Guard ge(ext, sizeof ext);
     std::memcpy(ext, seed, 64);
     ext[64] = static_cast<unsigned char>(nonce & 0xff);
     ext[65] = static_cast<unsigned char>(nonce >> 8);
     unsigned char buf[kPolyZPacked];
+    rmbl_ct::Guard gb(buf, sizeof buf);
     RmblKeccak st;
+    rmbl_ct::Guard gst(&st, sizeof st);
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, ext, 66);
     rmbl_keccak_finalize(&st);
@@ -204,13 +230,15 @@ void poly_challenge(int32_t c[256], const unsigned char *seed) {
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, seed, static_cast<size_t>(kCtildeBytes));
     rmbl_keccak_finalize(&st);
+    /* the signs are the stream's first eight bytes and the positions the bytes after them, read a
+     * block at a time (the first block from byte 8; a second was a branch few seeds reach) */
     unsigned char buf[136];
-    rmbl_keccak_squeeze(&st, buf, 136);
+    rmbl_keccak_squeeze(&st, buf, 8);
     uint64_t signs = 0;
     for (int i = 0; i < 8; ++i) {
         signs |= static_cast<uint64_t>(buf[i]) << (8 * i);
     }
-    unsigned int pos = 8;
+    unsigned int pos = 136;
     for (int i = 0; i < 256; ++i) c[i] = 0;
     for (int i = 256 - kTau; i < 256; ++i) {
         unsigned int b;
@@ -279,17 +307,24 @@ inline int32_t use_hint(int32_t a, unsigned int hint) {
 }
 
 /* Rejects a polynomial whose coefficients leave the allowed range. The
- * comparison is written branch-free on the sign bit because it runs on
- * secret data during signing, and a data-dependent branch there is a
- * timing side channel. */
+ * absolute value is taken branch-free on the sign bit; the early return
+ * on the first out-of-range coefficient is data-dependent, as in the
+ * pq-crystals reference, and leaks only the index of that coefficient
+ * inside a rejection iteration whose outcome (rejected) is public anyway.
+ * It is not a constant-time comparison and does not claim to be. */
 inline int poly_chknorm(const int32_t a[256], int32_t B) {
     if (B > (kQ - 1) / 8) return 1;
+    /* every coefficient is examined; an early return would tell a timing
+     * observer which coefficient of z (hence of the secret) was large */
+    uint32_t bad = 0;
     for (int i = 0; i < 256; ++i) {
         int32_t t = a[i] >> 31;
         t = a[i] - (t & 2 * a[i]);
-        if (t >= B) return 1;
+        bad |= static_cast<uint32_t>(B - 1 - t) >> 31; /* t >= B */
     }
-    return 0;
+    int rejected = bad != 0;
+    RMBL_MLDSA_DECLASSIFY(&rejected, sizeof rejected); /* the rejection itself is public */
+    return rejected;
 }
 
 /* ---------------------------------------------------------------------
@@ -714,7 +749,7 @@ void unpack_sk(unsigned char rho[32], unsigned char tr[64],
  * It is why the signature is 3309 bytes and not K*256 bits larger. */
 void pack_sig(unsigned char *sig, const unsigned char *c,
               const PolyVecL *z, const PolyVecK *h) {
-    std::memcpy(sig, c, static_cast<size_t>(kCtildeBytes));
+    std::memmove(sig, c, static_cast<size_t>(kCtildeBytes));  /* sign_mu passes sig as both */
     sig += kCtildeBytes;
     for (int i = 0; i < kL; ++i) {
         polyz_pack(sig + i * kPolyZPacked, z->v[i]);
@@ -772,6 +807,7 @@ void keypair_from_seed(unsigned char *pk, unsigned char *sk,
     pre[32] = static_cast<unsigned char>(kK);
     pre[33] = static_cast<unsigned char>(kL);
     rmbl_shake256(seedbuf, sizeof seedbuf, pre, 34);
+    RMBL_MLDSA_DECLASSIFY(seedbuf, 32); /* rho is published in pk */
     const unsigned char *rho = seedbuf;
     const unsigned char *rhoprime = seedbuf + 32;
     const unsigned char *key = rhoprime + 64;
@@ -795,6 +831,12 @@ void keypair_from_seed(unsigned char *pk, unsigned char *sk,
     rmbl_shake256(tr, static_cast<size_t>(kTrBytes), pk,
                   static_cast<size_t>(kPkBytes));
     pack_sk(sk, rho, tr, key, &t0, &s1, &s2);
+    rmbl_ct::wipe(seedbuf, sizeof seedbuf);
+    rmbl_ct::wipe(pre, sizeof pre);
+    rmbl_ct::wipe(&s1, sizeof s1);
+    rmbl_ct::wipe(&s2, sizeof s2);
+    rmbl_ct::wipe(&s1hat, sizeof s1hat);
+    rmbl_ct::wipe(&t0, sizeof t0);
 }
 
 /* `rnd` is the 32 bytes of per-signature randomness. Passing zeros
@@ -853,41 +895,52 @@ void tr_from_pk(unsigned char tr[64], const unsigned char *pk) {
  * ExternalMu-ML-DSA interface. It exists so a device holding the key
  * never has to receive the message: everything below this point uses
  * only mu. */
-void sign_mu(unsigned char *sig, const unsigned char mu[64],
+int sign_mu(unsigned char *sig, const unsigned char mu[64],
              const unsigned char rnd[32], const unsigned char *sk);
 
 int verify_mu(const unsigned char *sig, const unsigned char mu[64],
               const unsigned char *pk);
 
-void sign_internal(unsigned char *sig, const unsigned char *m, size_t mlen,
+int sign_internal(unsigned char *sig, const unsigned char *m, size_t mlen,
                    const unsigned char *ctx, size_t ctxlen,
                    const unsigned char rnd[32], const unsigned char *sk) {
     /* only tr is needed up here, and it sits at a fixed offset: the
      * secret key is rho || K || tr || s1 || s2 || t0 */
     unsigned char mu[64];
     compute_mu(mu, sk + 64, m, mlen, ctx, ctxlen, NULL, 0);
-    sign_mu(sig, mu, rnd, sk);
+    return sign_mu(sig, mu, rnd, sk);
 }
 
 /* The pre-hashed variant, HashML-DSA. Identical below mu. */
-void sign_prehash(unsigned char *sig, const unsigned char *phm, size_t phlen,
+int sign_prehash(unsigned char *sig, const unsigned char *phm, size_t phlen,
                   const unsigned char *ctx, size_t ctxlen,
                   const unsigned char *oid, size_t oidlen,
                   const unsigned char rnd[32], const unsigned char *sk) {
     unsigned char mu[64];
     compute_mu(mu, sk + 64, phm, phlen, ctx, ctxlen, oid, oidlen);
-    sign_mu(sig, mu, rnd, sk);
+    return sign_mu(sig, mu, rnd, sk);
 }
 
-void sign_mu(unsigned char *sig, const unsigned char mu[64],
-             const unsigned char rnd[32], const unsigned char *sk) {
+int sign_mu(unsigned char *sig, const unsigned char mu[64],
+            const unsigned char rnd[32], const unsigned char *sk) {
     unsigned char rho[32], tr[64], key[32], rhoprime[64];
     PolyVecL mat[kK], s1, y, z;
     PolyVecK t0, s2, w1, w0, h;
     int32_t cp[256];
+    rmbl_ct::Guard gkey(key, sizeof key), grp(rhoprime, sizeof rhoprime),
+        gs1(&s1, sizeof s1), gy(&y, sizeof y), gz(&z, sizeof z),
+        gt0(&t0, sizeof t0), gs2(&s2, sizeof s2), gw0(&w0, sizeof w0);
     unpack_sk(rho, tr, key, &t0, &s1, &s2, sk);
+    RMBL_MLDSA_DECLASSIFY(rho, 32); /* rho is published in pk */
+    /* A key that is the right length but not a key: s1 and s2 are packed in
+     * [-eta, eta], so a coefficient outside it can only come from corrupt
+     * bytes. Signing with it would reject every candidate for ever. */
+    if (vecl_chknorm(&s1, kEta + 1) || veck_chknorm(&s2, kEta + 1)) return -1;
 
     RmblKeccak st;
+    /* the sponge absorbs K, and h (c s2, c t0) and w1 of a rejected attempt
+     * derive from the secret too: wiped on the way out (review of 1.0.0, M8) */
+    rmbl_ct::Guard gst(&st, sizeof st), gh(&h, sizeof h), gw1(&w1, sizeof w1);
     /* rhoprime = CRH(key, rnd, mu) */
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, key, 32);
@@ -902,7 +955,10 @@ void sign_mu(unsigned char *sig, const unsigned char mu[64],
     veck_ntt(&t0);
 
     uint16_t nonce = 0;
-    for (;;) {
+    /* -1 if no attempt is accepted: a sound key accepts within a handful, so the cap is never met
+     * (the masked signer below ends the same way) */
+    int rc = -1;
+    for (int attempt = 0; attempt < rmbl_mldsa_core::kMaxSignAttempts; ++attempt) {
         vecl_uniform_gamma1(&y, rhoprime, nonce++);
         z = y;
         vecl_ntt(&z);
@@ -919,6 +975,7 @@ void sign_mu(unsigned char *sig, const unsigned char mu[64],
                            static_cast<size_t>(kK * kPolyW1Packed));
         rmbl_keccak_finalize(&st);
         rmbl_keccak_squeeze(&st, sig, static_cast<size_t>(kCtildeBytes));
+        RMBL_MLDSA_DECLASSIFY(sig, static_cast<size_t>(kCtildeBytes)); /* c~ is the signature's first field */
 
         poly_challenge(cp, sig);
         ntt(cp);
@@ -941,12 +998,323 @@ void sign_mu(unsigned char *sig, const unsigned char mu[64],
         if (veck_chknorm(&h, kGamma2)) continue;
 
         veck_add(&w0, &w0, &h);
-        const unsigned int n = veck_make_hint(&h, &w0, &w1);
+        unsigned int n = veck_make_hint(&h, &w0, &w1);
+        RMBL_MLDSA_DECLASSIFY(&n, sizeof n); /* the hint count and positions are published */
+        RMBL_MLDSA_DECLASSIFY(&h, sizeof h);
         if (n > static_cast<unsigned int>(kOmega)) continue;
 
         pack_sig(sig, sig, &z, &h);
-        return;
+        rc = 0;
+        break;
     }
+    return rc;
+}
+
+
+/* =====================================================================
+ * First-order masked signing: FIPS 204 ML-DSA.Sign_internal with every
+ * value that depends on the secret key or on y held as two shares.
+ *
+ * s1, s2, t0 and the key K are split into fresh shares as soon as they
+ * are unpacked; y comes out of a masked SHAKE256 (rho'' itself from a
+ * masked SHAKE256 over K's shares) as Boolean shares of its packed bits,
+ * converted to arithmetic shares mod q (rmbl_masked.h, sec_b2a). The
+ * linear algebra (NTT, A*y, c*s1, c*s2, c*t0) runs on each share in its
+ * own pass. Four things are unmasked, each a value the algorithm
+ * publishes or one bit of control flow it already reveals:
+ *
+ *   - w1 = HighBits(w): it is hashed into the challenge, and a verifier
+ *     recomputes it from the signature. It is revealed through per-lane
+ *     comparisons whose outcomes are exactly the bits of w1;
+ *   - the three rejection decisions (||z||, ||r0||, ||c t0||), each as a
+ *     single bit: the AND of the masked per-coefficient tests;
+ *   - HighBits(w - c s2 + c t0), from which the hint is computed: the
+ *     verifier recomputes it too (it is HighBits(A z - c t1 2^d));
+ *   - z, once the signature is accepted and z is part of it.
+ *
+ * The output is byte-identical to sign_mu(): the same rho'', the same y,
+ * the same accept/reject decisions (tests compare the two).
+ * ===================================================================== */
+namespace msk {
+
+using rmbl_masked::Bs;
+using rmbl_masked::Rng;
+using rmbl_masked::kDsa;
+
+#if MLDSA_GAMMA1 == (1 << 17)
+const int kZBits = 18;
+#else
+const int kZBits = 20;
+#endif
+
+inline int32_t canon(int32_t a) { return caddq(reduce32(a)); }
+
+template <class V>
+inline void canon_all(V *v) {
+    int32_t *p = &v->v[0][0];
+    for (size_t i = 0; i < sizeof(V) / sizeof(int32_t); ++i) p[i] = canon(p[i]);
+}
+
+/* fresh arithmetic shares of every coefficient of v */
+template <class V>
+inline void split(V *v0, V *v1, const V *v, Rng &rng) {
+    const int32_t *p = &v->v[0][0];
+    int32_t *p0 = &v0->v[0][0], *p1 = &v1->v[0][0];
+    /* share 0 first (fresh randomness), then share 1 = v - share 0, in separate passes */
+    for (size_t i = 0; i < sizeof(V) / sizeof(int32_t); ++i) p0[i] = rmbl_masked::rand_mod(rng, kQ);
+    rmbl_masked::rmbl_mask_scrub();
+    for (size_t i = 0; i < sizeof(V) / sizeof(int32_t); ++i) p1[i] = rmbl_masked::cadd_mod(canon(p[i]) - p0[i], kQ);
+    rmbl_masked::rmbl_mask_scrub();
+}
+
+/* y for one polynomial from the masked rho'': SHAKE256(rho'' || nonce) through the masked
+ * sponge, unpacked bit by bit on each share (unpacking is linear over GF(2)), converted to
+ * arithmetic shares and turned into gamma1 - value, as polyz_unpack does. */
+inline void poly_gamma1(int32_t *a0, int32_t *a1, const unsigned char rp0[64],
+                        const unsigned char rp1[64], uint16_t nonce, Rng &rng) {
+    unsigned char in0[66], in1[66];
+    std::memcpy(in0, rp0, 64);
+    std::memcpy(in1, rp1, 64);
+    in0[64] = static_cast<unsigned char>(nonce & 0xff);
+    in0[65] = static_cast<unsigned char>(nonce >> 8);
+    in1[64] = in1[65] = 0;
+    unsigned char b0[kPolyZPacked], b1[kPolyZPacked];
+    rmbl_ct::Guard g0(b0, sizeof b0), g1(b1, sizeof b1), gi0(in0, sizeof in0), gi1(in1, sizeof in1);
+    rmbl_masked::sponge_masked(b0, b1, sizeof b0, in0, in1, sizeof in0, 136, 0x1f, rng);
+    for (int g = 0; g < 8; ++g) {
+        Bs v;
+        for (int s = 0; s < 2; ++s) {
+            rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+            const unsigned char *buf = s ? b1 : b0;
+            for (int b = 0; b < kZBits; ++b) {
+                uint32_t w = 0;
+                for (int j = 0; j < 32; ++j) {
+                    const size_t pos = static_cast<size_t>(32 * g + j) * kZBits + static_cast<size_t>(b);
+                    w |= static_cast<uint32_t>((buf[pos >> 3] >> (pos & 7u)) & 1u) << j;
+                }
+                v.w[s][b] = w;
+            }
+            for (int b = kZBits; b < rmbl_masked::kMaxBits; ++b) v.w[s][b] = 0;
+            rmbl_masked::rmbl_mask_scrub();   /* one share per pass */
+        }
+        int32_t c0[32], c1[32];
+        rmbl_masked::sec_b2a(c0, c1, v, rng, kDsa);
+        for (int j = 0; j < 32; ++j) a0[32 * g + j] = rmbl_masked::cadd_mod(kGamma1 - c0[j], kQ);
+        rmbl_masked::rmbl_mask_scrub();
+        for (int j = 0; j < 32; ++j) a1[32 * g + j] = rmbl_masked::cadd_mod(-c1[j], kQ);
+        rmbl_masked::rmbl_mask_scrub();
+    }
+}
+
+inline void bprime(rmbl_masked::Bs &bp, const int32_t *a0, const int32_t *a1, Rng &rng) {
+    rmbl_masked::dsa_bprime(bp, a0, a1, kGamma2, rng);
+}
+inline void reveal_highbits(int32_t *w1, const rmbl_masked::Bs &bp, Rng &rng) {
+    rmbl_masked::dsa_reveal_highbits(w1, bp, kGamma2, rng);
+}
+inline void lowbits_ok(uint32_t o[2], const rmbl_masked::Bs &bp, const int32_t *w1, Rng &rng) {
+    rmbl_masked::dsa_lowbits_ok(o, bp, w1, kGamma2, kBeta, rng);
+}
+using rmbl_masked::AllOk;
+
+/* ||a||_inf < B for every coefficient of a vector of shares */
+template <class V>
+inline int norm_ok(const V *m0, const V *m1, int32_t B, Rng &rng) {
+    AllOk acc;
+    rmbl_masked::dsa_norm_acc(acc, &m0->v[0][0], &m1->v[0][0], static_cast<int>(sizeof(V) / sizeof(int32_t)), B, rng);
+    return acc.reveal(rng);
+}
+
+struct Work {
+    PolyVecL s1[2], y[2], z[2];
+    PolyVecK s2[2], t0[2], w[2], v[2], u[2];
+};
+
+}  // namespace msk
+
+int sign_mu_masked(unsigned char *sig, const unsigned char mu[64],
+                   const unsigned char rnd[32], const unsigned char *sk,
+                   rmbl_masked::Rng &rng) {
+    unsigned char rho[32], tr[64], key[32];
+    unsigned char k0[32], k1[32], in0[128], in1[128], rp0[64], rp1[64];
+    rmbl_ct::Guard gkey(key, sizeof key), gk0(k0, sizeof k0), gk1(k1, sizeof k1), gi0(in0, sizeof in0),
+        gi1(in1, sizeof in1), gr0(rp0, sizeof rp0), gr1(rp1, sizeof rp1);
+    std::vector<PolyVecL> mat(kK);
+    std::vector<msk::Work> work(1);
+    msk::Work &W = work[0];
+    {
+        PolyVecL s1;
+        PolyVecK t0, s2;
+        rmbl_ct::Guard gs1(&s1, sizeof s1), gs2(&s2, sizeof s2), gt0(&t0, sizeof t0);
+        unpack_sk(rho, tr, key, &t0, &s1, &s2, sk);
+        RMBL_MLDSA_DECLASSIFY(rho, 32); /* rho is published in pk */
+        if (vecl_chknorm(&s1, kEta + 1) || veck_chknorm(&s2, kEta + 1)) return -1;
+        msk::split(&W.s1[0], &W.s1[1], &s1, rng);
+        msk::split(&W.s2[0], &W.s2[1], &s2, rng);
+        msk::split(&W.t0[0], &W.t0[1], &t0, rng);
+    }
+    for (int i = 0; i < 32; ++i) k0[i] = static_cast<unsigned char>(rng.u32());
+    rmbl_masked::rmbl_mask_scrub();
+    for (int i = 0; i < 32; ++i) k1[i] = static_cast<unsigned char>(key[i] ^ k0[i]);
+    rmbl_masked::rmbl_mask_scrub();
+    rmbl_ct::wipe(key, sizeof key);
+    /* rho'' = H(K || rnd || mu), K masked; rnd and mu ride on share 0 */
+    std::memcpy(in0, k0, 32);
+    std::memcpy(in0 + 32, rnd, 32);
+    std::memcpy(in0 + 64, mu, 64);
+    rmbl_masked::rmbl_mask_scrub();
+    std::memcpy(in1, k1, 32);
+    std::memset(in1 + 32, 0, 96);
+    rmbl_masked::sponge_masked(rp0, rp1, 64, in0, in1, 128, 136, 0x1f, rng);
+
+    matrix_expand(mat.data(), rho);
+    for (int s = 0; s < 2; ++s) {
+        rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+        vecl_ntt(&W.s1[s]);
+        veck_ntt(&W.s2[s]);
+        veck_ntt(&W.t0[s]);
+    }
+
+    PolyVecK w1, hu, h;
+    PolyVecL zp;
+    int32_t cp[256];
+    RmblKeccak st;
+    uint16_t nonce = 0;
+    int rc = -1;
+    for (int attempt = 0; attempt < rmbl_mldsa_core::kMaxSignAttempts; ++attempt) {
+        for (int i = 0; i < kL; ++i) {
+            msk::poly_gamma1(W.y[0].v[i], W.y[1].v[i], rp0, rp1, static_cast<uint16_t>(kL * nonce + i), rng);
+        }
+        ++nonce;
+        for (int s = 0; s < 2; ++s) {
+            rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+            W.z[s] = W.y[s];
+            vecl_ntt(&W.z[s]);
+            matrix_pointwise_montgomery(&W.w[s], mat.data(), &W.z[s]);
+            veck_reduce(&W.w[s]);
+            veck_invntt(&W.w[s]);
+            msk::canon_all(&W.w[s]);
+        }
+        for (int i = 0; i < kK; ++i) {
+            for (int g = 0; g < 8; ++g) {
+                rmbl_masked::Bs bp;
+                msk::bprime(bp, &W.w[0].v[i][32 * g], &W.w[1].v[i][32 * g], rng);
+                msk::reveal_highbits(&w1.v[i][32 * g], bp, rng);
+                rmbl_ct::wipe(&bp, sizeof bp);   /* the bitsliced shares of this chunk of w */
+            }
+        }
+        veck_pack_w1(sig, &w1);
+        rmbl_keccak_init(&st, 136, 0x1f);
+        rmbl_keccak_absorb(&st, mu, static_cast<size_t>(kCrhBytes));
+        rmbl_keccak_absorb(&st, sig, static_cast<size_t>(kK * kPolyW1Packed));
+        rmbl_keccak_finalize(&st);
+        rmbl_keccak_squeeze(&st, sig, static_cast<size_t>(kCtildeBytes));
+        RMBL_MLDSA_DECLASSIFY(sig, static_cast<size_t>(kCtildeBytes)); /* c~ is the signature's first field */
+        poly_challenge(cp, sig);
+        ntt(cp);
+
+        /* z = y + c s1 */
+        for (int s = 0; s < 2; ++s) {
+            rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+            vecl_pointwise_poly(&W.z[s], cp, &W.s1[s]);
+            vecl_invntt(&W.z[s]);
+            vecl_add(&W.z[s], &W.z[s], &W.y[s]);
+            msk::canon_all(&W.z[s]);
+        }
+        if (!msk::norm_ok(&W.z[0], &W.z[1], kGamma1 - kBeta, rng)) continue;
+
+        /* v = w - c s2, and its low bits */
+        for (int s = 0; s < 2; ++s) {
+            rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+            veck_pointwise_poly(&W.v[s], cp, &W.s2[s]);
+            veck_invntt(&W.v[s]);
+            veck_sub(&W.v[s], &W.w[s], &W.v[s]);
+            msk::canon_all(&W.v[s]);
+        }
+        {
+            msk::AllOk acc;
+            for (int i = 0; i < kK; ++i) {
+                for (int g = 0; g < 8; ++g) {
+                    rmbl_masked::Bs bp;
+                    msk::bprime(bp, &W.v[0].v[i][32 * g], &W.v[1].v[i][32 * g], rng);
+                    uint32_t o[2];
+                    msk::lowbits_ok(o, bp, &w1.v[i][32 * g], rng);
+                    acc.add(o, rng);
+                    /* the bitsliced shares of this chunk of v = w - c s2 stayed on the stack
+                     * on some builds and reveal part of c t0 */
+                    rmbl_ct::wipe(&bp, sizeof bp);
+                    rmbl_ct::wipe(o, sizeof o);
+                }
+            }
+            if (!acc.reveal(rng)) continue;
+        }
+
+        /* c t0 */
+        for (int s = 0; s < 2; ++s) {
+            rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+            veck_pointwise_poly(&W.u[s], cp, &W.t0[s]);
+            veck_invntt(&W.u[s]);
+            msk::canon_all(&W.u[s]);
+        }
+        if (!msk::norm_ok(&W.u[0], &W.u[1], kGamma2, rng)) continue;
+
+        /* the hint: HighBits(w - c s2 + c t0) against w1 */
+        for (int s = 0; s < 2; ++s) {
+            rmbl_masked::rmbl_mask_scrub();   /* the previous share's values leave the registers */
+            veck_add(&W.u[s], &W.v[s], &W.u[s]);
+            msk::canon_all(&W.u[s]);
+        }
+        unsigned int n = 0;
+        for (int i = 0; i < kK; ++i) {
+            for (int g = 0; g < 8; ++g) {
+                rmbl_masked::Bs bp;
+                msk::bprime(bp, &W.u[0].v[i][32 * g], &W.u[1].v[i][32 * g], rng);
+                msk::reveal_highbits(&hu.v[i][32 * g], bp, rng);
+                rmbl_ct::wipe(&bp, sizeof bp);
+            }
+            for (int j = 0; j < 256; ++j) {
+                h.v[i][j] = hu.v[i][j] != w1.v[i][j] ? 1 : 0;
+                n += static_cast<unsigned int>(h.v[i][j]);
+            }
+        }
+        if (n > static_cast<unsigned int>(kOmega)) continue;
+
+        /* accepted: z is part of the signature */
+        for (int i = 0; i < kL; ++i) {
+            for (int j = 0; j < 256; ++j) {
+                int32_t zz = W.z[0].v[i][j] + W.z[1].v[i][j];
+                zz -= kQ & -static_cast<int32_t>(zz >= kQ);
+                zz -= kQ & -static_cast<int32_t>(zz > (kQ - 1) / 2);
+                zp.v[i][j] = zz;
+            }
+        }
+        RMBL_MLDSA_DECLASSIFY(&zp, sizeof zp);
+        pack_sig(sig, sig, &zp, &h);
+        rc = 0;
+        break;
+    }
+    rmbl_ct::wipe(&W, sizeof W);
+    return rc;
+}
+
+/* The masked variants of the two signing interfaces above mu. */
+int sign_internal_masked(unsigned char *sig, const unsigned char *m, size_t mlen,
+                         const unsigned char *ctx, size_t ctxlen,
+                         const unsigned char rnd[32], const unsigned char *sk,
+                         rmbl_masked::Rng &rng) {
+    unsigned char mu[64];
+    compute_mu(mu, sk + 64, m, mlen, ctx, ctxlen, NULL, 0);
+    return sign_mu_masked(sig, mu, rnd, sk, rng);
+}
+
+int sign_prehash_masked(unsigned char *sig, const unsigned char *phm, size_t phlen,
+                        const unsigned char *ctx, size_t ctxlen,
+                        const unsigned char *oid, size_t oidlen,
+                        const unsigned char rnd[32], const unsigned char *sk,
+                        rmbl_masked::Rng &rng) {
+    unsigned char mu[64];
+    compute_mu(mu, sk + 64, phm, phlen, ctx, ctxlen, oid, oidlen);
+    return sign_mu_masked(sig, mu, rnd, sk, rng);
 }
 
 int verify_internal(const unsigned char *sig, const unsigned char *m,

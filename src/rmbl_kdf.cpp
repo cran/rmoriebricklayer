@@ -36,9 +36,27 @@ extern "C" BOOLEAN NTAPI SystemFunction036(PVOID buffer, ULONG length);
 #undef length
 #endif
 
+#ifndef R_NO_REMAP
 #define R_NO_REMAP
+#endif
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
+#include "rmbl_ct.h"
+#include <cerrno>
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+#if defined(__linux__) && defined(__GLIBC__) && \
+    (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 25))
+#include <sys/random.h>
+#define RMBL_HAVE_GETRANDOM 1
+#endif
+
+/* The first element of a character argument, or an error in words: every
+ * STRING_ELT(x, 0) below went through this once a length-0 or NA input
+ * reached a .Call directly (the R wrappers guard; the entry points did not). */
 #include <R_ext/Rdynload.h>
 
 #include <cstdint>
@@ -56,15 +74,7 @@ extern "C" void rmbl_hmac_sha256_hex(const unsigned char *key, size_t keylen,
 
 namespace {
 
-const char kHex[] = "0123456789abcdef";
-
-void hexlify(const unsigned char *b, size_t n, std::string &out) {
-    out.resize(n * 2);
-    for (size_t i = 0; i < n; ++i) {
-        out[i * 2] = kHex[(b[i] >> 4) & 0xf];
-        out[i * 2 + 1] = kHex[b[i] & 0xf];
-    }
-}
+using rmbl_ct::hexlify;
 
 /* ---------------- BLAKE2b (RFC 7693) ---------------- */
 
@@ -89,9 +99,7 @@ const uint8_t kSigma[12][16] = {
     {14,10, 4, 8, 9,15,13, 6, 1,12, 0, 2,11, 7, 5, 3}
 };
 
-inline uint64_t rotr64(uint64_t x, unsigned k) {
-    return (x >> k) | (x << (64 - k));
-}
+using rmbl_ct::rotr64;
 
 struct blake2b_ctx {
     uint8_t  buf[128];
@@ -113,7 +121,10 @@ void b2b_g(uint64_t *v, int a, int b, int c, int d, uint64_t x, uint64_t y) {
 }
 
 void b2b_compress(blake2b_ctx *c, int last) {
+    /* m is the block (the key block first, for a keyed hash) and v the
+     * state mixed with it: both wiped as the frame ends (review of 1.0.0, M8) */
     uint64_t v[16], m[16];
+    rmbl_ct::Guard gv(v, sizeof v), gm(m, sizeof m);
     for (int i = 0; i < 8; ++i) v[i] = c->h[i];
     for (int i = 0; i < 8; ++i) v[i + 8] = kIV[i];
     v[12] ^= c->t[0];
@@ -187,27 +198,33 @@ void b2b_final(blake2b_ctx *c, unsigned char *out) {
 }  // namespace
 
 extern "C" {
+void rmbl_hmac_sha256_raw(const unsigned char *key, size_t keylen,
+                          const unsigned char *msg, size_t msglen,
+                          unsigned char out[32]);
 
 int rmbl_blake2b(const unsigned char *msg, size_t msglen,
                  const unsigned char *key, size_t keylen, int outlen,
                  unsigned char *out) {
     blake2b_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);   /* the key's block and the keyed state */
     if (b2b_init(&c, outlen, key, keylen) != 0) return -1;
     b2b_update(&c, msg, msglen);
     b2b_final(&c, out);
     return 0;
 }
 
-/* PBKDF2-HMAC-SHA256 (RFC 8018 section 5.2). */
-void rmbl_pbkdf2_sha256(const unsigned char *pass, size_t passlen,
+/* PBKDF2-HMAC-SHA256 (RFC 8018 section 5.2). The body with its buffers is
+ * `pbkdf2_inner`; the exported wrapper below raises a pending interrupt only
+ * after those buffers are gone. */
+static int pbkdf2_inner(const unsigned char *pass, size_t passlen,
                         const unsigned char *salt, size_t saltlen,
                         int iterations, int dklen, unsigned char *out) {
     const int hlen = 32;
-    if (dklen < 1 || iterations < 1) return;
+    if (dklen < 1 || iterations < 1) return -1;   /* refused: nothing written */
     /* An explicit bound the compiler can see: without it saltlen + 4 is
      * an unprovable expression and the fortified memcpy warns. */
     const size_t kMaxSalt = 1u << 20;
-    if (saltlen > kMaxSalt) return;
+    if (saltlen > kMaxSalt) return -1;   /* refused: nothing written */
     const int blocks = (dklen + hlen - 1) / hlen;
 
     std::vector<unsigned char> block;
@@ -216,17 +233,11 @@ void rmbl_pbkdf2_sha256(const unsigned char *pass, size_t passlen,
         block.assign(salt, salt + saltlen);
     }
     block.resize(saltlen + 4, 0);
-    char hexbuf[65];
-
+    /* the raw MAC, never its hex form: decoding hex branches on the
+     * characters, and every character here derives from the password */
     auto hmac_raw = [&](const unsigned char *m, size_t mlen,
                         unsigned char o[32]) {
-        rmbl_hmac_sha256_hex(pass, passlen, m, mlen, hexbuf);
-        for (int i = 0; i < 32; ++i) {
-            const char hi = hexbuf[i * 2], lo = hexbuf[i * 2 + 1];
-            const int a = (hi <= '9') ? hi - '0' : hi - 'a' + 10;
-            const int b = (lo <= '9') ? lo - '0' : lo - 'a' + 10;
-            o[i] = static_cast<unsigned char>((a << 4) | b);
-        }
+        rmbl_hmac_sha256_raw(pass, passlen, m, mlen, o);
     };
 
     for (int i = 1; i <= blocks; ++i) {
@@ -235,9 +246,16 @@ void rmbl_pbkdf2_sha256(const unsigned char *pass, size_t passlen,
         block[saltlen + 2] = static_cast<unsigned char>((i >> 8) & 0xff);
         block[saltlen + 3] = static_cast<unsigned char>(i & 0xff);
         unsigned char u[32], t[32];
+        rmbl_ct::Guard gu(u, sizeof u), gt(t, sizeof t);
         hmac_raw(block.data(), block.size(), u);
         std::memcpy(t, u, 32);
         for (int j = 1; j < iterations; ++j) {
+            if ((j & 4095) == 0 && rmbl_interrupt_pending()) {
+                /* stop, zero the output and report 1; the wrapper raises */
+                rmbl_kernel_interrupted = 1;
+                std::memset(out, 0, static_cast<size_t>(dklen));
+                return 1;
+            }
             hmac_raw(u, 32, u);
             for (int k = 0; k < 32; ++k) t[k] ^= u[k];
         }
@@ -245,12 +263,40 @@ void rmbl_pbkdf2_sha256(const unsigned char *pass, size_t passlen,
         const int take = (dklen - off < hlen) ? (dklen - off) : hlen;
         std::memcpy(out + off, t, static_cast<size_t>(take));
     }
+    return 0;
+}
+
+int rmbl_pbkdf2_sha256(const unsigned char *pass, size_t passlen,
+                        const unsigned char *salt, size_t saltlen,
+                        int iterations, int dklen, unsigned char *out) {
+    int r = -1;
+    /* an allocation failure in the body is an R error, never std::terminate() (M12) */
+    rmbl::kernel_call([&] { r = pbkdf2_inner(pass, passlen, salt, saltlen, iterations, dklen, out); });
+    if (r == 1) rmbl_interrupt_raise_unbarriered();   /* no std::vector alive here */
+    return r;
 }
 
 /* Operating-system entropy. Returns 0 on success, -1 if no CSPRNG could
  * be read -- the caller must treat that as fatal rather than falling
  * back to something guessable. */
 int rmbl_os_random(unsigned char *out, size_t n) {
+#if defined(RMBL_HAVE_GETRANDOM)
+    /* getrandom(2) needs no file descriptor, so it works under fd
+     * exhaustion and in a chroot without /dev. ENOSYS (an old kernel
+     * behind a new glibc) falls through to the device below. */
+    size_t done = 0;
+    bool unsupported = false;
+    while (done < n) {
+        const ssize_t got = getrandom(out + done, n - done, 0);
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            if (errno == ENOSYS) { unsupported = true; break; }
+            return -1;
+        }
+        done += static_cast<size_t>(got);
+    }
+    if (!unsupported) return 0;
+#endif
 #if defined(_WIN32)
     /* ULONG is 32-bit, so a very large request has to be filled in
      * chunks rather than truncated. */
@@ -265,46 +311,70 @@ int rmbl_os_random(unsigned char *out, size_t n) {
     }
     return 0;
 #else
-    FILE *f = std::fopen("/dev/urandom", "rb");
-    if (f == NULL) return -1;
-    const size_t got = std::fread(out, 1, n, f);
-    std::fclose(f);
+    /* read(2) on a descriptor opened close-on-exec: stdio buffered up to a
+     * page of random bytes beyond the request in its own heap buffer (freed
+     * unwiped), and the descriptor leaked into any child exec'd meanwhile */
+    int fd;
+    do {
+        fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0) return -1;
+    size_t got = 0;
+    while (got < n) {
+        const ssize_t r = read(fd, out + got, n - got);
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) break;
+        got += static_cast<size_t>(r);
+    }
+    close(fd);
     return (got == n) ? 0 : -1;
 #endif
 }
 
-SEXP C_rmbl_blake2b(SEXP x, SEXP key, SEXP outlen) {
+SEXP C_rmbl_blake2b_impl(SEXP x, SEXP key, SEXP outlen) {
     const int ol = Rf_asInteger(outlen);
-    if (ol < 1 || ol > 64) Rf_error("`length` must be between 1 and 64 bytes");
+    if (ol < 1 || ol > 64) rmbl::fail("`length` must be between 1 and 64 bytes");
+    /* validate before any std::vector exists: rmbl::fail() longjmps past
+     * C++ destructors */
+    if (key != R_NilValue && TYPEOF(key) == RAWSXP && XLENGTH(key) > 64) {
+        rmbl::fail("`key` must be at most 64 bytes");
+    }
+    if (key != R_NilValue && TYPEOF(key) != RAWSXP) {
+        SEXP k = PROTECT(Rf_coerceVector(key, STRSXP));
+        const size_t kl = std::strlen(rmbl_str0(k, "key"));
+        UNPROTECT(1);
+        if (kl > 64) rmbl::fail("`key` must be at most 64 bytes");
+    }
     std::vector<unsigned char> kb;
     if (key != R_NilValue) {
         if (TYPEOF(key) == RAWSXP) {
             kb.assign(RAW(key), RAW(key) + XLENGTH(key));
         } else {
             SEXP k = PROTECT(Rf_coerceVector(key, STRSXP));
-            const char *s = CHAR(STRING_ELT(k, 0));
+            const char *s = rmbl_str0(k, "key");
             kb.assign(s, s + std::strlen(s));
             UNPROTECT(1);
         }
-        if (kb.size() > 64) Rf_error("`key` must be at most 64 bytes");
     }
+    /* the heap copy of the key is wiped before the vector frees it; declared after `kb`, the guard
+     * runs first, on every return (review of 1.0.0, M8) */
+    rmbl_ct::Guard gkb(kb.data(), kb.size());
     std::vector<unsigned char> ob(static_cast<size_t>(ol));
     std::string hex;
 
     if (TYPEOF(x) == RAWSXP) {
-        if (rmbl_blake2b(RAW(x), static_cast<size_t>(XLENGTH(x)),
-                         kb.empty() ? NULL : kb.data(), kb.size(), ol,
-                         ob.data()) != 0) {
-            Rf_error("BLAKE2b initialisation failed");
-        }
+        /* outlen 1..64 and a key of at most 64 bytes, checked above, are b2b_init's only failures: its
+         * status is ignored here as in the string branch below (the check could never be reached) */
+        rmbl_blake2b(RAW(x), static_cast<size_t>(XLENGTH(x)), kb.empty() ? NULL : kb.data(), kb.size(), ol,
+                     ob.data());
         hexlify(ob.data(), ob.size(), hex);
         return Rf_mkString(hex.c_str());
     }
     x = PROTECT(Rf_coerceVector(x, STRSXP));
     const R_xlen_t n = XLENGTH(x);
-    SEXP res = PROTECT(Rf_allocVector(STRSXP, n));
+    SEXP res = PROTECT(rmbl::alloc_vector(STRSXP, n));
     for (R_xlen_t i = 0; i < n; ++i) {
-        const char *s = CHAR(STRING_ELT(x, i));
+        const char *s = rmbl_str_at(x, i, "x");
         rmbl_blake2b(reinterpret_cast<const unsigned char *>(s),
                      std::strlen(s), kb.empty() ? NULL : kb.data(),
                      kb.size(), ol, ob.data());
@@ -315,47 +385,50 @@ SEXP C_rmbl_blake2b(SEXP x, SEXP key, SEXP outlen) {
     return res;
 }
 
-SEXP C_rmbl_pbkdf2(SEXP pass, SEXP salt, SEXP iterations, SEXP dklen) {
+SEXP C_rmbl_pbkdf2_impl(SEXP pass, SEXP salt, SEXP iterations, SEXP dklen) {
     const int iter = Rf_asInteger(iterations);
     const int dk = Rf_asInteger(dklen);
-    if (iter < 1) Rf_error("`iterations` must be at least 1");
-    if (dk < 1 || dk > 1024) Rf_error("`length` must be between 1 and 1024");
+    if (iter == NA_INTEGER || iter < 1) rmbl::fail("`iter` must be at least 1");
+    /* 2^26 iterations is minutes of work; INT_MAX was days, uninterruptible */
+    if (iter > (1 << 26)) rmbl::fail("`iter` above 2^26 is refused");
+    if (dk == NA_INTEGER || dk < 1 || dk > 1024) rmbl::fail("`length` must be between 1 and 1024");
+    /* every rmbl::fail() before the std::vectors below exist: a longjmp over a
+     * live vector leaks it */
+    SEXP p = PROTECT(TYPEOF(pass) == RAWSXP ? pass : Rf_coerceVector(pass, STRSXP));
+    SEXP s2 = PROTECT(TYPEOF(salt) == RAWSXP ? salt : Rf_coerceVector(salt, STRSXP));
+    const char *ps = TYPEOF(p) == RAWSXP ? NULL : rmbl_str0(p, "pass");
+    const char *ss = TYPEOF(s2) == RAWSXP ? NULL : rmbl_str0(s2, "salt");
+    const size_t pslen = ps ? rmbl_str0_len(p, "pass") : 0;
+    const size_t sslen = ss ? rmbl_str0_len(s2, "salt") : 0;
 
     std::vector<unsigned char> pb, sb;
-    if (TYPEOF(pass) == RAWSXP) {
-        pb.assign(RAW(pass), RAW(pass) + XLENGTH(pass));
-    } else {
-        SEXP p = PROTECT(Rf_coerceVector(pass, STRSXP));
-        const char *s = CHAR(STRING_ELT(p, 0));
-        pb.assign(s, s + std::strlen(s));
-        UNPROTECT(1);
-    }
-    if (TYPEOF(salt) == RAWSXP) {
-        sb.assign(RAW(salt), RAW(salt) + XLENGTH(salt));
-    } else {
-        SEXP s2 = PROTECT(Rf_coerceVector(salt, STRSXP));
-        const char *s = CHAR(STRING_ELT(s2, 0));
-        sb.assign(s, s + std::strlen(s));
-        UNPROTECT(1);
-    }
+    if (TYPEOF(p) == RAWSXP) pb.assign(RAW(p), RAW(p) + XLENGTH(p));
+    else pb.assign(ps, ps + pslen);
+    if (TYPEOF(s2) == RAWSXP) sb.assign(RAW(s2), RAW(s2) + XLENGTH(s2));
+    else sb.assign(ss, ss + sslen);
+    rmbl_ct::Guard gpb(pb.data(), pb.size());
+    UNPROTECT(2);
     std::vector<unsigned char> out(static_cast<size_t>(dk));
+    rmbl_ct::Guard gout(out.data(), out.size());   /* the derived key */
     rmbl_pbkdf2_sha256(pb.data(), pb.size(), sb.data(), sb.size(), iter, dk,
                        out.data());
     std::string hex;
     hexlify(out.data(), out.size(), hex);
+    rmbl_ct::Guard ghex(&hex[0], hex.size());      /* and its spelling */
     return Rf_mkString(hex.c_str());
 }
 
-SEXP C_rmbl_os_random(SEXP n) {
+SEXP C_rmbl_os_random_impl(SEXP n) {
     const int nn = Rf_asInteger(n);
     if (nn < 1 || nn > 1048576) {
-        Rf_error("`n` must be between 1 and 1048576 bytes");
+        rmbl::fail("`n` must be between 1 and 1048576 bytes");
     }
     std::vector<unsigned char> buf(static_cast<size_t>(nn));
+    rmbl_ct::Guard gbuf(buf.data(), buf.size());   /* key material, often: wiped before the free */
     if (rmbl_os_random(buf.data(), buf.size()) != 0) {
         return R_NilValue;   /* the R layer decides how to react */
     }
-    SEXP out = PROTECT(Rf_allocVector(RAWSXP, nn));
+    SEXP out = PROTECT(rmbl::alloc_vector(RAWSXP, nn));
     std::memcpy(RAW(out), buf.data(), buf.size());
     UNPROTECT(1);
     return out;

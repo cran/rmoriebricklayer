@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Canonical home of the SIU parse/resolve core. The standalone `siu`
-// package (github.com/rootcoder007/siu) mirrors these sources; edit here
-// first, then resync the mirror.
+// Canonical home of the SIU parse/resolve core. rmorie (src/siu/) and morie
+// (morie.siu.native) carry ports of these sources; edit here first, then port.
 //
 // resolve.hpp -- deterministic extraction of count-type fields (e.g. the
 // subject-officer count) from an SIU director's report, for the residual the
@@ -33,6 +32,6 @@ std::string strip_boilerplate(const std::string& report_text);
 //   5. otherwise                                         -> unresolved
 // Rule 3 MUST precede rule 4: a 1-SO report often also says some witness
 // officer "is not a subject official".
-SoResolution resolve_subject_officers(const std::string& report_text);
+SoResolution resolve_subject_officials(const std::string& report_text);
 
 }  // namespace siu

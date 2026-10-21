@@ -7,15 +7,15 @@
 
 #' Compressed, base64-encoded JSON
 #'
-#' `json_gzip_encode()` serialises to JSON, compresses with gzip and
+#' `jsgzenc()` serialises to JSON, compresses with gzip and
 #' encodes the result as base64, so it can be embedded in another JSON
-#' document, a header, or a text column. `json_gzip_decode()` reverses
+#' document, a header, or a text column. `jsgzdec()` reverses
 #' all three steps.
 #'
 #' JSON is highly compressible because every record repeats the key names,
 #' so this is usually a large saving on anything record-shaped -- but it is
 #' opaque. Use it for payloads that travel, and plain
-#' [bricklayer_json_to_json()] for
+#' [tojs()] for
 #' anything a person is meant to read or a `git diff` is meant to
 #' show.
 #'
@@ -23,65 +23,103 @@
 #' which is what to use when writing to a file rather than embedding in
 #' text.
 #'
+#' The bytes are a real gzip member (RFC 1952, with header bytes `1f 8b`),
+#' readable by `gzip -d`, `zcat` and any HTTP client, not the zlib stream
+#' that `memCompress(type = "gzip")` returns. The modification time in the
+#' header is zero, so the same input always gives the same bytes and a digest
+#' of the result does not depend on the clock. The base64 text uses the
+#' standard alphabet with line breaks every 72 characters
+#' ([jsb64enc()]).
+#'
+#' The decoder takes the input's own type: a raw vector is read as gzip
+#' bytes whatever `raw` says, and text as base64. As a guard against
+#' decompression bombs it refuses a member whose declared uncompressed size
+#' is over 64 MiB. Errors: text given with `raw = TRUE`; text that is not
+#' base64; bytes that are not a gzip member (under 18 bytes or not starting
+#' `1f 8b`); a declared size over 64 MiB; a corrupt member; invalid JSON
+#' inside.
+#'
+#' Note that the JSON keeps data, not R types: a factor comes back as text and
+#' attributes are lost. Compress
+#' [jsser()] output when the
+#' object must come back exactly.
+#'
 #' @param x Object to encode.
-#' @param txt Base64 string (or raw vector) from
-#' `json_gzip_encode()`.
-#' @param raw Return (or accept) gzip bytes instead of base64.
-#' @param ... Passed to
-#' [bricklayer_json_to_json()].
-#' @return `json_gzip_encode()` a length-1 character vector, or a raw
-#' vector when `raw = TRUE`. `json_gzip_decode()` the decoded
-#' object.
+#' @param txt Base64 string (or raw vector of gzip bytes) from
+#' `jsgzenc()`.
+#' @param raw Logical scalar, default `FALSE`: return (or, for the decoder,
+#' insist on) gzip bytes instead of base64 text.
+#' @param ... For `jsgzenc()`, passed to
+#'   [tojs()]
+#' (for example `auto_unbox` or `digits`); for `jsgzdec()`,
+#' passed
+#' to [fromjs()] (for example
+#' `simplifyVector`).
+#' @return `jsgzenc()` a length-1 character vector, or a raw
+#' vector when `raw = TRUE`. `jsgzdec()` the decoded
+#' object, as [fromjs()]
+#' returns it.
 #' @seealso
-#' [bricklayer_json_to_json()],
-#' [bricklayer_json_serialize()]
-#' for a lossless but uncompressed form.
-#' @examples
+#' [tojs()],
+#' [jsser()]
+#' for an uncompressed form that keeps types and attributes.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' x <- list(rows = data.frame(id = 1:50, value = stats::runif(50)))
 #'
-#' enc <- json_gzip_encode(x)
+#' enc <- jsgzenc(x)
 #' substring(enc, 1, 40)
 #'
 #' # Smaller than the JSON it came from, because the keys repeat.
-#' c(json = nchar(bricklayer_json_to_json(x)), gzip_b64 = nchar(enc))
+#' c(json = nchar(tojs(x)), gzipb64 = nchar(enc))
 #'
 #' # Round trips.
-#' identical(json_gzip_decode(enc)$rows$id, 1:50)
+#' identical(jsgzdec(enc)$rows$id, 1:50)
 #'
 #' # Raw gzip bytes, for writing to a file.
-#' bytes <- json_gzip_encode(x, raw = TRUE)
+#' bytes <- jsgzenc(x, raw = TRUE)
 #' class(bytes)
-#' identical(json_gzip_decode(bytes, raw = TRUE)$rows$id, 1:50)
-#' @name rmbl_json_gzip
+#' identical(jsgzdec(bytes, raw = TRUE)$rows$id, 1:50)
+#'
+#' # the bytes are ordinary gzip: a file any gzip tool can read
+#' f <- tempfile(fileext = ".json.gz")
+#' writeBin(bytes, f)
+#' substr(readLines(gzfile(f), warn = FALSE), 1, 40)
+#'
+#' # options pass through to the JSON writer and reader
+#' jsgzdec(jsgzenc(list(a = 1, b = "x"), auto_unbox = TRUE),
+#'                  simplifyVector = FALSE)
+#'
+#' # text that is not a gzip member is refused
+#' try(jsgzdec(jsb64enc("not gzip")))
+#' @name jsgz
 #' @export
-json_gzip_encode <- function(x, raw = FALSE, ...) {
-  txt <- bricklayer_json_to_json(x, ...)
+jsgzenc <- function(x, raw = FALSE, ...) {
+  txt <- tojs(x, ...)
   bytes <- .rmbl_gzip_member(charToRaw(as.character(txt)))
   if (isTRUE(raw)) return(bytes)
-  bricklayer_json_base64_enc(bytes)
+  jsb64enc(bytes)
 }
 
-# Wrap a deflate stream in a real gzip member (RFC 1952).
-#
-# memCompress(type = "gzip") does NOT produce gzip: it produces a zlib
-# stream (RFC 1950), whose header is 0x78 0x9c rather than gzip's 0x1f
-# 0x8b. R's own memDecompress reads both, so a round trip through this
-# package looked correct while no external tool -- gzip, zcat, a browser
-# decoding Content-Encoding: gzip -- could read the bytes at all.
-#
-# The two formats share the same deflate payload and differ only in the
-# wrapper, so the zlib header (2 bytes) and its Adler-32 trailer (4
-# bytes) come off and the gzip header and trailer go on. MTIME is left
-# at zero so the same input always gives the same bytes: a capsule's
-# digest must not depend on the clock.
+#' Wrap a deflate stream in a real gzip member (RFC 1952).
+#'
+#' memCompress(type = \code{"gzip"}) does NOT produce gzip: it produces a zlib
+#' stream (RFC 1950), whose header is 0x78 0x9c rather than gzip's 0x1f
+#' 0x8b. R's own memDecompress reads both, so a round trip through this
+#' package looked correct while no external tool -- gzip, zcat, a browser
+#' decoding Content-Encoding: gzip -- could read the bytes at all.
+#'
+#' The two formats share the same deflate payload and differ only in the
+#' wrapper, so the zlib header (2 bytes) and its Adler-32 trailer (4
+#' bytes) come off and the gzip header and trailer go on. MTIME is left
+#' at zero so the same input always gives the same bytes: a capsule's
+#' digest must not depend on the clock.
+#' @param bytes The raw bytes to compress.
+#' @return A raw vector holding one gzip member with MTIME zero.
+#' @noRd
 .rmbl_gzip_member <- function(bytes) {
+  # memCompress(type = "gzip") returns a zlib stream (CMF/FLG header, deflate
+  # body, Adler-32 trailer), never fewer than six bytes
   z <- memCompress(bytes, type = "gzip")
-  if (length(z) < 6L) stop("compression produced no stream", call. = FALSE)
-  # a zlib stream begins with CMF/FLG, where CMF's low nibble is 8
-  # (deflate); anything else is not the wrapper assumed here
-  if (bitwAnd(as.integer(z[1L]), 0x0f) != 8L) {
-    stop("unexpected compressed-stream header", call. = FALSE)
-  }
   deflate <- z[3L:(length(z) - 4L)]
   n <- length(bytes)
   # Arithmetic, not bit operations: a CRC-32 runs up to 2^32 - 1 and R's
@@ -97,15 +135,16 @@ json_gzip_encode <- function(x, raw = FALSE, ...) {
   hdr <- as.raw(c(0x1f, 0x8b, 0x08, 0x00,
                   0x00, 0x00, 0x00, 0x00,   # MTIME = 0, for determinism
                   0x00, 0xff))              # XFL = 0, OS = unknown
-  c(hdr, deflate, le32(core_crc32(bytes)), le32(n))
+  c(hdr, deflate, le32(ccrc32(bytes)), le32(n))
 }
 
-#' @rdname rmbl_json_gzip
+#' @rdname jsgz
 #' @export
-json_gzip_decode <- function(txt, raw = FALSE, ...) {
+jsgzdec <- function(txt, raw = FALSE, ...) {
+  .rmbl_no_fn(txt = txt)
   # The input's own type settles how to read it: raw is already the gzip
   # member, character is base64 around one. Trusting the flag instead
-  # meant that handing back what json_gzip_encode(raw = TRUE) returned,
+  # meant that handing back what jsgzenc(raw = TRUE) returned,
   # without repeating the flag, ran the bytes through as.character() and
   # a base64 decode and failed inside the inflater rather than here.
   bytes <- if (is.raw(txt)) {
@@ -114,7 +153,7 @@ json_gzip_decode <- function(txt, raw = FALSE, ...) {
     if (isTRUE(raw)) {
       stop("`txt` must be a raw vector when `raw = TRUE`", call. = FALSE)
     }
-    bricklayer_json_base64_dec(as.character(txt)[1L])
+    jsb64dec(as.character(txt)[1L])
   }
   # A gzip member is at least 18 bytes (10 of header, 8 of trailer) and
   # starts 1f 8b; R's own memDecompress() would return garbage on a short
@@ -124,6 +163,16 @@ json_gzip_decode <- function(txt, raw = FALSE, ...) {
     stop("`txt` does not hold a gzip member: expected at least 18 bytes ",
          "starting 1f 8b, got ", length(bytes), " byte(s).", call. = FALSE)
   }
+  # The trailer's ISIZE (uncompressed length mod 2^32) is a free pre-check
+  # against a decompression bomb from an untrusted field (gzip reaches
+  # ~1000:1); zlib itself verifies the trailer while inflating.
+  nb <- length(bytes)
+  isize <- sum(as.numeric(as.integer(bytes[(nb - 3L):nb])) * 256^(0:3))
+  if (isize > 64 * 1024^2) {
+    stop(sprintf(paste0("`txt` declares %.0f uncompressed bytes (gzip ISIZE); ",
+                        "refusing to inflate more than 64 MiB"), isize),
+         call. = FALSE)
+  }
   json <- rawToChar(memDecompress(bytes, type = "gzip"))
-  bricklayer_json_from_json(json, ...)
+  fromjs(json, ...)
 }

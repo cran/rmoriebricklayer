@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Declarative column rules. validate_schema() checks the things every
+# Declarative column rules. valsch() checks the things every
 # table has -- names, types, bounds, levels, missingness. It cannot know
 # that an age must be non-negative, that two dates must be ordered, or
 # that an identifier must be unique. Those are the caller's rules, so the
@@ -8,44 +8,68 @@
 
 #' Declare a validation rule
 #'
-#' Builds a rule for [validate_rules()]: a
-#' predicate over one column, or over the whole data frame, with a severity
-#' and a message. Rules live alongside a schema in a provenance record,
-#' which keeps the project-specific checks in data rather than scattered
-#' through code.
+#' Builds a rule for [valrules()]: a predicate over
+#' one column, or over
+#' the whole data frame, with a severity and a message. Use rules for the
+#' checks that are particular to a data set and that a schema cannot express:
+#' an age must be non-negative, an identifier must be unique, a release date
+#' must not precede an admission date. Rules live alongside a schema in a
+#' provenance record, which keeps the project-specific checks in data rather
+#' than scattered through code.
 #'
-#' `expr` is a function. Given `column`, it receives that column
-#' and must return a logical vector the same length (TRUE = the row passes)
-#' or a single logical for a whole-column property. Given no `column`,
-#' it receives the whole data frame and must return a single logical.
+#' @details
+#' \code{expr} is a function. Given \code{col}, it receives that column
+#' and must return a logical vector the same length (\code{TRUE} = the row
+#' passes) or a single logical for a whole-column property. Given no
+#' \code{col}, it receives the whole data frame and must return a single
+#' logical. How the result is read is described in
+#' [valrules()].
 #'
-#' @param name Short identifier for the rule.
+#' Only the first element of \code{name}, \code{col} and \code{msg} is
+#' kept. The rule is not run here. Errors: an empty or \code{NA} \code{name};
+#' \code{expr} not a function; an empty or \code{NA} \code{col}; a
+#' \code{sev} other than \code{"warning"} or \code{"fatal"}.
+#'
+#' @param name A short identifier for the rule, a string. It names the issue in
+#'   the result of [valrules()], so give each rule a different name.
 #' @param expr A function, as described above.
-#' @param column Column the rule applies to, or `NULL`
-#' for a table-level rule.
-#' @param severity `"warning"` (default) or
-#' `"fatal"`.
-#' @param message Human-readable description of what a
-#' failure means. Defaults to a generated one naming the rule.
-#' @return A list of class `bricklayer_rule`.
+#' @param col Name of the column the rule applies to, or \code{NULL} (the
+#'   default) for a table-level rule.
+#' @param sev \code{"warning"} (default) or \code{"fatal"}. A fatal
+#'   failure stops [schval()].
+#' @param msg Human-readable description of what a failure means, a
+#'   string. Defaults to \code{"Rule '<name>' failed"}.
+#' @return A list of class \code{c("bricklayer_rule", "list")} with
+#'   \code{name}, \code{expr}, \code{column} (\code{NULL} for a table rule),
+#'   \code{severity} and \code{message}; it prints as one line.
 #' @seealso
-#' [validate_rules()],
-#' [validate_schema()] for the structural
+#' [valrules()],
+#' [valsch()] for the structural
 #' checks that need no rules.
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # A column predicate, applied row-wise.
-#' rule("age_non_negative", function(v) v >= 0, column = "age")
+#' rul("agenonnegative", function(v) v >= 0, col = "age")
 #'
 #' # A whole-column property.
-#' rule("id_unique", function(v) !anyDuplicated(v), column = "id",
-#'      severity = "fatal")
+#' rul("idunique", function(v) !anyDuplicated(v), col = "id",
+#'      sev = "fatal")
 #'
 #' # A table-level rule spanning two columns.
-#' rule("dates_ordered", function(df) all(df$start <= df$end))
+#' rul("datesordered", function(df) all(df$start <= df$end))
+#'
+#' # with a message that says what a failure means
+#' r <- rul("releaseafteradmission",
+#'           function(d) all(d$release >= d$admission, na.rm = TRUE),
+#'           msg = "a release date precedes its admission date")
+#' r$message
+#'
+#' # the predicate must be a function, not an expression
+#' try(rul("agenonnegative", "age >= 0", col = "age"))
 #' @export
-rule <- function(name, expr, column = NULL, severity = c("warning", "fatal"),
-                 message = NULL) {
-  severity <- match.arg(severity)
+rul <- function(name, expr, col = NULL, sev = c("warning", "fatal"),
+                 msg = NULL) {
+  .rmbl_no_fn(name = name, column = col, message = msg)
+  sev <- .rmbl_arg(sev)
   name <- as.character(name)[1L]
   if (is.na(name) || !nzchar(name)) {
     stop("`name` must be a non-empty string", call. = FALSE)
@@ -53,18 +77,18 @@ rule <- function(name, expr, column = NULL, severity = c("warning", "fatal"),
   if (!is.function(expr)) {
     stop("`expr` must be a function", call. = FALSE)
   }
-  if (!is.null(column)) {
-    column <- as.character(column)[1L]
-    if (is.na(column) || !nzchar(column)) {
-      stop("`column` must be a non-empty string or NULL", call. = FALSE)
+  if (!is.null(col)) {
+    col <- as.character(col)[1L]
+    if (is.na(col) || !nzchar(col)) {
+      stop("`col` must be a non-empty string or NULL", call. = FALSE)
     }
   }
-  out <- list(name = name, expr = expr, column = column,
-              severity = severity,
-              message = if (is.null(message)) {
+  out <- list(name = name, expr = expr, column = col,
+              severity = sev,
+              message = if (is.null(msg)) {
                 sprintf("Rule '%s' failed", name)
               } else {
-                as.character(message)[1L]
+                as.character(msg)[1L]
               })
   class(out) <- c("bricklayer_rule", "list")
   out
@@ -72,69 +96,94 @@ rule <- function(name, expr, column = NULL, severity = c("warning", "fatal"),
 
 #' Apply declared rules to a data frame
 #'
-#' Evaluates each rule from [rule()] and returns the
-#' failures in the same shape
-#' [validate_schema()] uses, so the two can
-#' be combined and handed to
-#' [apply_schema_validation()]
-#' together.
+#' Evaluates each rule from [rul()] on a data frame and returns the
+#' failures in the same shape [valsch()] uses, so
+#' the two can be
+#' combined and handed to
+#' [schval()] together. Use it
+#' each
+#' time a data set is refreshed, to see which of its own invariants still
+#' hold.
 #'
+#' @details
 #' A rule whose column is absent is SKIPPED rather than failed -- a missing
-#' column is [validate_schema()] 's business,
-#' and reporting it twice buries the real finding. A rule that ERRORS is
-#' reported as a failure naming the error, never swallowed: a rule that
-#' cannot run has not passed.
+#' column is [valsch()]'s business, and reporting
+#' it twice buries
+#' the real finding. A rule that ERRORS is reported as a failure naming the
+#' error, never swallowed: a rule that cannot run has not passed. On a table
+#' of no rows a row-wise rule has no row to fail and passes.
+#'
+#' How a rule's result is read: a result that is not logical, or has length
+#' 0, is a failure (\code{"rule returned <class>, not a logical"}); a single value
+#' fails unless it is \code{TRUE} (so \code{NA} fails); a longer vector is
+#' read row by row, and rows that are \code{FALSE} or \code{NA} fail (a rule
+#' that cannot decide has not been satisfied). The length of a row-wise
+#' result is not checked against the number of rows. The issue is named by
+#' the rule's \code{name}; two rules with the same name keep only the later
+#' failure. Rules run in the order given and only read the data.
+#'
+#' Errors: \code{data} not a data frame (or with missing or duplicated
+#' column names); \code{rules} not a rule or a list; an element that is not
+#' a rule.
 #'
 #' @param data A data frame.
-#' @param rules A list of [rule()] objects,
-#' or a single rule.
-#' @return A named list of issues, each with `severity`,
-#' `message`, and for a row-wise rule `n_failed` and `rows`
-#' (the first failing row indices). Empty when everything passes.
+#' @param rules A list of [rul()] objects, or a single rule.
+#' @return A named list of issues, one per failed rule, each a list with
+#'   \code{severity} (character) and \code{message} (character; for a row-wise
+#'   rule it ends with \dQuote{(k of n rows)}), and for a row-wise rule
+#'   \code{n_failed} (integer) and \code{rows} (integer, the first ten failing
+#'   row indices). Empty when everything passes.
 #' @seealso
-#' [rule()],
-#' [validate_schema()],
-#' [apply_schema_validation()]
-#' @examples
+#' [rul()],
+#' [valsch()],
+#' [schval()]
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' df <- data.frame(id = c(1, 2, 2), age = c(30, -5, 40),
 #'                  start = c(1, 5, 3), end = c(2, 4, 9))
 #'
 #' rules <- list(
-#'   rule("age_non_negative", function(v) v >= 0, column = "age"),
-#'   rule("id_unique", function(v) !anyDuplicated(v), column = "id",
-#'        severity = "fatal"),
-#'   rule("dates_ordered", function(d) all(d$start <= d$end))
+#'   rul("agenonnegative", function(v) v >= 0, col = "age"),
+#'   rul("idunique", function(v) !anyDuplicated(v), col = "id",
+#'        sev = "fatal"),
+#'   rul("datesordered", function(d) all(d$start <= d$end))
 #' )
 #'
-#' issues <- validate_rules(df, rules)
+#' issues <- valrules(df, rules)
 #' names(issues)
 #'
 #' # A row-wise failure reports how many rows and which.
-#' issues$age_non_negative$n_failed
-#' issues$age_non_negative$rows
+#' issues$agenonnegative$n_failed
+#' issues$agenonnegative$rows
 #'
 #' # Clean data produces nothing.
 #' clean <- data.frame(id = 1:3, age = c(30, 31, 40), start = 1:3, end = 4:6)
-#' length(validate_rules(clean, rules))
+#' length(valrules(clean, rules))
 #'
 #' # A rule for an absent column is skipped, not failed -- a missing
-#' # column is validate_schema()'s finding to report, not this one's.
-#' length(validate_rules(data.frame(id = 1:3), rules[1:2]))
+#' # column is valsch()'s finding to report, not this one's.
+#' length(valrules(data.frame(id = 1:3), rules[1:2]))
 #'
 #' # A rule that errors is a failure, not a silent pass.
-#' broken <- list(rule("bad", function(v) stop("boom"), column = "age"))
-#' validate_rules(clean, broken)$bad$message
+#' broken <- list(rul("bad", function(v) stop("boom"), col = "age"))
+#' valrules(clean, broken)$bad$message
+#'
+#' # NA counts as a failure
+#' valrules(data.frame(age = c(30, NA)), rules[1])$agenonnegative$message
+#'
+#' # only rule() objects are accepted
+#' try(valrules(df, list(function(v) v >= 0)))
 #' @export
-validate_rules <- function(data, rules) {
-  if (!is.data.frame(data)) stop("`data` must be a data frame", call. = FALSE)
+valrules <- function(data, rules) {
+  if (!is.data.frame(data)) stop("valrules: `data` must be a data frame", call. = FALSE)
+  .rmbl_df_names(data)
   if (inherits(rules, "bricklayer_rule")) rules <- list(rules)
   if (!is.list(rules)) {
-    stop("`rules` must be a rule() or a list of them", call. = FALSE)
+    stop("`rules` must be a rul() or a list of them", call. = FALSE)
   }
   issues <- list()
   for (r in rules) {
     if (!inherits(r, "bricklayer_rule")) {
-      stop("every element of `rules` must come from rule()", call. = FALSE)
+      stop("every element of `rules` must come from rul()", call. = FALSE)
     }
     # A rule for a column that is not here has nothing to say.
     if (!is.null(r$column) && !r$column %in% names(data)) next
@@ -150,6 +199,9 @@ validate_rules <- function(data, rules) {
                           r$message, conditionMessage(res)))
       next
     }
+    # a row-wise rule on a table of no rows has no row to fail (every rule failed on a 0-row frame;
+    # CRAN stress test of 0.5.14)
+    if (is.logical(res) && length(res) == 0L && nrow(data) == 0L) next
     if (!is.logical(res) || length(res) == 0L) {
       issues[[r$name]] <- list(
         severity = r$severity,

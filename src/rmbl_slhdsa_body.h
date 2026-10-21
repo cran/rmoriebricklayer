@@ -180,14 +180,16 @@ struct Adrs {
 void prf_addr(unsigned char out[kN], const Ctx &ctx, const Adrs &adrs) {
 #if SLH_SHA2
     unsigned char tail[kAdrsBytes + kN];
+    unsigned char h[32];
+    rmbl_ct::Guard gt(tail, sizeof tail), gh(h, sizeof h);
     std::memcpy(tail, adrs.a, kAdrsBytes);
     std::memcpy(tail + kAdrsBytes, ctx.sk_seed, kN);
-    unsigned char h[32];
     /* one block of PK.seed is already in the midstate */
     rmbl_sha256_finish(ctx.mid256, 1, tail, sizeof tail, h);
     std::memcpy(out, h, kN);
 #else
     unsigned char buf[2 * kN + kAdrsBytes];
+    rmbl_ct::Guard gb(buf, sizeof buf);
     std::memcpy(buf, ctx.pub_seed, kN);
     std::memcpy(buf + kN, adrs.a, kAdrsBytes);
     std::memcpy(buf + kN + kAdrsBytes, ctx.sk_seed, kN);
@@ -285,6 +287,13 @@ void chain_lengths(unsigned int *lengths, const unsigned char *msg) {
     wots_checksum(lengths + kWotsLen1, lengths);
 }
 
+/* Constant-time testing hook (inst/ctcheck): a value the specification
+ * publishes anyway -- the randomiser R, the signature's first field -- is declared public to the checker here,
+ * so the branch that follows is not reported. A no-op in the package. */
+#ifndef RMBL_SLHDSA_DECLASSIFY
+#define RMBL_SLHDSA_DECLASSIFY(ptr, len) ((void)0)
+#endif
+
 /* s applications of the tweakable hash starting at step `start`. */
 void gen_chain(unsigned char *out, const unsigned char *in,
                unsigned int start, unsigned int steps,
@@ -310,28 +319,6 @@ Adrs wots_prf_adrs(const Adrs &base, uint32_t chain) {
     return p;
 }
 
-void wots_gen_pk(unsigned char *pk, const Ctx &ctx, Adrs adrs) {
-    for (int i = 0; i < kWotsLen; ++i) {
-        adrs.set_chain(static_cast<uint32_t>(i));
-        unsigned char sk[kN];
-        adrs.set_hash(0);
-        prf_addr(sk, ctx, wots_prf_adrs(adrs, static_cast<uint32_t>(i)));
-        gen_chain(pk + i * kN, sk, 0, kW - 1, ctx, adrs);
-    }
-}
-
-void wots_sign(unsigned char *sig, const unsigned char *msg,
-               const Ctx &ctx, Adrs adrs) {
-    unsigned int lengths[kWotsLen];
-    chain_lengths(lengths, msg);
-    for (int i = 0; i < kWotsLen; ++i) {
-        adrs.set_chain(static_cast<uint32_t>(i));
-        unsigned char sk[kN];
-        adrs.set_hash(0);
-        prf_addr(sk, ctx, wots_prf_adrs(adrs, static_cast<uint32_t>(i)));
-        gen_chain(sig + i * kN, sk, 0, lengths[i], ctx, adrs);
-    }
-}
 
 void wots_pk_from_sig(unsigned char *pk, const unsigned char *sig,
                       const unsigned char *msg, const Ctx &ctx, Adrs adrs) {
@@ -355,12 +342,23 @@ void wots_pk_from_sig(unsigned char *pk, const unsigned char *sig,
 typedef void (*LeafGen)(unsigned char *leaf, const Ctx &ctx,
                         uint32_t idx, void *info);
 
+/* How often treehash() polls for a Ctrl-C: a WOTS+ leaf is a whole one-time public key
+ * (kWotsLen chains of up to 15 hashes), a FORS leaf two hashes, so a poll every 16 WOTS+
+ * leaves and every 256 FORS leaves is a poll every few milliseconds at every parameter set,
+ * and its cost (one clock read and one R_ToplevelExec) is lost in the hashing. */
+const uint32_t kPollWotsLeaves = 15u;
+const uint32_t kPollForsLeaves = 255u;
+
+/* `poll_mask`: a pending Ctrl-C is taken (and the busy spinner turned) after every
+ * poll_mask + 1 leaves. The test is on the loop counter alone, which runs over every leaf of
+ * the tree whatever the key or message, so it adds no branch on secret data. */
 void treehash(unsigned char *root, unsigned char *auth_path, const Ctx &ctx,
               uint32_t leaf_idx, uint32_t idx_offset, uint32_t tree_height,
-              LeafGen gen_leaf, Adrs tree_adrs, void *info) {
+              LeafGen gen_leaf, Adrs tree_adrs, void *info, uint32_t poll_mask) {
     std::vector<unsigned char> stack(
         static_cast<size_t>(tree_height) * kN);
     for (uint32_t idx = 0;; ++idx) {
+        if ((idx & poll_mask) == poll_mask) ::rmbl::check_interrupt();
         unsigned char current[2 * kN];
         gen_leaf(current + kN, ctx, idx + idx_offset, info);
         uint32_t internal_idx_offset = idx_offset;
@@ -417,6 +415,7 @@ void wots_gen_leaf(unsigned char *leaf, const Ctx &ctx, uint32_t addr_idx,
         sadrs.set_chain(static_cast<uint32_t>(i));
         sadrs.set_hash(0);
         unsigned char sk[kN];
+        rmbl_ct::Guard gsk(sk, sizeof sk);
         prf_addr(sk, ctx, wots_prf_adrs(sadrs, static_cast<uint32_t>(i)));
         /* when this leaf is the one being signed, the chain is stopped
          * at the message digit and that prefix IS the signature */
@@ -444,7 +443,7 @@ void merkle_sign(unsigned char *sig, unsigned char *root, const Ctx &ctx,
     info.wots_sign_leaf = idx_leaf;
     treehash(root, idx_leaf == ~0u ? nullptr : auth_path, ctx, idx_leaf, 0,
              static_cast<uint32_t>(kTreeHeight), wots_gen_leaf, tree_adrs,
-             &info);
+             &info, kPollWotsLeaves);
 }
 
 void merkle_gen_root(unsigned char *root, const Ctx &ctx) {
@@ -537,7 +536,7 @@ void fors_sign(unsigned char *sig, unsigned char *pk, const unsigned char *m,
         sig += kN;
         treehash(roots + i * kN, sig, ctx, indices[i], idx_offset,
                  static_cast<uint32_t>(kForsHeight), fors_gen_leaf,
-                 tree_adrs, &info);
+                 tree_adrs, &info, kPollForsLeaves);
         sig += static_cast<size_t>(kN) * kForsHeight;
     }
     thash(pk, roots, kForsTrees, ctx, pk_adrs);
@@ -623,31 +622,38 @@ void gen_message_random(unsigned char *R, const unsigned char *sk_prf,
                         const unsigned char *opt_rand,
                         const unsigned char *ctxb, size_t ctxlen,
                         const unsigned char *m, size_t mlen,
-                        const unsigned char *oid, size_t oidlen) {
+                        const unsigned char *oid, size_t oidlen,
+                        bool internal = false) {
 #if SLH_SHA2
     /* HMAC, keyed with SK.prf, over opt_rand || M' */
     std::vector<unsigned char> msg;
     msg.reserve(static_cast<size_t>(kN) + 2 + ctxlen + oidlen + mlen);
     msg.insert(msg.end(), opt_rand, opt_rand + kN);
-    msg.push_back(oidlen > 0 ? 1 : 0);
-    msg.push_back(static_cast<unsigned char>(ctxlen));
-    msg.insert(msg.end(), ctxb, ctxb + ctxlen);
-    if (oidlen > 0) msg.insert(msg.end(), oid, oid + oidlen);
+    if (!internal) {
+        msg.push_back(oidlen > 0 ? 1 : 0);
+        msg.push_back(static_cast<unsigned char>(ctxlen));
+        msg.insert(msg.end(), ctxb, ctxb + ctxlen);
+        if (oidlen > 0) msg.insert(msg.end(), oid, oid + oidlen);
+    }
     msg.insert(msg.end(), m, m + mlen);
     unsigned char h[64];
+    rmbl_ct::Guard gm(msg.data(), msg.size()), gh(h, sizeof h);
     rmbl_hmac_shax(kShaXOut, sk_prf, kN, msg.data(), msg.size(), h);
     std::memcpy(R, h, kN);
 #else
     RmblKeccak st;
+    rmbl_ct::Guard gst(&st, sizeof st);
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, sk_prf, kN);
     rmbl_keccak_absorb(&st, opt_rand, kN);
-    unsigned char pre[2];
-    pre[0] = oidlen > 0 ? 1 : 0;
-    pre[1] = static_cast<unsigned char>(ctxlen);
-    rmbl_keccak_absorb(&st, pre, 2);
-    if (ctxlen > 0) rmbl_keccak_absorb(&st, ctxb, ctxlen);
-    if (oidlen > 0) rmbl_keccak_absorb(&st, oid, oidlen);
+    if (!internal) {
+        unsigned char pre[2];
+        pre[0] = oidlen > 0 ? 1 : 0;
+        pre[1] = static_cast<unsigned char>(ctxlen);
+        rmbl_keccak_absorb(&st, pre, 2);
+        if (ctxlen > 0) rmbl_keccak_absorb(&st, ctxb, ctxlen);
+        if (oidlen > 0) rmbl_keccak_absorb(&st, oid, oidlen);
+    }
     rmbl_keccak_absorb(&st, m, mlen);
     rmbl_keccak_finalize(&st);
     rmbl_keccak_squeeze(&st, R, kN);
@@ -658,7 +664,8 @@ void hash_message(unsigned char *digest, uint64_t *tree, uint32_t *leaf_idx,
                   const unsigned char *R, const unsigned char *pk,
                   const unsigned char *ctxb, size_t ctxlen,
                   const unsigned char *m, size_t mlen,
-                  const unsigned char *oid, size_t oidlen) {
+                  const unsigned char *oid, size_t oidlen,
+                  bool internal = false) {
     unsigned char buf[kDgstBytes];
 #if SLH_SHA2
     /* SHA-2: the digest is MGF1 over R || PK.seed || H(R || PK || M'),
@@ -667,10 +674,12 @@ void hash_message(unsigned char *digest, uint64_t *tree, uint32_t *leaf_idx,
     inbuf.reserve(static_cast<size_t>(kN) + kPkBytes + 2 + ctxlen + mlen);
     inbuf.insert(inbuf.end(), R, R + kN);
     inbuf.insert(inbuf.end(), pk, pk + kPkBytes);
-    inbuf.push_back(oidlen > 0 ? 1 : 0);
-    inbuf.push_back(static_cast<unsigned char>(ctxlen));
-    inbuf.insert(inbuf.end(), ctxb, ctxb + ctxlen);
-    if (oidlen > 0) inbuf.insert(inbuf.end(), oid, oid + oidlen);
+    if (!internal) {
+        inbuf.push_back(oidlen > 0 ? 1 : 0);
+        inbuf.push_back(static_cast<unsigned char>(ctxlen));
+        inbuf.insert(inbuf.end(), ctxb, ctxb + ctxlen);
+        if (oidlen > 0) inbuf.insert(inbuf.end(), oid, oid + oidlen);
+    }
     inbuf.insert(inbuf.end(), m, m + mlen);
     std::vector<unsigned char> seed(static_cast<size_t>(2) * kN + kShaXOut);
     std::memcpy(seed.data(), R, kN);
@@ -686,12 +695,14 @@ void hash_message(unsigned char *digest, uint64_t *tree, uint32_t *leaf_idx,
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, R, kN);
     rmbl_keccak_absorb(&st, pk, kPkBytes);
-    unsigned char pre[2];
-    pre[0] = oidlen > 0 ? 1 : 0;
-    pre[1] = static_cast<unsigned char>(ctxlen);
-    rmbl_keccak_absorb(&st, pre, 2);
-    if (ctxlen > 0) rmbl_keccak_absorb(&st, ctxb, ctxlen);
-    if (oidlen > 0) rmbl_keccak_absorb(&st, oid, oidlen);
+    if (!internal) {
+        unsigned char pre[2];
+        pre[0] = oidlen > 0 ? 1 : 0;
+        pre[1] = static_cast<unsigned char>(ctxlen);
+        rmbl_keccak_absorb(&st, pre, 2);
+        if (ctxlen > 0) rmbl_keccak_absorb(&st, ctxb, ctxlen);
+        if (oidlen > 0) rmbl_keccak_absorb(&st, oid, oidlen);
+    }
     rmbl_keccak_absorb(&st, m, mlen);
     rmbl_keccak_finalize(&st);
     rmbl_keccak_squeeze(&st, buf, sizeof buf);
@@ -716,6 +727,7 @@ void seed_keypair(unsigned char *pk, unsigned char *sk,
     std::memcpy(sk, seed, 3 * kN);
     std::memcpy(pk, sk + 2 * kN, kN);
     Ctx ctx;
+    rmbl_ct::Guard gctx(&ctx, sizeof ctx);
     std::memcpy(ctx.pub_seed, pk, kN);
     std::memcpy(ctx.sk_seed, sk, kN);
     ctx.prepare();
@@ -726,10 +738,13 @@ void seed_keypair(unsigned char *pk, unsigned char *sk,
 void sign(unsigned char *sig, const unsigned char *m, size_t mlen,
           const unsigned char *ctxb, size_t ctxlen,
           const unsigned char *opt_rand, const unsigned char *sk,
-          const unsigned char *oid, size_t oidlen) {
+          const unsigned char *oid, size_t oidlen, bool internal = false) {
     Ctx ctx;
+    rmbl_ct::Guard gctx(&ctx, sizeof ctx);
     const unsigned char *sk_prf = sk + kN;
     const unsigned char *pk = sk + 2 * kN;
+    /* PK.seed || PK.root inside the secret key are the public key */
+    RMBL_SLHDSA_DECLASSIFY(const_cast<unsigned char *>(pk), 2 * kN);
     unsigned char mhash[kForsMsgBytes];
     unsigned char root[kN];
     uint64_t tree;
@@ -739,9 +754,10 @@ void sign(unsigned char *sig, const unsigned char *m, size_t mlen,
     ctx.prepare();
 
     gen_message_random(sig, sk_prf, opt_rand, ctxb, ctxlen, m, mlen,
-                       oid, oidlen);
+                       oid, oidlen, internal);
+    RMBL_SLHDSA_DECLASSIFY(sig, kN); /* R is published; every index below derives from it */
     hash_message(mhash, &tree, &idx_leaf, sig, pk, ctxb, ctxlen, m, mlen,
-                 oid, oidlen);
+                 oid, oidlen, internal);
     sig += kN;
 
     Adrs wots_adrs, tree_adrs;
@@ -751,6 +767,9 @@ void sign(unsigned char *sig, const unsigned char *m, size_t mlen,
     wots_adrs.set_keypair(idx_leaf);
 
     fors_sign(sig, root, mhash, ctx, wots_adrs);
+    /* the FORS root is what the verifier recomputes from the signature, and
+     * each layer's root below is the WOTS+ message of the layer above */
+    RMBL_SLHDSA_DECLASSIFY(root, kN);
     sig += kForsBytes;
 
     for (int i = 0; i < kD; ++i) {
@@ -759,7 +778,11 @@ void sign(unsigned char *sig, const unsigned char *m, size_t mlen,
         wots_adrs.copy_subtree(tree_adrs);
         wots_adrs.set_keypair(idx_leaf);
         merkle_sign(sig, root, ctx, wots_adrs, tree_adrs, idx_leaf);
+        RMBL_SLHDSA_DECLASSIFY(root, kN);
         sig += kWotsBytes + kTreeHeight * kN;
+        /* once per hypertree layer, a fixed count: the "f" sets' subtrees (8 leaves) are too
+         * small for treehash()'s own poll */
+        ::rmbl::check_interrupt();
         /* climb one layer: this subtree's index becomes the leaf index
          * of the layer above */
         idx_leaf = static_cast<uint32_t>(tree & ((1u << kTreeHeight) - 1));
@@ -770,7 +793,7 @@ void sign(unsigned char *sig, const unsigned char *m, size_t mlen,
 int verify(const unsigned char *sig, size_t siglen, const unsigned char *m,
            size_t mlen, const unsigned char *ctxb, size_t ctxlen,
            const unsigned char *pk, const unsigned char *oid,
-           size_t oidlen) {
+           size_t oidlen, bool internal = false) {
     if (siglen != static_cast<size_t>(kSigBytes)) return -1;
     Ctx ctx;
     const unsigned char *pub_root = pk + kN;
@@ -786,7 +809,7 @@ int verify(const unsigned char *sig, size_t siglen, const unsigned char *m,
     const unsigned char *R = sig;
     sig += kN;
     hash_message(mhash, &tree, &idx_leaf, R, pk, ctxb, ctxlen, m, mlen,
-                 oid, oidlen);
+                 oid, oidlen, internal);
 
     Adrs wots_adrs, tree_adrs, wots_pk_adrs;
     wots_adrs.set_type(kAddrTypeWots);

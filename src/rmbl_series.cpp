@@ -28,6 +28,7 @@
 
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
 #include <R_ext/Random.h>
 
 namespace {
@@ -89,8 +90,27 @@ double hurwitz_zeta_scalar(double s, double q) {
     const int N = 16;
 
         
-        if (ISNAN(s) || s <= 1.0 || q <= 0.0) {
+        if (ISNAN(s) || ISNAN(q) || q <= 0.0) {
             return NA_REAL;
+        }
+        /* zeta(-n, q) = -B_{n+1}(q) / (n + 1) for a non-positive integer n
+         * (Apostol, Introduction to Analytic Number Theory, thm 12.13):
+         * zeta(0, 1) = -1/2 and zeta(-1, 1) = -1/12 are values, not NA */
+        if (s <= 0.0 && s == std::floor(s) && s >= -5.0) {
+            const int n = static_cast<int>(-s);
+            long double b;
+            switch (n) {
+            case 0: b = q - 0.5L; break;                                        /* B_1(q) */
+            case 1: b = q * q - q + 1.0L / 6.0L; break;                          /* B_2(q) */
+            case 2: b = q * q * q - 1.5L * q * q + 0.5L * q; break;              /* B_3(q) */
+            case 3: b = q * q * q * q - 2.0L * q * q * q + q * q - 1.0L / 30.0L; break; /* B_4(q) */
+            case 4: b = std::pow(static_cast<long double>(q), 5) - 2.5L * std::pow(static_cast<long double>(q), 4) + (5.0L / 3.0L) * q * q * q - q / 6.0L; break; /* B_5(q) */
+            default: b = std::pow(static_cast<long double>(q), 6) - 3.0L * std::pow(static_cast<long double>(q), 5) + 2.5L * std::pow(static_cast<long double>(q), 4) - 0.5L * q * q + 1.0L / 42.0L; break; /* B_6(q) */
+            }
+            return static_cast<double>(-b / (n + 1));
+        }
+        if (s <= 1.0) {
+            return NA_REAL;   /* the pole at s = 1, and 0 < s < 1 or non-integer s <= 0: not computed here */
         }
         long double acc = 0.0L;
         for (int k = 0; k < N; ++k) {
@@ -114,11 +134,11 @@ double hurwitz_zeta_scalar(double s, double q) {
 
 extern "C" {
 
-SEXP C_rmbl_gini(SEXP x) {
+SEXP C_rmbl_gini_impl(SEXP x) {
     std::vector<double> v;
     bool neg = false;
     if (!collect(x, v, &neg)) {
-        Rf_error("concentration measures need non-negative values");
+        rmbl::fail("concentration measures need non-negative values");
     }
     return Rf_ScalarReal(gini_sorted(v));
 }
@@ -126,18 +146,18 @@ SEXP C_rmbl_gini(SEXP x) {
 /* Lorenz curve: the cumulative share of the total held by the smallest
  * p of the units, including the (0, 0) origin so the curve can be
  * plotted and integrated as it stands. */
-SEXP C_rmbl_lorenz(SEXP x) {
+SEXP C_rmbl_lorenz_impl(SEXP x) {
     std::vector<double> v;
     bool neg = false;
     if (!collect(x, v, &neg)) {
-        Rf_error("concentration measures need non-negative values");
+        rmbl::fail("concentration measures need non-negative values");
     }
     const size_t n = v.size();
     std::sort(v.begin(), v.end());
     long double total = 0.0L;
     for (size_t i = 0; i < n; ++i) total += v[i];
-    SEXP pop = PROTECT(Rf_allocVector(REALSXP, static_cast<R_xlen_t>(n) + 1));
-    SEXP val = PROTECT(Rf_allocVector(REALSXP, static_cast<R_xlen_t>(n) + 1));
+    SEXP pop = PROTECT(rmbl::alloc_vector(REALSXP, static_cast<R_xlen_t>(n) + 1));
+    SEXP val = PROTECT(rmbl::alloc_vector(REALSXP, static_cast<R_xlen_t>(n) + 1));
     REAL(pop)[0] = 0.0;
     REAL(val)[0] = 0.0;
     long double run = 0.0L;
@@ -148,10 +168,10 @@ SEXP C_rmbl_lorenz(SEXP x) {
         REAL(val)[i + 1] = total > 0.0L
             ? static_cast<double>(run / total) : NA_REAL;
     }
-    SEXP res = PROTECT(Rf_allocVector(VECSXP, 2));
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 2));
     SET_VECTOR_ELT(res, 0, pop);
     SET_VECTOR_ELT(res, 1, val);
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 2));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 2));
     SET_STRING_ELT(nm, 0, Rf_mkChar("population"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("value"));
     Rf_setAttrib(res, R_NamesSymbol, nm);
@@ -165,22 +185,30 @@ SEXP C_rmbl_lorenz(SEXP x) {
  * units is 3 units rather than 2.5 of them. Reporting which count was
  * used is the caller's business; the fraction alone is not enough to
  * reconstruct it. */
-SEXP C_rmbl_top_share(SEXP x, SEXP fracs) {
+SEXP C_rmbl_top_share_impl(SEXP x, SEXP fracs) {
+    if (TYPEOF(fracs) != REALSXP) rmbl::fail("`fracs` must be a double vector");
     std::vector<double> v;
     bool neg = false;
     if (!collect(x, v, &neg)) {
-        Rf_error("concentration measures need non-negative values");
+        rmbl::fail("concentration measures need non-negative values");
     }
     const size_t n = v.size();
     std::sort(v.begin(), v.end(),
               [](double a, double b) { return a > b; });
-    long double total = 0.0L;
-    for (size_t i = 0; i < n; ++i) total += v[i];
+    /* prefix sums once: each fraction is then one lookup, so a long
+     * vector of fractions costs O(n + m), not O(n * m) */
+    std::vector<long double> pre(n + 1, 0.0L);
+    for (size_t i = 0; i < n; ++i) {
+        if ((i & 65535) == 0) rmbl::check_interrupt();
+        pre[i + 1] = pre[i] + v[i];
+    }
+    const long double total = pre[n];
     const R_xlen_t m = XLENGTH(fracs);
     const double *f = REAL(fracs);
-    SEXP share = PROTECT(Rf_allocVector(REALSXP, m));
-    SEXP took = PROTECT(Rf_allocVector(INTSXP, m));
+    SEXP share = PROTECT(rmbl::alloc_vector(REALSXP, m));
+    SEXP took = PROTECT(rmbl::alloc_vector(INTSXP, m));
     for (R_xlen_t j = 0; j < m; ++j) {
+        if ((j & 65535) == 0) rmbl::check_interrupt();
         if (n == 0 || total <= 0.0L || ISNAN(f[j]) || f[j] < 0 || f[j] > 1) {
             REAL(share)[j] = NA_REAL;
             INTEGER(took)[j] = NA_INTEGER;
@@ -189,15 +217,13 @@ SEXP C_rmbl_top_share(SEXP x, SEXP fracs) {
         size_t k = static_cast<size_t>(
             std::ceil(f[j] * static_cast<double>(n) - 1e-9));
         if (k > n) k = n;
-        long double run = 0.0L;
-        for (size_t i = 0; i < k; ++i) run += v[i];
-        REAL(share)[j] = static_cast<double>(run / total);
+        REAL(share)[j] = static_cast<double>(pre[k] / total);
         INTEGER(took)[j] = static_cast<int>(k);
     }
-    SEXP res = PROTECT(Rf_allocVector(VECSXP, 2));
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 2));
     SET_VECTOR_ELT(res, 0, share);
     SET_VECTOR_ELT(res, 1, took);
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 2));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 2));
     SET_STRING_ELT(nm, 0, Rf_mkChar("share"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("units"));
     Rf_setAttrib(res, R_NamesSymbol, nm);
@@ -214,7 +240,7 @@ SEXP C_rmbl_top_share(SEXP x, SEXP fracs) {
  * tie term overstates the variance's shrinkage and so overstates
  * significance, which matters most on exactly the short integer series
  * this is for. */
-SEXP C_rmbl_mann_kendall(SEXP y) {
+SEXP C_rmbl_mann_kendall_impl(SEXP y) {
     const R_xlen_t n = XLENGTH(y);
     const double *p = REAL(y);
     std::vector<double> v;
@@ -225,6 +251,7 @@ SEXP C_rmbl_mann_kendall(SEXP y) {
     const R_xlen_t m = static_cast<R_xlen_t>(v.size());
     double s = 0.0;
     for (R_xlen_t i = 0; i + 1 < m; ++i) {
+        if ((i & 511) == 0) rmbl::check_interrupt();
         for (R_xlen_t j = i + 1; j < m; ++j) {
             const double d = v[static_cast<size_t>(j)] -
                              v[static_cast<size_t>(i)];
@@ -247,11 +274,11 @@ SEXP C_rmbl_mann_kendall(SEXP y) {
     const long double nn = static_cast<long double>(m);
     const double var = m < 2 ? NA_REAL : static_cast<double>(
         (nn * (nn - 1.0L) * (2.0L * nn + 5.0L) - tiesum) / 18.0L);
-    SEXP res = PROTECT(Rf_allocVector(VECSXP, 3));
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 3));
     SET_VECTOR_ELT(res, 0, Rf_ScalarReal(m < 2 ? NA_REAL : s));
     SET_VECTOR_ELT(res, 1, Rf_ScalarReal(var));
     SET_VECTOR_ELT(res, 2, Rf_ScalarInteger(static_cast<int>(m)));
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 3));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 3));
     SET_STRING_ELT(nm, 0, Rf_mkChar("S"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("var"));
     SET_STRING_ELT(nm, 2, Rf_mkChar("n"));
@@ -268,13 +295,34 @@ SEXP C_rmbl_mann_kendall(SEXP y) {
  * Sen confidence interval needs their order statistics; enumerating them
  * here replaces an R double loop that grew a vector one slope at a time
  * and made trend_test() unusable beyond a few hundred periods. */
-SEXP C_rmbl_sen_slopes(SEXP x, SEXP y) {
+/* The pairwise enumerations are quadratic: the same n cap trend_test()
+ * applies in R is applied here, where a LinkingTo caller or a direct .Call
+ * would otherwise ask for n(n-1)/2 doubles (n = 1e6 is 4 TB). */
+static const R_xlen_t kMaxPairwiseN = 20000;
+
+static void need_xy(SEXP x, SEXP y) {
+    if (TYPEOF(x) != REALSXP || TYPEOF(y) != REALSXP) {
+        RMBL_ARG_ERROR("`x` and `y` must be double vectors");
+    }
+    if (XLENGTH(x) != XLENGTH(y)) {
+        RMBL_ARG_ERROR("`x` and `y` must be the same length (%d vs %d)",
+                 static_cast<int>(XLENGTH(x)), static_cast<int>(XLENGTH(y)));
+    }
+    if (XLENGTH(x) > kMaxPairwiseN) {
+        RMBL_ARG_ERROR("n = %d exceeds the %d-point limit of the pairwise-slope enumeration",
+                 static_cast<int>(XLENGTH(x)), static_cast<int>(kMaxPairwiseN));
+    }
+}
+
+SEXP C_rmbl_sen_slopes_impl(SEXP x, SEXP y) {
+    need_xy(x, y);
     const R_xlen_t n = XLENGTH(x);
     const double *px = REAL(x);
     const double *py = REAL(y);
     std::vector<double> slopes;
     if (n > 1) slopes.reserve(static_cast<size_t>(n) * (n - 1) / 2);
     for (R_xlen_t i = 0; i + 1 < n; ++i) {
+        if ((i & 255) == 0) rmbl::check_interrupt();
         for (R_xlen_t j = i + 1; j < n; ++j) {
             const double dx = px[j] - px[i];
             if (dx == 0.0 || ISNAN(dx) || ISNAN(py[j]) || ISNAN(py[i])) continue;
@@ -282,13 +330,14 @@ SEXP C_rmbl_sen_slopes(SEXP x, SEXP y) {
         }
     }
     std::sort(slopes.begin(), slopes.end());
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, static_cast<R_xlen_t>(slopes.size())));
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, static_cast<R_xlen_t>(slopes.size())));
     for (size_t k = 0; k < slopes.size(); ++k) REAL(out)[k] = slopes[k];
     UNPROTECT(1);
     return out;
 }
 
-SEXP C_rmbl_theil_sen(SEXP x, SEXP y) {
+SEXP C_rmbl_theil_sen_impl(SEXP x, SEXP y) {
+    need_xy(x, y);
     const R_xlen_t n = XLENGTH(x);
     const double *px = REAL(x);
     const double *py = REAL(y);
@@ -304,6 +353,7 @@ SEXP C_rmbl_theil_sen(SEXP x, SEXP y) {
     std::vector<double> slopes;
     slopes.reserve(m * (m > 0 ? m - 1 : 0) / 2);
     for (size_t i = 0; i + 1 < m; ++i) {
+        if ((i & 255) == 0) rmbl::check_interrupt();
         for (size_t j = i + 1; j < m; ++j) {
             const double dx = xs[j] - xs[i];
             /* a pair sharing an x contributes no slope, rather than an
@@ -342,12 +392,12 @@ SEXP C_rmbl_theil_sen(SEXP x, SEXP y) {
             intercept = 0.5 * (lo + hi);
         }
     }
-    SEXP res = PROTECT(Rf_allocVector(VECSXP, 3));
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 3));
     SET_VECTOR_ELT(res, 0, Rf_ScalarReal(slope));
     SET_VECTOR_ELT(res, 1, Rf_ScalarReal(intercept));
     SET_VECTOR_ELT(res, 2, Rf_ScalarReal(
         static_cast<double>(slopes.size())));
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 3));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 3));
     SET_STRING_ELT(nm, 0, Rf_mkChar("slope"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("intercept"));
     SET_STRING_ELT(nm, 2, Rf_mkChar("pairs"));
@@ -371,11 +421,11 @@ SEXP C_rmbl_theil_sen(SEXP x, SEXP y) {
  * Bernoulli-number corrections. N = 16 with six correction terms is
  * good to near machine precision for s > 1.
  */
-SEXP C_rmbl_hurwitz_zeta(SEXP s_, SEXP q_) {
+SEXP C_rmbl_hurwitz_zeta_impl(SEXP s_, SEXP q_) {
     const R_xlen_t n = XLENGTH(s_);
     const double *sv = REAL(s_);
     const double q = Rf_asReal(q_);
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, n));
     for (R_xlen_t i = 0; i < n; ++i) {
         REAL(out)[i] = hurwitz_zeta_scalar(sv[i], q);
     }
@@ -397,21 +447,48 @@ SEXP C_rmbl_hurwitz_zeta(SEXP s_, SEXP q_) {
  * loop: thousands of reassignments of the values over the areas, each
  * re-walking the whole neighbour list.
  */
-SEXP C_rmbl_morans_i(SEXP x_, SEXP idx_, SEXP start_, SEXP len_,
+SEXP C_rmbl_morans_i_impl(SEXP x_, SEXP idx_, SEXP start_, SEXP len_,
                      SEXP wts_, SEXP nperm_, SEXP seed_) {
+    (void)seed_;  /* kept for the registered arity: the permutations draw from R's stream, set.seed() governs it */
+    /* every argument checked before the first std::vector exists, as the R wrapper checks them:
+     * the entry is reachable with .Call directly, and an NA `nperm` became a negative length
+     * whose R error jumped over a live vector; an index past the areas read out of bounds
+     * (review of 1.0.0, M12) */
+    if (TYPEOF(x_) != REALSXP || TYPEOF(idx_) != INTSXP || TYPEOF(start_) != INTSXP ||
+        TYPEOF(len_) != INTSXP || TYPEOF(wts_) != REALSXP) {
+        rmbl::fail("Moran's I takes double `x` and `wts` and integer `idx`, `start` and `len`");
+    }
     const R_xlen_t n = XLENGTH(x_);
     const double *x = REAL(x_);
     const int *idx = INTEGER(idx_);
     const int *start = INTEGER(start_);
     const int *len = INTEGER(len_);
     const double *wts = REAL(wts_);
-    const R_xlen_t nperm = static_cast<R_xlen_t>(Rf_asInteger(nperm_));
+    const int np = Rf_asInteger(nperm_);
+    if (np == NA_INTEGER || np < 0) rmbl::fail("`nperm` must be a whole number >= 0");
+    const R_xlen_t nperm = static_cast<R_xlen_t>(np);
 
-    if (n < 3) Rf_error("Moran's I needs at least three areas");
+    if (n < 3) rmbl::fail("Moran's I needs at least three areas");
+    if (XLENGTH(start_) != n || XLENGTH(len_) != n || XLENGTH(wts_) != XLENGTH(idx_)) {
+        rmbl::fail("`start` and `len` must have one element per area and `wts` one per neighbour");
+    }
+    for (R_xlen_t i = 0; i < n; ++i) {
+        if (start[i] == NA_INTEGER || len[i] == NA_INTEGER || start[i] < 0 || len[i] < 0 ||
+            static_cast<R_xlen_t>(start[i]) + len[i] > XLENGTH(idx_)) {
+            rmbl::fail("area %d's neighbour block lies outside `idx`", static_cast<int>(i + 1));
+        }
+        for (int k = 0; k < len[i]; ++k) {
+            const int j = idx[start[i] + k];
+            if (j == NA_INTEGER || j < 0 || j >= n) {
+                rmbl::fail("area %d has a neighbour index outside 0 to %d", static_cast<int>(i + 1),
+                           static_cast<int>(n - 1));
+            }
+        }
+    }
 
     long double total = 0.0L;
     for (R_xlen_t i = 0; i < n; ++i) {
-        if (ISNAN(x[i])) Rf_error("`x` must not contain missing values");
+        if (ISNAN(x[i])) rmbl::fail("`x` must not contain missing values");
         total += x[i];
     }
     const double mean = static_cast<double>(total / n);
@@ -426,12 +503,12 @@ SEXP C_rmbl_morans_i(SEXP x_, SEXP idx_, SEXP start_, SEXP len_,
         for (int k = 0; k < len[i]; ++k) wsum += wts[start[i] + k];
     }
     if (ss <= 0.0L || wsum <= 0.0L) {
-        SEXP out = PROTECT(Rf_allocVector(VECSXP, 4));
+        SEXP out = PROTECT(rmbl::alloc_vector(VECSXP, 4));
         SET_VECTOR_ELT(out, 0, Rf_ScalarReal(NA_REAL));
         SET_VECTOR_ELT(out, 1, Rf_ScalarReal(NA_REAL));
         SET_VECTOR_ELT(out, 2, Rf_ScalarReal(static_cast<double>(wsum)));
-        SET_VECTOR_ELT(out, 3, Rf_allocVector(REALSXP, 0));
-        SEXP nm = PROTECT(Rf_allocVector(STRSXP, 4));
+        SET_VECTOR_ELT(out, 3, rmbl::alloc_vector(REALSXP, 0));
+        SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
         SET_STRING_ELT(nm, 0, Rf_mkChar("I"));
         SET_STRING_ELT(nm, 1, Rf_mkChar("cross"));
         SET_STRING_ELT(nm, 2, Rf_mkChar("W"));
@@ -457,13 +534,19 @@ SEXP C_rmbl_morans_i(SEXP x_, SEXP idx_, SEXP start_, SEXP len_,
     const double I = static_cast<double>(
         (static_cast<long double>(n) / wsum) * cross / ss);
 
-    SEXP null = PROTECT(Rf_allocVector(REALSXP, nperm));
+    SEXP null = PROTECT(rmbl::alloc_vector(REALSXP, nperm));
     if (nperm > 0) {
         /* R's own stream, so set.seed() in the caller governs it and the
          * p-value is reproducible */
         GetRNGstate();
         std::vector<double> p(z);
+        bool stopped = false;
         for (R_xlen_t b = 0; b < nperm; ++b) {
+            /* each permutation re-walks the neighbour list: poll for a Ctrl-C */
+            if ((b & 63) == 0 && rmbl_interrupt_pending()) {
+                stopped = true;
+                break;
+            }
             /* Fisher-Yates over the centred values: the null is that the
              * values are assigned to areas at random, so the sum of
              * squares is invariant and only the cross-product moves */
@@ -477,13 +560,14 @@ SEXP C_rmbl_morans_i(SEXP x_, SEXP idx_, SEXP start_, SEXP len_,
                 (static_cast<long double>(n) / wsum) * cross_of(p) / ss);
         }
         PutRNGstate();
+        if (stopped) throw rmbl::Interrupt();
     }
-    SEXP out = PROTECT(Rf_allocVector(VECSXP, 4));
+    SEXP out = PROTECT(rmbl::alloc_vector(VECSXP, 4));
     SET_VECTOR_ELT(out, 0, Rf_ScalarReal(I));
     SET_VECTOR_ELT(out, 1, Rf_ScalarReal(static_cast<double>(cross)));
     SET_VECTOR_ELT(out, 2, Rf_ScalarReal(static_cast<double>(wsum)));
     SET_VECTOR_ELT(out, 3, null);
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 4));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
     SET_STRING_ELT(nm, 0, Rf_mkChar("I"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("cross"));
     SET_STRING_ELT(nm, 2, Rf_mkChar("W"));
@@ -508,6 +592,7 @@ extern "C" {
  * distribution of nothing to be unequal about -- and when any value is
  * negative, since a share of a total has no meaning then. */
 double rmbl_gini(const double *x, R_xlen_t n) {
+    return rmbl::kernel_call([&]() -> double {
     std::vector<double> v;
     v.reserve(static_cast<size_t>(n));
     for (R_xlen_t i = 0; i < n; ++i) {
@@ -516,6 +601,7 @@ double rmbl_gini(const double *x, R_xlen_t n) {
         v.push_back(x[i]);
     }
     return gini_sorted(v);
+    });
 }
 
 /* Share of the total held by the largest ceil(frac * n) units, and how
@@ -524,6 +610,7 @@ double rmbl_top_share(const double *x, R_xlen_t n, double frac,
                       R_xlen_t *units) {
     if (units != NULL) *units = 0;
     if (ISNAN(frac) || frac < 0 || frac > 1) return NA_REAL;
+    return rmbl::kernel_call([&]() -> double {
     std::vector<double> v;
     v.reserve(static_cast<size_t>(n));
     for (R_xlen_t i = 0; i < n; ++i) {
@@ -544,12 +631,14 @@ double rmbl_top_share(const double *x, R_xlen_t n, double frac,
     for (size_t i = 0; i < k; ++i) run += v[i];
     if (units != NULL) *units = static_cast<R_xlen_t>(k);
     return static_cast<double>(run / total);
+    });
 }
 
 /* Lorenz curve into caller-supplied buffers of length n + 1, including
  * the origin. Returns the number of points written, or 0 on refusal. */
 R_xlen_t rmbl_lorenz(const double *x, R_xlen_t n, double *population,
                      double *value) {
+    return rmbl::kernel_call([&]() -> R_xlen_t {
     std::vector<double> v;
     v.reserve(static_cast<size_t>(n));
     for (R_xlen_t i = 0; i < n; ++i) {
@@ -572,11 +661,15 @@ R_xlen_t rmbl_lorenz(const double *x, R_xlen_t n, double *population,
             ? static_cast<double>(run / total) : NA_REAL;
     }
     return static_cast<R_xlen_t>(m) + 1;
+    });
 }
 
-/* Mann-Kendall S and its tie-corrected variance. */
-void rmbl_mann_kendall(const double *y, R_xlen_t n, double *S,
-                       double *var, R_xlen_t *used) {
+/* Mann-Kendall S and its tie-corrected variance. The body with its buffers is
+ * `mann_kendall_inner` (returns 1 when a pending interrupt stopped it, with
+ * S and var set to NA); the exported wrapper raises only after the buffers
+ * are gone. */
+static int mann_kendall_inner(const double *y, R_xlen_t n, double *S,
+                              double *var, R_xlen_t *used) {
     std::vector<double> v;
     v.reserve(static_cast<size_t>(n));
     for (R_xlen_t i = 0; i < n; ++i) {
@@ -584,9 +677,14 @@ void rmbl_mann_kendall(const double *y, R_xlen_t n, double *S,
     }
     const R_xlen_t m = static_cast<R_xlen_t>(v.size());
     if (used != NULL) *used = m;
-    if (m < 2) { *S = NA_REAL; *var = NA_REAL; return; }
+    if (m < 2) { *S = NA_REAL; *var = NA_REAL; return 0; }
     double s = 0.0;
     for (R_xlen_t i = 0; i + 1 < m; ++i) {
+        if ((i & 511) == 0 && rmbl_interrupt_pending()) {
+            rmbl_kernel_interrupted = 1;
+            *S = NA_REAL; *var = NA_REAL;
+            return 1;
+        }
         for (R_xlen_t j = i + 1; j < m; ++j) {
             const double d = v[static_cast<size_t>(j)] -
                              v[static_cast<size_t>(i)];
@@ -610,6 +708,16 @@ void rmbl_mann_kendall(const double *y, R_xlen_t n, double *S,
     *S = s;
     *var = static_cast<double>(
         (nn * (nn - 1.0L) * (2.0L * nn + 5.0L) - tiesum) / 18.0L);
+    return 0;
+}
+
+void rmbl_mann_kendall(const double *y, R_xlen_t n, double *S,
+                       double *var, R_xlen_t *used) {
+    *S = NA_REAL;
+    *var = NA_REAL;
+    int stopped = 0;
+    rmbl::kernel_call([&] { stopped = mann_kendall_inner(y, n, S, var, used); });
+    if (stopped == 1) rmbl_interrupt_raise_unbarriered();
 }
 
 /* Hurwitz zeta, the normalising constant of the discrete power law. */
@@ -617,9 +725,19 @@ double rmbl_hurwitz_zeta(double s, double q) {
     return hurwitz_zeta_scalar(s, q);
 }
 
-/* Theil-Sen slope and intercept. */
+/* Theil-Sen slope and intercept, with the .Call version's guards: at most kMaxPairwiseN points (the
+ * n^2 / 2 slopes of more are gigabytes), a poll for a Ctrl-C in the pair loop, and an exception
+ * raised as an R error, never std::terminate() (review of 1.0.0, M12). Both are NA when there is
+ * no slope or the work was interrupted. */
 void rmbl_theil_sen(const double *x, const double *y, R_xlen_t n,
                     double *slope, double *intercept) {
+    *slope = NA_REAL;
+    *intercept = NA_REAL;
+    if (n > kMaxPairwiseN) {
+        rmbl_arg_error("n = %d exceeds the %d-point limit of the pairwise-slope enumeration",
+                       static_cast<int>(n), static_cast<int>(kMaxPairwiseN));
+    }
+    rmbl::kernel_call([&] {
     std::vector<double> xs;
     std::vector<double> ys;
     for (R_xlen_t i = 0; i < n; ++i) {
@@ -631,22 +749,24 @@ void rmbl_theil_sen(const double *x, const double *y, R_xlen_t n,
     const size_t m = xs.size();
     std::vector<double> slopes;
     for (size_t i = 0; i + 1 < m; ++i) {
+        if ((i & 255) == 0) rmbl::check_interrupt();
         for (size_t j = i + 1; j < m; ++j) {
             const double dx = xs[j] - xs[i];
             if (dx == 0.0) continue;
             slopes.push_back((ys[j] - ys[i]) / dx);
         }
     }
-    if (slopes.empty()) { *slope = NA_REAL; *intercept = NA_REAL; return; }
+    if (slopes.empty()) return;
     std::sort(slopes.begin(), slopes.end());
     const size_t k = slopes.size();
-    *slope = (k % 2 == 1) ? slopes[k / 2]
-                          : 0.5 * (slopes[k / 2 - 1] + slopes[k / 2]);
+    const double b = (k % 2 == 1) ? slopes[k / 2] : 0.5 * (slopes[k / 2 - 1] + slopes[k / 2]);
     std::vector<double> resid(m);
-    for (size_t i = 0; i < m; ++i) resid[i] = ys[i] - *slope * xs[i];
+    for (size_t i = 0; i < m; ++i) resid[i] = ys[i] - b * xs[i];
     std::sort(resid.begin(), resid.end());
+    *slope = b;
     *intercept = (m % 2 == 1) ? resid[m / 2]
                               : 0.5 * (resid[m / 2 - 1] + resid[m / 2]);
+    });
 }
 
 }  // extern "C"

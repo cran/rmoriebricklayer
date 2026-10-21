@@ -22,6 +22,9 @@
 ##   Rscript setup_and_run.R --quick      # non-interactive (defaults)
 ##   Rscript setup_and_run.R --synthetic  # offline, fake data, no prompts
 ##   Rscript setup_and_run.R --data PATH  # explicit data path
+##   Rscript setup_and_run.R --allow-digest-drift  # analyse bytes whose
+##                                        # SHA-256 differs from the pinned
+##                                        # provenance (recorded in manifest)
 ##   Rscript setup_and_run.R --help
 ##
 ## Licence: AGPL-3.0-or-later
@@ -45,6 +48,24 @@ HELP_MODE  <- any(args %in% c("-h", "--help"))
 ## without a prompt, so an offline or unattended run can exercise it.
 SYNTH_ARG  <- any(args %in% "--synthetic") ||
   nzchar(Sys.getenv("OTIS_MRP_SYNTHETIC", ""))
+## The pinned digest is the capsule's guarantee. A mismatch stops the run
+## (exit 7) unless this flag is given, and then the override is recorded
+## in the manifest rather than printed once and forgotten.
+ALLOW_DRIFT <- any(args %in% "--allow-digest-drift")
+DIGEST_OVERRIDE <- FALSE
+digest_mismatch <- function(v) {
+  say("  ! SHA256 differs from the pinned provenance:")
+  say("      expected ", v$expected)
+  say("      got      ", v$actual)
+  if (!ALLOW_DRIFT) {
+    say("  Refusing to analyse bytes the capsule did not pin.")
+    say("  Re-run with --allow-digest-drift to proceed anyway; the override")
+    say("  is then recorded in manifest.json.")
+    quit(status = 7)
+  }
+  say("  --allow-digest-drift given: continuing; recorded in the manifest.")
+  DIGEST_OVERRIDE <<- TRUE
+}
 ## No terminal on stdin (CI, reviewer harness, piped run): prompts would
 ## silently take their defaults anyway, so make that explicit and honest.
 AUTO_QUICK <- FALSE
@@ -84,8 +105,8 @@ PROVENANCE_PATH <- file.path(script_dir, "data_provenance.json")
 if (!file.exists(CONFIG_PATH))
   stop("config.json not found at ", CONFIG_PATH)
 # the bundled native codec (json_native.R): no jsonlite needed
-cfg <- bricklayer_json_from_json(CONFIG_PATH, simplifyVector = FALSE)
-prov <- load_provenance(PROVENANCE_PATH)
+cfg <- fromjs(CONFIG_PATH, simplifyVector = FALSE)
+prov <- loadprov(PROVENANCE_PATH)
 
 PROJECT_NAME    <- cfg$project$name         %||% "bricklayer-project"
 PROJECT_AUTHOR  <- cfg$project$author       %||% "(unknown author)"
@@ -200,8 +221,9 @@ if (dml_on) {
     say("  This script does not install packages itself. Install them in R,")
     say("  then re-run this script:")
     say("    install.packages(c(", paste0('"', fb, '"', collapse = ", "), "))")
-    say("  Alternative: install.packages(\"rmorie\") gives the same estimator",
-        " in ~10 s.")
+    say("  Alternative: rmorie gives the same estimator in ~10 s (it is on r-universe, not CRAN):")
+    say("    install.packages(\"rmorie\", repos = c(\"https://rootcoder007.r-universe.dev\",",
+        " \"https://cloud.r-project.org\"))")
     say("  Or unset OTIS_DML_RECOMPUTE: the 8 DML checks then record as INFO.")
     quit(status = 3)
   }
@@ -311,9 +333,9 @@ if (!is.null(DATA_ARG)) {
       }
       input_path <- normalizePath(candidate)
       if (!is.null(prov$resource$sha256)) {
-        v <- verify_sha256(input_path, prov$resource$sha256)
+        v <- vrfsha256(input_path, prov$resource$sha256)
         if (v$match) say("  ✓ SHA256 matches pinned provenance.")
-        else say("  ! SHA256 differs — the file may be a newer release.")
+        else digest_mismatch(v)
       }
     }
 
@@ -324,20 +346,21 @@ if (!is.null(DATA_ARG)) {
         script_dir   = script_dir,
         project_name = PROJECT_NAME,
         quick        = QUICK_MODE)
-      url <- resolve_via_ckan(prov)
-      if (is.null(url)) url <- resolve_via_ckan_search(prov)
+      url <- rslvckan(prov)
+      if (is.null(url)) url <- rslvckns(prov)
       if (is.null(url)) url <- prov$resource$direct_url
       if (is.null(url)) {
         say("ERROR: no download URL available — provenance missing.")
         quit(status = 5)
       }
-      fn <- prov$resource$filename %||% basename(url)
+      # the provenance's filename is a NAME, never a path
+      fn <- basename(prov$resource$filename %||% basename(url))
       target <- file.path(save_dir, fn)
       say("  Downloading: ", url)
       say("  → ", target)
       wb_url <- prov$wayback$csv_snapshot %||% ""
-      if (!friendly_download(url, target,
-                              attempt_wayback = if (nzchar(wb_url)) wb_url else NULL)) {
+      if (!fdl(url, target,
+                              attwb = if (nzchar(wb_url)) wb_url else NULL)) {
         say("  All download paths exhausted. Options:")
         say("    1) Re-run after disabling your VPN")
         say("    2) Download manually from: ", prov$dataset$catalogue_page)
@@ -346,9 +369,9 @@ if (!is.null(DATA_ARG)) {
       }
       input_path <- target
       if (!is.null(prov$resource$sha256)) {
-        v <- verify_sha256(target, prov$resource$sha256)
+        v <- vrfsha256(target, prov$resource$sha256)
         if (v$match) say("  ✓ SHA256 byte-for-byte match.")
-        else say("  ! SHA256 differs — Ontario may have updated the data.")
+        else digest_mismatch(v)
       }
     }
 
@@ -377,7 +400,7 @@ if (!is.null(DATA_ARG)) {
       }
       target <- file.path(save_dir, "SYNTHETIC_data.csv")
       say("  Generating synthetic dataset...")
-      info <- make_synthetic_csv(synth_schema, target)
+      info <- mksyncsv(synth_schema, target)
       say("  Wrote ", info$rows, " rows (seed = ", info$seed, ") to: ", target)
       input_path <- target
       SYNTHETIC_MODE <- TRUE
@@ -412,7 +435,13 @@ if (isTRUE(SYNTHETIC_MODE)) {
   cat("##########################################################\n\n")
 }
 
-run_args <- c(ANALYSIS_R, shQuote(input_path), shQuote(output_dir))
+## every ARGUMENT quoted: a bundle directory with a space broke the command
+## line system2() composes. The command itself is not quoted here: system2()
+## quotes it (shQuote on Unix, the Windows rules on Windows), and a second
+## layer made the shell look for a program literally named '/opt/R/.../Rscript'.
+sh_type <- if (OS_KIND == "windows") "cmd" else "sh"
+run_args <- c(shQuote(ANALYSIS_R, type = sh_type), shQuote(input_path, type = sh_type),
+              shQuote(output_dir, type = sh_type))
 env_vec <- if (isTRUE(SYNTHETIC_MODE)) "BRICKLAYER_SYNTHETIC=1" else character(0)
 exit_code <- system2(rscript_bin, run_args,
                      stdout = log_path, stderr = log_path,
@@ -424,7 +453,7 @@ hr()
 say("Step 4/5: Results summary")
 manifest_path <- file.path(output_dir, "manifest.json")
 if (file.exists(manifest_path)) {
-  m <- bricklayer_json_from_json(manifest_path, simplifyVector = FALSE)
+  m <- fromjs(manifest_path, simplifyVector = FALSE)
   counts <- summarise_counts(m)
   say(sprintf("  Total:  %d", counts$total))
   say(sprintf("  PASS:   %d", counts$pass))
@@ -458,7 +487,8 @@ if (file.exists(manifest_path)) {
   m$meta$author    <- PROJECT_AUTHOR
   m$meta$os        <- OS_KIND
   m$meta$synthetic <- SYNTHETIC_MODE
-  write_summary_txt(
+  m$meta$digest_override <- DIGEST_OVERRIDE
+  wrsmrytxt(
     m, output_dir,
     paths = list(
       bundle         = script_dir,
@@ -467,11 +497,11 @@ if (file.exists(manifest_path)) {
       analysis_script = ANALYSIS_R,
       provenance     = PROVENANCE_PATH
     ),
-    what_was_done = unlist(cfg$summary$what_was_done %||%
+    whatwasdone = unlist(cfg$summary$what_was_done %||%
                             list("Ran the project's analysis script.",
                                  "Wrote CSV outputs and manifest.json.")),
     contact = PROJECT_CONTACT,
-    licence = paste0(PROJECT_LICENCE,
+    lic = paste0(PROJECT_LICENCE,
                      if (!is.null(prov$dataset$licence_short))
                        paste0(" (scripts); ",
                               prov$dataset$licence_short, " (data)")

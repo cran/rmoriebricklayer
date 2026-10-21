@@ -27,11 +27,20 @@
  * not.
  */
 
+#ifndef R_NO_REMAP
 #define R_NO_REMAP
+#endif
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
+#include "rmbl_ct.h"
+
+/* The first element of a character argument, or an error in words: every
+ * STRING_ELT(x, 0) below went through this once a length-0 or NA input
+ * reached a .Call directly (the R wrappers guard; the entry points did not). */
 #include <R_ext/Rdynload.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -43,16 +52,6 @@ extern "C" void rmbl_sha256_raw(const unsigned char *data, size_t len,
                                 unsigned char out[32]);
 
 namespace {
-
-const char kHex[] = "0123456789abcdef";
-
-inline void hexlify(const unsigned char *bytes, size_t n, char *out) {
-    for (size_t i = 0; i < n; ++i) {
-        out[i * 2] = kHex[(bytes[i] >> 4) & 0xf];
-        out[i * 2 + 1] = kHex[bytes[i] & 0xf];
-    }
-    out[n * 2] = '\0';
-}
 
 /* ---------------- SHA-512 (FIPS 180-4) ---------------- */
 
@@ -86,9 +85,7 @@ const uint64_t kSha512K[80] = {
     0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
 
-inline uint64_t rotr64(uint64_t x, unsigned k) {
-    return (x >> k) | (x << (64 - k));
-}
+using rmbl_ct::rotr64;
 
 struct sha512_ctx {
     uint8_t  buf[128];
@@ -99,7 +96,10 @@ struct sha512_ctx {
 };
 
 void sha512_compress(sha512_ctx *c, const uint8_t blk[128]) {
+    /* the message schedule is the block itself, spread out: under HMAC it
+     * is k0 ^ ipad, so it is wiped as the frame ends (review of 1.0.0, M8) */
     uint64_t w[80];
+    rmbl_ct::Guard gw(w, sizeof w);
     for (int i = 0; i < 16; ++i) {
         w[i] = 0;
         for (int j = 0; j < 8; ++j) {
@@ -298,6 +298,7 @@ void rmbl_sha1_raw(const unsigned char *data, size_t len,
 void rmbl_sha384_raw(const unsigned char *data, size_t len,
                      unsigned char out[48]) {
     sha512_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);
     sha512_init(&c);
     /* the SHA-384 initial state */
     c.h[0] = 0xcbbb9d5dc1059ed8ULL;
@@ -309,14 +310,42 @@ void rmbl_sha384_raw(const unsigned char *data, size_t len,
     c.h[6] = 0xdb0c2e0d64f98fa7ULL;
     c.h[7] = 0x47b5481dbefa4fa4ULL;
     unsigned char full[64];
+    rmbl_ct::Guard gf(full, sizeof full);
     sha512_update(&c, data, len);
     sha512_final(&c, full);
     std::memcpy(out, full, 48);
 }
 
+/* SHA-512/t (FIPS 180-4 section 5.3.6) for t = 224 and 256: the SHA-512
+ * compression function from the initial state the standard derives for
+ * each t, truncated to t bits. `bits` is 224 or 256; out holds t/8 bytes. */
+void rmbl_sha512t_raw(int bits, const unsigned char *data, size_t len,
+                      unsigned char *out) {
+    static const uint64_t kIv224[8] = {
+        0x8C3D37C819544DA2ULL, 0x73E1996689DCD4D6ULL, 0x1DFAB7AE32FF9C82ULL,
+        0x679DD514582F9FCFULL, 0x0F6D2B697BD44DA8ULL, 0x77E36F7304C48942ULL,
+        0x3F9D85A86A1D36C8ULL, 0x1112E6AD91D692A1ULL
+    };
+    static const uint64_t kIv256[8] = {
+        0x22312194FC2BF72CULL, 0x9F555FA3C84C64C2ULL, 0x2393B86B6F53B151ULL,
+        0x963877195940EABDULL, 0x96283EE2A88EFFE3ULL, 0xBE5E1E2553863992ULL,
+        0x2B0199FC2C85B8AAULL, 0x0EB72DDC81C52CA2ULL
+    };
+    sha512_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);
+    sha512_init(&c);
+    std::memcpy(c.h, bits == 224 ? kIv224 : kIv256, sizeof c.h);
+    unsigned char full[64];
+    rmbl_ct::Guard gf(full, sizeof full);
+    sha512_update(&c, data, len);
+    sha512_final(&c, full);
+    std::memcpy(out, full, static_cast<size_t>(bits / 8));
+}
+
 void rmbl_sha512_midstate(const unsigned char block[128],
                           uint64_t state_out[8]) {
     sha512_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);
     sha512_init(&c);
     sha512_compress(&c, block);
     std::memcpy(state_out, c.h, sizeof c.h);
@@ -326,6 +355,7 @@ void rmbl_sha512_finish(const uint64_t state_in[8], size_t prefix_blocks,
                         const unsigned char *tail, size_t taillen,
                         unsigned char out[64]) {
     sha512_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);
     sha512_init(&c);
     std::memcpy(c.h, state_in, sizeof c.h);
     c.bitlen_lo = static_cast<uint64_t>(prefix_blocks) * 1024u;
@@ -337,11 +367,12 @@ void rmbl_sha512_finish(const uint64_t state_in[8], size_t prefix_blocks,
 
 void rmbl_sha512_hex(const unsigned char *data, size_t len, char out[129]) {
     sha512_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);
     uint8_t h[64];
     sha512_init(&c);
     sha512_update(&c, data, len);
     sha512_final(&c, h);
-    hexlify(h, 64, out);
+    rmbl_ct::hexlify_z(h, 64, out);
 }
 
 /* The same digest as raw bytes. The SHA-2 instantiation of SLH-DSA
@@ -350,6 +381,7 @@ void rmbl_sha512_hex(const unsigned char *data, size_t len, char out[129]) {
 void rmbl_sha512_raw(const unsigned char *data, size_t len,
                      unsigned char out[64]) {
     sha512_ctx c;
+    rmbl_ct::Guard gc(&c, sizeof c);
     sha512_init(&c);
     sha512_update(&c, data, len);
     sha512_final(&c, out);
@@ -367,13 +399,15 @@ uint32_t rmbl_crc32(const unsigned char *data, size_t len) {
 /* HMAC-SHA-256 (RFC 2104): H((K' ^ opad) || H((K' ^ ipad) || msg)),
  * with K' the key hashed down to 32 bytes when longer than the 64-byte
  * block and zero-padded to 64 otherwise. */
-void rmbl_hmac_sha256_hex(const unsigned char *key, size_t keylen,
+void rmbl_hmac_sha256_raw(const unsigned char *key, size_t keylen,
                           const unsigned char *msg, size_t msglen,
-                          char out[65]) {
+                          unsigned char out[32]) {
     unsigned char k0[64];
+    rmbl_ct::Guard gk(k0, sizeof k0);
     std::memset(k0, 0, sizeof(k0));
     if (keylen > 64) {
         unsigned char kh[32];
+        rmbl_ct::Guard gkh(kh, sizeof kh);
         rmbl_sha256_raw(key, keylen, kh);
         std::memcpy(k0, kh, 32);
     } else if (keylen > 0) {
@@ -383,17 +417,28 @@ void rmbl_hmac_sha256_hex(const unsigned char *key, size_t keylen,
     }
 
     std::vector<unsigned char> inner(64 + msglen);
+    rmbl_ct::Guard gi(inner.data(), inner.size());
     for (int i = 0; i < 64; ++i) inner[static_cast<size_t>(i)] = k0[i] ^ 0x36;
     if (msglen > 0) std::memcpy(inner.data() + 64, msg, msglen);
     unsigned char ih[32];
+    rmbl_ct::Guard gih(ih, sizeof ih);
     rmbl_sha256_raw(inner.data(), inner.size(), ih);
 
     unsigned char outer[64 + 32];
+    rmbl_ct::Guard go(outer, sizeof outer);
     for (int i = 0; i < 64; ++i) outer[i] = k0[i] ^ 0x5c;
     std::memcpy(outer + 64, ih, 32);
+    rmbl_sha256_raw(outer, sizeof(outer), out);
+}
+
+void rmbl_hmac_sha256_hex(const unsigned char *key, size_t keylen,
+                          const unsigned char *msg, size_t msglen,
+                          char out[65]) {
     unsigned char oh[32];
-    rmbl_sha256_raw(outer, sizeof(outer), oh);
-    hexlify(oh, 32, out);
+    /* the inner buffer is a std::vector sized by the message: a failed allocation is an R error,
+     * not std::terminate() in a LinkingTo caller (review of 1.0.0, M12) */
+    rmbl::kernel_call([&] { rmbl_hmac_sha256_raw(key, keylen, msg, msglen, oh); });
+    rmbl_ct::hexlify_z(oh, 32, out);
 }
 
 /* Constant-time digest comparison: a verifier must not leak how much of
@@ -405,7 +450,9 @@ int rmbl_digest_equal(const char *a, const char *b, size_t n) {
             diff | (static_cast<unsigned char>(a[i]) ^
                     static_cast<unsigned char>(b[i])));
     }
-    return diff == 0 ? 1 : 0;
+    /* the barrier keeps the compiler from turning the accumulated OR into
+     * an early-exit branch (the same treatment the ML-KEM select has) */
+    return rmbl_ct::barrier(diff) == 0 ? 1 : 0;
 }
 
 }  // extern "C"
@@ -413,18 +460,25 @@ int rmbl_digest_equal(const char *a, const char *b, size_t n) {
 namespace {
 
 /* Merkle level reduction over raw 32-byte digests. An unpaired node is
- * promoted unchanged. */
-std::vector<unsigned char> merkle_reduce(const std::vector<unsigned char> &lvl) {
+ * promoted unchanged. Scheme 2 (0.5.13 on) prefixes each interior node's
+ * input with 0x01 and each leaf's with 0x00 (RFC 6962 domain separation),
+ * so an interior node can no longer be presented as a leaf; scheme 1
+ * (0.5.12 and earlier) hashes both the same way and is kept only so that
+ * roots pinned by those versions still recompute. */
+std::vector<unsigned char> merkle_reduce(const std::vector<unsigned char> &lvl,
+                                         int scheme) {
     const size_t nodes = lvl.size() / 32;
     std::vector<unsigned char> up;
     up.reserve(((nodes + 1) / 2) * 32);
     size_t i = 0;
     while (i + 1 < nodes) {
-        unsigned char pair[64];
-        std::memcpy(pair, lvl.data() + i * 32, 32);
-        std::memcpy(pair + 32, lvl.data() + (i + 1) * 32, 32);
+        unsigned char pair[65];
+        const size_t off = scheme == 2 ? 1 : 0;
+        pair[0] = 0x01;
+        std::memcpy(pair + off, lvl.data() + i * 32, 32);
+        std::memcpy(pair + off + 32, lvl.data() + (i + 1) * 32, 32);
         unsigned char h[32];
-        rmbl_sha256_raw(pair, 64, h);
+        rmbl_sha256_raw(pair, 64 + off, h);
         up.insert(up.end(), h, h + 32);
         i += 2;
     }
@@ -440,17 +494,24 @@ std::vector<unsigned char> merkle_reduce(const std::vector<unsigned char> &lvl) 
  * The R layer is responsible for normalising its argument to this shape
  * (see .rmbl_chunk_bytes), which keeps the byte sequence for a character
  * chunk identical to what earlier versions hashed. */
-std::vector<unsigned char> leaves_from_chunks(SEXP x) {
+std::vector<unsigned char> leaves_from_chunks(SEXP x, int scheme) {
     const R_xlen_t n = XLENGTH(x);
     std::vector<unsigned char> lvl;
     lvl.reserve(static_cast<size_t>(n) * 32);
     for (R_xlen_t i = 0; i < n; ++i) {
         SEXP e = VECTOR_ELT(x, i);
         if (TYPEOF(e) != RAWSXP) {
-            Rf_error("each chunk must be a raw vector");
+            RMBL_ARG_ERROR("each chunk must be a raw vector");
         }
         unsigned char h[32];
-        rmbl_sha256_raw(RAW(e), static_cast<size_t>(XLENGTH(e)), h);
+        if (scheme == 2) {
+            std::vector<unsigned char> b(static_cast<size_t>(XLENGTH(e)) + 1);
+            b[0] = 0x00;
+            if (XLENGTH(e) > 0) std::memcpy(b.data() + 1, RAW(e), static_cast<size_t>(XLENGTH(e)));
+            rmbl_sha256_raw(b.data(), b.size(), h);
+        } else {
+            rmbl_sha256_raw(RAW(e), static_cast<size_t>(XLENGTH(e)), h);
+        }
         lvl.insert(lvl.end(), h, h + 32);
     }
     return lvl;
@@ -458,17 +519,59 @@ std::vector<unsigned char> leaves_from_chunks(SEXP x) {
 
 /* Shared entry guard: the three Merkle entry points all take the same
  * normalised list of raw chunks. */
-void check_chunk_list(SEXP x) {
+int check_chunk_list(SEXP x, SEXP scheme) {
     if (TYPEOF(x) != VECSXP) {
-        Rf_error("`chunks` must be a list of raw vectors");
+        RMBL_ARG_ERROR("`chunks` must be a list of raw vectors");
     }
+    const int sc = Rf_asInteger(scheme);
+    if (sc != 1 && sc != 2) RMBL_ARG_ERROR("`scheme` must be 1 or 2");
+    return sc;
 }
 
 }  // namespace
 
 extern "C" {
 
-SEXP C_rmbl_sha512(SEXP x) {
+extern "C" void rmbl_sha256_two_part(const unsigned char *, size_t, size_t, unsigned char[32]);
+
+/* Internal self-test: SHA-256 and SHA-512 of `x` fed in two pieces at
+ * `split`, as two hex strings. Equal to the one-shot digests when the
+ * partial-block buffering in each update() is right. */
+SEXP C_rmbl_hash_two_part_impl(SEXP x, SEXP split) {
+    if (TYPEOF(x) != RAWSXP) rmbl::fail("`x` must be a raw vector");
+    if (XLENGTH(split) != 1 || (TYPEOF(split) != INTSXP && TYPEOF(split) != REALSXP))
+        rmbl::fail("`split` must be a single non-negative integer");
+    if (TYPEOF(split) == REALSXP) {
+        const double d = REAL(split)[0];
+        if (!(d >= 0) || d != std::floor(d) || d > 2147483647.0)
+            rmbl::fail("`split` must be a single non-negative integer");
+    }
+    const int sp = Rf_asInteger(split);
+    if (sp == NA_INTEGER || sp < 0) rmbl::fail("`split` must be a non-negative integer");
+    const size_t len = static_cast<size_t>(XLENGTH(x));
+    size_t at = static_cast<size_t>(sp);
+    if (at > len) at = len;
+    unsigned char d256[32];
+    rmbl_sha256_two_part(RAW(x), len, at, d256);
+    sha512_ctx c;
+    sha512_init(&c);
+    sha512_update(&c, RAW(x), at);
+    sha512_update(&c, RAW(x) + at, len - at);
+    uint8_t d512[64];
+    sha512_final(&c, d512);
+    static const char hx[] = "0123456789abcdef";
+    char h256[65], h512[129];
+    for (int i = 0; i < 32; ++i) { h256[2 * i] = hx[d256[i] >> 4]; h256[2 * i + 1] = hx[d256[i] & 15]; }
+    for (int i = 0; i < 64; ++i) { h512[2 * i] = hx[d512[i] >> 4]; h512[2 * i + 1] = hx[d512[i] & 15]; }
+    h256[64] = 0; h512[128] = 0;
+    SEXP out = PROTECT(rmbl::alloc_vector(STRSXP, 2));
+    SET_STRING_ELT(out, 0, Rf_mkChar(h256));
+    SET_STRING_ELT(out, 1, Rf_mkChar(h512));
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP C_rmbl_sha512_impl(SEXP x) {
     char out[129];
     if (TYPEOF(x) == RAWSXP) {
         rmbl_sha512_hex(RAW(x), static_cast<size_t>(XLENGTH(x)), out);
@@ -476,9 +579,9 @@ SEXP C_rmbl_sha512(SEXP x) {
     }
     x = PROTECT(Rf_coerceVector(x, STRSXP));
     const R_xlen_t n = XLENGTH(x);
-    SEXP res = PROTECT(Rf_allocVector(STRSXP, n));
+    SEXP res = PROTECT(rmbl::alloc_vector(STRSXP, n));
     for (R_xlen_t i = 0; i < n; ++i) {
-        const char *s = CHAR(STRING_ELT(x, i));
+        const char *s = rmbl_str_at(x, i, "x");
         rmbl_sha512_hex(reinterpret_cast<const unsigned char *>(s),
                         std::strlen(s), out);
         SET_STRING_ELT(res, i, Rf_mkChar(out));
@@ -487,16 +590,16 @@ SEXP C_rmbl_sha512(SEXP x) {
     return res;
 }
 
-SEXP C_rmbl_crc32(SEXP x) {
+SEXP C_rmbl_crc32_impl(SEXP x) {
     if (TYPEOF(x) == RAWSXP) {
         return Rf_ScalarReal(static_cast<double>(
             rmbl_crc32(RAW(x), static_cast<size_t>(XLENGTH(x)))));
     }
     x = PROTECT(Rf_coerceVector(x, STRSXP));
     const R_xlen_t n = XLENGTH(x);
-    SEXP res = PROTECT(Rf_allocVector(REALSXP, n));
+    SEXP res = PROTECT(rmbl::alloc_vector(REALSXP, n));
     for (R_xlen_t i = 0; i < n; ++i) {
-        const char *s = CHAR(STRING_ELT(x, i));
+        const char *s = rmbl_str_at(x, i, "x");
         REAL(res)[i] = static_cast<double>(
             rmbl_crc32(reinterpret_cast<const unsigned char *>(s),
                        std::strlen(s)));
@@ -505,13 +608,16 @@ SEXP C_rmbl_crc32(SEXP x) {
     return res;
 }
 
-SEXP C_rmbl_hmac_sha256(SEXP key, SEXP msg) {
+SEXP C_rmbl_hmac_sha256_impl(SEXP key, SEXP msg) {
+    /* type checks first: an rmbl::fail() below would longjmp over the vectors */
+    if (TYPEOF(key) != RAWSXP) (void)rmbl_str0(key, "key");
+    if (TYPEOF(msg) != RAWSXP) (void)rmbl_str0(msg, "msg");
     std::vector<unsigned char> kb, mb;
     if (TYPEOF(key) == RAWSXP) {
         kb.assign(RAW(key), RAW(key) + XLENGTH(key));
     } else {
         SEXP k = PROTECT(Rf_coerceVector(key, STRSXP));
-        const char *s = CHAR(STRING_ELT(k, 0));
+        const char *s = rmbl_str0(k, "key");
         kb.assign(s, s + std::strlen(s));
         UNPROTECT(1);
     }
@@ -519,20 +625,22 @@ SEXP C_rmbl_hmac_sha256(SEXP key, SEXP msg) {
         mb.assign(RAW(msg), RAW(msg) + XLENGTH(msg));
     } else {
         SEXP m = PROTECT(Rf_coerceVector(msg, STRSXP));
-        const char *s = CHAR(STRING_ELT(m, 0));
+        const char *s = rmbl_str0(m, "msg");
         mb.assign(s, s + std::strlen(s));
         UNPROTECT(1);
     }
+    /* the heap copy of the key, wiped before the vector frees it (review of 1.0.0, M8) */
+    rmbl_ct::Guard gkb(kb.data(), kb.size());
     char out[65];
     rmbl_hmac_sha256_hex(kb.data(), kb.size(), mb.data(), mb.size(), out);
     return Rf_mkString(out);
 }
 
-SEXP C_rmbl_digest_equal(SEXP a, SEXP b) {
+SEXP C_rmbl_digest_equal_impl(SEXP a, SEXP b) {
     a = PROTECT(Rf_coerceVector(a, STRSXP));
     b = PROTECT(Rf_coerceVector(b, STRSXP));
-    const char *sa = CHAR(STRING_ELT(a, 0));
-    const char *sb = CHAR(STRING_ELT(b, 0));
+    const char *sa = rmbl_str0(a, "a");
+    const char *sb = rmbl_str0(b, "b");
     int eq = 0;
     if (std::strlen(sa) == std::strlen(sb)) {
         eq = rmbl_digest_equal(sa, sb, std::strlen(sa));
@@ -541,26 +649,26 @@ SEXP C_rmbl_digest_equal(SEXP a, SEXP b) {
     return Rf_ScalarLogical(eq);
 }
 
-SEXP C_rmbl_merkle_root(SEXP x) {
-    check_chunk_list(x);
+SEXP C_rmbl_merkle_root_impl(SEXP x, SEXP scheme) {
+    const int sc = check_chunk_list(x, scheme);
     if (XLENGTH(x) < 1) return Rf_ScalarString(NA_STRING);
-    std::vector<unsigned char> lvl = leaves_from_chunks(x);
-    while (lvl.size() > 32) lvl = merkle_reduce(lvl);
+    std::vector<unsigned char> lvl = leaves_from_chunks(x, sc);
+    while (lvl.size() > 32) lvl = merkle_reduce(lvl, sc);
     char out[65];
-    hexlify(lvl.data(), 32, out);
+    rmbl_ct::hexlify_z(lvl.data(), 32, out);
     return Rf_mkString(out);
 }
 
 /* Leaf hashes, one per chunk -- the level-0 digests the root is built
  * from, so a caller can see WHICH chunk moved. */
-SEXP C_rmbl_merkle_leaves(SEXP x) {
-    check_chunk_list(x);
+SEXP C_rmbl_merkle_leaves_impl(SEXP x, SEXP scheme) {
+    const int sc = check_chunk_list(x, scheme);
     const R_xlen_t n = XLENGTH(x);
-    std::vector<unsigned char> lvl = leaves_from_chunks(x);
-    SEXP res = PROTECT(Rf_allocVector(STRSXP, n));
+    std::vector<unsigned char> lvl = leaves_from_chunks(x, sc);
+    SEXP res = PROTECT(rmbl::alloc_vector(STRSXP, n));
     char out[65];
     for (R_xlen_t i = 0; i < n; ++i) {
-        hexlify(lvl.data() + static_cast<size_t>(i) * 32, 32, out);
+        rmbl_ct::hexlify_z(lvl.data() + static_cast<size_t>(i) * 32, 32, out);
         SET_STRING_ELT(res, i, Rf_mkChar(out));
     }
     UNPROTECT(1);
@@ -569,14 +677,14 @@ SEXP C_rmbl_merkle_leaves(SEXP x) {
 
 /* Inclusion proof for leaf `index` (1-based): the sibling digests from
  * the leaf up to the root, with the side each sibling sits on. */
-SEXP C_rmbl_merkle_proof(SEXP x, SEXP index) {
-    check_chunk_list(x);
+SEXP C_rmbl_merkle_proof_impl(SEXP x, SEXP index, SEXP scheme) {
+    const int sc = check_chunk_list(x, scheme);
     const R_xlen_t n = XLENGTH(x);
     R_xlen_t pos = static_cast<R_xlen_t>(Rf_asInteger(index)) - 1;
     if (n < 1 || pos < 0 || pos >= n) {
-        Rf_error("`index` must be between 1 and the number of chunks");
+        rmbl::fail("`index` must be between 1 and the number of chunks");
     }
-    std::vector<unsigned char> lvl = leaves_from_chunks(x);
+    std::vector<unsigned char> lvl = leaves_from_chunks(x, sc);
     std::vector<std::string> sib;
     std::vector<int> side;   /* 0 = sibling on the left, 1 = on the right */
     char out[65];
@@ -587,30 +695,30 @@ SEXP C_rmbl_merkle_proof(SEXP x, SEXP index) {
             /* promoted: no sibling at this level */
             pos = static_cast<R_xlen_t>(p / 2);
         } else if (p % 2 == 0) {
-            hexlify(lvl.data() + (p + 1) * 32, 32, out);
+            rmbl_ct::hexlify_z(lvl.data() + (p + 1) * 32, 32, out);
             sib.push_back(out);
             side.push_back(1);
             pos = static_cast<R_xlen_t>(p / 2);
         } else {
-            hexlify(lvl.data() + (p - 1) * 32, 32, out);
+            rmbl_ct::hexlify_z(lvl.data() + (p - 1) * 32, 32, out);
             sib.push_back(out);
             side.push_back(0);
             pos = static_cast<R_xlen_t>(p / 2);
         }
-        lvl = merkle_reduce(lvl);
+        lvl = merkle_reduce(lvl, sc);
     }
     const R_xlen_t m = static_cast<R_xlen_t>(sib.size());
-    SEXP sh = PROTECT(Rf_allocVector(STRSXP, m));
-    SEXP sd = PROTECT(Rf_allocVector(STRSXP, m));
+    SEXP sh = PROTECT(rmbl::alloc_vector(STRSXP, m));
+    SEXP sd = PROTECT(rmbl::alloc_vector(STRSXP, m));
     for (R_xlen_t i = 0; i < m; ++i) {
         SET_STRING_ELT(sh, i, Rf_mkChar(sib[static_cast<size_t>(i)].c_str()));
         SET_STRING_ELT(sd, i,
             Rf_mkChar(side[static_cast<size_t>(i)] == 1 ? "right" : "left"));
     }
-    SEXP res = PROTECT(Rf_allocVector(VECSXP, 2));
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 2));
     SET_VECTOR_ELT(res, 0, sh);
     SET_VECTOR_ELT(res, 1, sd);
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 2));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 2));
     SET_STRING_ELT(nm, 0, Rf_mkChar("sibling"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("side"));
     Rf_setAttrib(res, R_NamesSymbol, nm);

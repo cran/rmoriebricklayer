@@ -28,10 +28,13 @@
  * a sketch that varied between runs would defeat it.
  */
 
+#ifndef R_NO_REMAP
 #define R_NO_REMAP
+#endif
 #include <R.h>
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
+#include "morie_core.h"
 
 #include <algorithm>
 #include <cmath>
@@ -40,6 +43,7 @@
 #include <cstring>
 #include <random>
 #include <vector>
+#include "rmbl_entry.h"
 
 extern "C" void rmbl_sha256_raw(const unsigned char *data, size_t len,
                                 unsigned char out[32]);
@@ -106,27 +110,26 @@ void rmbl_moments_merge(const double *a, const double *b, double *out) {
 }
 
 /* Central sums for one block, in the (n, mean, M2, M3, M4) layout the
- * merge consumes. */
+ * merge consumes. Two passes, as var() does: the mean (a running mean, which
+ * cannot overflow, then var()'s correction by the mean residual), then the
+ * central sums of the residuals. The one-pass update lost 9 of 16 digits of
+ * the variance of values near 1e8 with a spread of 1 (CRAN stress test of
+ * 0.5.14). */
 void rmbl_moments_acc(const double *x, R_xlen_t n, double *out) {
     out[0] = out[1] = out[2] = out[3] = out[4] = 0.0;
     if (n < 1) return;
-    double mean = 0.0, M2 = 0.0, M3 = 0.0, M4 = 0.0;
+    double mean = 0.0;
+    for (R_xlen_t i = 0; i < n; ++i) mean += (x[i] - mean) / (static_cast<double>(i) + 1.0);
+    double r = 0.0;
+    for (R_xlen_t i = 0; i < n; ++i) r += x[i] - mean;
+    mean += r / static_cast<double>(n);
+    double M2 = 0.0, M3 = 0.0, M4 = 0.0;
     for (R_xlen_t i = 0; i < n; ++i) {
-        const double cnt = static_cast<double>(i) + 1.0;
-        if (i == 0) {          /* first value: it is the mean; squaring it
-                                  here overflowed above sqrt(DBL_MAX) */
-            mean = x[0];
-            continue;
-        }
         const double d = x[i] - mean;
-        const double dn = d / cnt;
-        const double dn2 = dn * dn;
-        const double term = d * dn * (cnt - 1.0);
-        M4 += term * dn2 * (cnt * cnt - 3.0 * cnt + 3.0) +
-              6.0 * dn2 * M2 - 4.0 * dn * M3;
-        M3 += term * dn * (cnt - 2.0) - 3.0 * dn * M2;
-        M2 += term;
-        mean += dn;
+        const double d2 = d * d;
+        M2 += d2;
+        M3 += d2 * d;
+        M4 += d2 * d2;
     }
     out[0] = static_cast<double>(n);
     out[1] = mean;
@@ -135,7 +138,7 @@ void rmbl_moments_acc(const double *x, R_xlen_t n, double *out) {
     out[4] = M4;
 }
 
-SEXP C_rmbl_moments_acc(SEXP x) {
+SEXP C_rmbl_moments_acc_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     SEXP out = PROTECT(Rf_allocVector(REALSXP, 5));
     rmbl_moments_acc(REAL(x), XLENGTH(x), REAL(out));
@@ -143,12 +146,12 @@ SEXP C_rmbl_moments_acc(SEXP x) {
     return out;
 }
 
-SEXP C_rmbl_moments_merge(SEXP a, SEXP b) {
+SEXP C_rmbl_moments_merge_impl(SEXP a, SEXP b) {
     a = PROTECT(Rf_coerceVector(a, REALSXP));
     b = PROTECT(Rf_coerceVector(b, REALSXP));
     if (XLENGTH(a) != 5 || XLENGTH(b) != 5) {
         UNPROTECT(2);
-        Rf_error("each accumulator must have 5 entries");
+        RMBL_ARG_ERROR("each accumulator must have 5 entries");
     }
     SEXP out = PROTECT(Rf_allocVector(REALSXP, 5));
     rmbl_moments_merge(REAL(a), REAL(b), REAL(out));
@@ -156,23 +159,32 @@ SEXP C_rmbl_moments_merge(SEXP a, SEXP b) {
     return out;
 }
 
+/* Lemire's unbiased draw from [0, s) is morie::core::bounded_draw() (morie_core.h): this file
+ * carried a second copy of it */
+
 /* Vitter's Algorithm R. Fills the reservoir with the first k items,
  * then replaces item j (0-based, j >= k) with probability k/(j+1).
  * Returns the 1-based indices of the retained items. */
-SEXP C_rmbl_reservoir(SEXP n_total, SEXP k, SEXP seed) {
-    const double nd = Rf_asReal(n_total);
+SEXP C_rmbl_reservoir_impl(SEXP n_total, SEXP k, SEXP seed) {
+    const double nd = Rf_asReal(n_total), kd = Rf_asReal(k), sd = Rf_asReal(seed);
+    if (!R_FINITE(nd) || nd < 0 || nd > 9007199254740992.0) RMBL_ARG_ERROR("`n` must be a non-negative count");
+    if (!R_FINITE(kd) || kd < 0) RMBL_ARG_ERROR("`k` must be a non-negative count");
+    if (nd != std::floor(nd) || kd != std::floor(kd)) RMBL_ARG_ERROR("`n` and `k` must be whole numbers");
+    if (kd > 100000000.0) RMBL_ARG_ERROR("`k` above 1e8 would need more memory than a sample should");
+    /* a NaN or negative seed cast to an unsigned integer is undefined behaviour */
+    if (!R_FINITE(sd) || sd < 0 || sd != std::floor(sd) || sd >= 9007199254740992.0)
+        RMBL_ARG_ERROR("`seed` must be a whole number in [0, 2^53)");
     const R_xlen_t n = static_cast<R_xlen_t>(nd);
-    R_xlen_t kk = static_cast<R_xlen_t>(Rf_asReal(k));
-    if (n < 0) Rf_error("`n` must be non-negative");
-    if (kk < 0) Rf_error("`k` must be non-negative");
+    R_xlen_t kk = static_cast<R_xlen_t>(kd);
     if (kk > n) kk = n;
 
-    std::mt19937_64 rng(static_cast<unsigned long long>(Rf_asReal(seed)));
+    std::mt19937_64 rng(static_cast<unsigned long long>(sd));
     std::vector<R_xlen_t> res(static_cast<std::size_t>(kk));
     for (R_xlen_t i = 0; i < kk; ++i) res[static_cast<std::size_t>(i)] = i;
     for (R_xlen_t j = kk; j < n; ++j) {
-        std::uniform_int_distribution<R_xlen_t> d(0, j);
-        const R_xlen_t t = d(rng);
+        /* n runs to 2^53: Ctrl-C ended nothing (37.9 s for 3e9; CRAN stress test of 0.5.14) */
+        if ((j & 0xFFFFF) == 0) rmbl::check_interrupt();
+        const R_xlen_t t = static_cast<R_xlen_t>(morie::core::bounded_draw(rng, static_cast<std::uint64_t>(j) + 1));
         if (t < kk) res[static_cast<std::size_t>(t)] = j;
     }
     std::sort(res.begin(), res.end());
@@ -187,12 +199,12 @@ SEXP C_rmbl_reservoir(SEXP n_total, SEXP k, SEXP seed) {
 /* HyperLogLog registers for a character vector. `p` is the log2 of the
  * register count; the registers are returned so several chunks can be
  * merged by taking the element-wise maximum. */
-SEXP C_rmbl_hll_add(SEXP x, SEXP p_bits, SEXP regs_in) {
+SEXP C_rmbl_hll_add_impl(SEXP x, SEXP p_bits, SEXP regs_in) {
     x = PROTECT(Rf_coerceVector(x, STRSXP));
     const int p = Rf_asInteger(p_bits);
     if (p < 4 || p > 20) {
         UNPROTECT(1);
-        Rf_error("`p` must be between 4 and 20");
+        RMBL_ARG_ERROR("`p` must be between 4 and 20");
     }
     const std::size_t m = static_cast<std::size_t>(1) << p;
     SEXP out = PROTECT(Rf_allocVector(INTSXP, static_cast<R_xlen_t>(m)));
@@ -210,9 +222,14 @@ SEXP C_rmbl_hll_add(SEXP x, SEXP p_bits, SEXP regs_in) {
     for (R_xlen_t i = 0; i < n; ++i) {
         SEXP e = STRING_ELT(x, i);
         if (e == NA_STRING) continue;
-        const char *s = CHAR(e);
+        /* the UTF-8 bytes of the string, so "cafe" with an accented e in UTF-8 and in latin1
+         * is one value, not two (review of 1.0.0, M10); the translation's
+         * buffer is released each time round */
+        const void *vmax = vmaxget();
+        const char *s = Rf_translateCharUTF8(e);
         const uint64_t h = hash64(reinterpret_cast<const unsigned char *>(s),
                                   std::strlen(s));
+        vmaxset(vmax);
         /* top p bits select the register, the rest supply the run length */
         const std::size_t idx = static_cast<std::size_t>(h >> (64 - p));
         const uint64_t rest = (h << p) | (static_cast<uint64_t>(1) << (p - 1));
@@ -231,7 +248,7 @@ SEXP C_rmbl_hll_add(SEXP x, SEXP p_bits, SEXP regs_in) {
 
 /* Cardinality estimate from the registers, with linear counting in the
  * small range where the raw estimator is badly biased. */
-SEXP C_rmbl_hll_count(SEXP regs) {
+SEXP C_rmbl_hll_count_impl(SEXP regs) {
     regs = PROTECT(Rf_coerceVector(regs, INTSXP));
     const std::size_t m = static_cast<std::size_t>(XLENGTH(regs));
     if (m == 0) {

@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 /* SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * rmbl_stats.cpp -- bricklayer's own statistical kernels.
@@ -19,21 +20,24 @@
  *   * a kernel with nothing to compute returns NaN rather than erroring.
  */
 
+#ifndef R_NO_REMAP
 #define R_NO_REMAP
+#endif
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
 #include <R_ext/Rdynload.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstddef>
 #include <vector>
 
 #include "morie_core.h"
 
 namespace {
-
-const double kMadConstant = 1.4826022185056018;  /* 1 / qnorm(3/4) */
 
 inline bool has_nan(const double *a, R_xlen_t n) {
     for (R_xlen_t i = 0; i < n; ++i) {
@@ -46,6 +50,9 @@ inline bool has_nan(const double *a, R_xlen_t n) {
 inline double quantile7_sorted(const std::vector<double> &v, double p) {
     const R_xlen_t n = static_cast<R_xlen_t>(v.size());
     if (n == 0) return std::nan("");
+    /* a NaN probability: NaN, as quantile() gives (casting floor(NaN) to an integer is undefined
+     * behaviour; UBSan, CRAN stress test of 0.5.14) */
+    if (std::isnan(p)) return p;
     if (n == 1) return v[0];
     const double h = (static_cast<double>(n) - 1.0) * p;
     double fl = std::floor(h);
@@ -59,12 +66,25 @@ inline double median_sorted(const std::vector<double> &v) {
     return quantile7_sorted(v, 0.5);
 }
 
-/* Midranks: tied values share the average of the ranks they span. */
+/* Midranks: tied values share the average of the ranks they span. A NaN
+ * ranks as NaN: `<` with a NaN is no strict weak ordering, and std::sort
+ * given one has undefined behaviour (review of 1.0.0), so the comparator
+ * puts every NaN last and the ranks of the other values are among them
+ * alone, as rank(na.last = "keep") gives them. */
 inline void midranks(const double *a, R_xlen_t n, double *out) {
     std::vector<R_xlen_t> ord(static_cast<std::size_t>(n));
     for (R_xlen_t i = 0; i < n; ++i) ord[static_cast<std::size_t>(i)] = i;
-    std::sort(ord.begin(), ord.end(),
-              [&](R_xlen_t i, R_xlen_t j) { return a[i] < a[j]; });
+    std::sort(ord.begin(), ord.end(), [&](R_xlen_t i, R_xlen_t j) {
+        const bool ni = std::isnan(a[i]), nj = std::isnan(a[j]);
+        if (ni || nj) return !ni && nj;
+        return a[i] < a[j];
+    });
+    R_xlen_t m = n;
+    while (m > 0 && std::isnan(a[ord[static_cast<std::size_t>(m - 1)]])) {
+        --m;
+        out[ord[static_cast<std::size_t>(m)]] = std::nan("");
+    }
+    n = m;
     R_xlen_t i = 0;
     while (i < n) {
         R_xlen_t j = i;
@@ -84,13 +104,15 @@ inline void midranks(const double *a, R_xlen_t n, double *out) {
 extern "C" {
 
 /* ---------------------------------------------------------------- */
-/* One-pass central moments (Welford / Terriberry).                  */
+/* Central moments in three passes: the mean, the largest deviation, */
+/* then the scaled powers (not a one-pass Welford update).           */
 /* out[0..3] = mean, variance (n-1), skewness, excess kurtosis.      */
 /* The higher moments use the sample-moment definitions m3 / m2^1.5  */
 /* and m4 / m2^2 - 3, with m_k the k-th central moment divided by n. */
 /* ---------------------------------------------------------------- */
-/* Mean, variance, skewness and excess kurtosis in two passes on scaled
- * deviations. The single-pass update this replaces squared a[0] on its
+/* Mean, variance, skewness and excess kurtosis: after the mean, one pass
+ * finds the largest deviation and one sums the powers of the deviations
+ * scaled by it. The single-pass update this replaces squared a[0] on its
  * first step (NaN for |x| above the square root of DBL_MAX) and raised
  * raw deviations to the fourth power (overflow beyond |d| ~ 1e77). Here
  * the mean is base R's (extended-precision sum plus a corrective pass),
@@ -132,6 +154,7 @@ void rmbl_moments(const double *a, R_xlen_t n, double *out) {
 /* Type-7 quantiles at arbitrary probabilities. */
 void rmbl_quantile(const double *a, R_xlen_t n, const double *probs,
                    R_xlen_t np, double *out) {
+    rmbl::kernel_call([&] {
     if (n < 1 || has_nan(a, n)) {
         for (R_xlen_t k = 0; k < np; ++k) out[k] = std::nan("");
         return;
@@ -139,18 +162,22 @@ void rmbl_quantile(const double *a, R_xlen_t n, const double *probs,
     std::vector<double> v(a, a + n);
     std::sort(v.begin(), v.end());
     for (R_xlen_t k = 0; k < np; ++k) out[k] = quantile7_sorted(v, probs[k]);
+    });
 }
 
 double rmbl_median(const double *a, R_xlen_t n) {
+    return rmbl::kernel_call([&]() -> double {
     if (n < 1 || has_nan(a, n)) return std::nan("");
     std::vector<double> v(a, a + n);
     std::sort(v.begin(), v.end());
     return median_sorted(v);
+    });
 }
 
 /* Median absolute deviation, scaled to be consistent for the normal
  * standard deviation when `constant` is 1.4826. */
 double rmbl_mad(const double *a, R_xlen_t n, double constant) {
+    return rmbl::kernel_call([&]() -> double {
     if (n < 1 || has_nan(a, n)) return std::nan("");
     std::vector<double> v(a, a + n);
     std::sort(v.begin(), v.end());
@@ -158,13 +185,14 @@ double rmbl_mad(const double *a, R_xlen_t n, double constant) {
     for (R_xlen_t i = 0; i < n; ++i) v[static_cast<std::size_t>(i)] = std::fabs(a[i] - med);
     std::sort(v.begin(), v.end());
     return constant * median_sorted(v);
+    });
 }
 
-double rmbl_mad_constant(void) { return kMadConstant; }
 
 /* Symmetric trimmed mean: drop floor(n * trim) values from each end,
  * matching base R's mean(x, trim = ). */
 double rmbl_trimmed_mean(const double *a, R_xlen_t n, double trim) {
+    return rmbl::kernel_call([&]() -> double {
     if (n < 1 || has_nan(a, n)) return std::nan("");
     if (!(trim >= 0.0) || trim > 0.5) return std::nan("");
     std::vector<double> v(a, a + n);
@@ -174,11 +202,13 @@ double rmbl_trimmed_mean(const double *a, R_xlen_t n, double trim) {
     double s = 0.0;
     for (R_xlen_t i = k; i < n - k; ++i) s += v[static_cast<std::size_t>(i)];
     return s / static_cast<double>(n - 2 * k);
+    });
 }
 
 /* Winsorized mean: the same tails are pulled in to the surviving
  * extremes rather than discarded, so every observation still counts. */
 double rmbl_winsorized_mean(const double *a, R_xlen_t n, double trim) {
+    return rmbl::kernel_call([&]() -> double {
     if (n < 1 || has_nan(a, n)) return std::nan("");
     if (!(trim >= 0.0) || trim > 0.5) return std::nan("");
     std::vector<double> v(a, a + n);
@@ -195,6 +225,7 @@ double rmbl_winsorized_mean(const double *a, R_xlen_t n, double trim) {
         s += z;
     }
     return s / static_cast<double>(n);
+    });
 }
 
 double rmbl_weighted_mean(const double *a, const double *w, R_xlen_t n) {
@@ -230,6 +261,7 @@ double rmbl_weighted_var(const double *a, const double *w, R_xlen_t n) {
 /* Spearman's rho: Pearson correlation of the midranks, so ties are
  * handled the way stats::cor(method = "spearman") handles them. */
 double rmbl_cor_spearman(const double *x, const double *y, R_xlen_t n) {
+    return rmbl::kernel_call([&]() -> double {
     if (n < 2 || has_nan(x, n) || has_nan(y, n)) return std::nan("");
     std::vector<double> rx(static_cast<std::size_t>(n));
     std::vector<double> ry(static_cast<std::size_t>(n));
@@ -250,15 +282,19 @@ double rmbl_cor_spearman(const double *x, const double *y, R_xlen_t n) {
     const double den = (dn * sxx - sx * sx) * (dn * syy - sy * sy);
     if (den <= 0.0) return std::nan("");
     return num / std::sqrt(den);
+    });
 }
 
 void rmbl_midranks(const double *a, R_xlen_t n, double *out) {
+    rmbl::kernel_call([&] {
     if (n < 1) return;
     midranks(a, n, out);
+    });
 }
 
 /* Column covariance matrix (n - 1 denominator), column-major in and out. */
 void rmbl_cov_matrix(const double *x, R_xlen_t n, R_xlen_t p, double *out) {
+    rmbl::kernel_call([&] {
     if (n < 2) {
         for (R_xlen_t k = 0; k < p * p; ++k) out[k] = std::nan("");
         return;
@@ -281,12 +317,14 @@ void rmbl_cov_matrix(const double *x, R_xlen_t n, R_xlen_t p, double *out) {
             out[j * p + k] = v;
         }
     }
+    });
 }
 
 /* Two-sample Kolmogorov-Smirnov statistic: the largest vertical gap
  * between the two empirical distribution functions. */
 double rmbl_ks_two_sample(const double *x, R_xlen_t nx,
                           const double *y, R_xlen_t ny) {
+    return rmbl::kernel_call([&]() -> double {
     if (nx < 1 || ny < 1 || has_nan(x, nx) || has_nan(y, ny)) {
         return std::nan("");
     }
@@ -305,22 +343,45 @@ double rmbl_ks_two_sample(const double *x, R_xlen_t nx,
         if (gap > d) d = gap;
     }
     return d;
+    });
 }
 
-/* Asymptotic two-sided KS p-value: the Kolmogorov distribution tail
- * 2 sum_{k>=1} (-1)^(k-1) exp(-2 k^2 t^2). */
+/* Asymptotic two-sided KS p-value, 1 - K(t) with t = sqrt(n_eff) * D.
+ *
+ * Two series, as in R's C_pKS2 (Marsaglia, Tsang and Wang 2003). For
+ * t >= 1 the Kolmogorov tail 2 sum_{k>=1} (-1)^(k-1) exp(-2 k^2 t^2)
+ * converges in a few terms. For t < 1 it does not: truncating it at 200
+ * terms left a partial sum far from 1 for small t, so two million-row
+ * columns differing in ONE value were reported as drifted (p = 0.02),
+ * and the error grew with n. The theta-function form
+ *   K(t) = sqrt(2 pi) / t * sum_{k odd} exp(-(k pi)^2 / (8 t^2))
+ * converges fast there instead. */
 double rmbl_ks_pvalue(double d, double n_eff) {
     if (!(d > 0.0) || !(n_eff > 0.0)) return 1.0;
     const double t = std::sqrt(n_eff) * d;
     if (t < 1e-12) return 1.0;
-    double s = 0.0;
-    for (int k = 1; k <= 200; ++k) {
-        const double term = std::exp(-2.0 * static_cast<double>(k) *
-                                     static_cast<double>(k) * t * t);
-        s += ((k % 2 == 1) ? 1.0 : -1.0) * term;
-        if (term < 1e-16) break;
+    double p;
+    if (t < 1.0) {
+        const double z = -(M_PI * M_PI / 8.0) / (t * t);
+        const double w = std::log(t);
+        double s = 0.0;
+        for (int k = 1; k < 200; k += 2) {
+            const double term = std::exp(static_cast<double>(k) *
+                                         static_cast<double>(k) * z - w);
+            s += term;
+            if (term < 1e-300) break;
+        }
+        p = 1.0 - std::sqrt(2.0 * M_PI) * s;
+    } else {
+        double s = 0.0;
+        for (int k = 1; k <= 200; ++k) {
+            const double term = std::exp(-2.0 * static_cast<double>(k) *
+                                         static_cast<double>(k) * t * t);
+            s += ((k % 2 == 1) ? 1.0 : -1.0) * term;
+            if (term < 1e-300) break;
+        }
+        p = 2.0 * s;
     }
-    double p = 2.0 * s;
     if (p < 0.0) p = 0.0;
     if (p > 1.0) p = 1.0;
     return p;
@@ -357,14 +418,26 @@ double rmbl_js_divergence(const double *p, const double *q, R_xlen_t k) {
 /* Leading significant decimal digit of |x|, or 0 when there is none. */
 int rmbl_first_digit(double x) {
     if (!std::isfinite(x)) return 0;
-    double v = std::fabs(x);
+    const double v = std::fabs(x);
     if (v == 0.0) return 0;
-    while (v < 1.0) v *= 10.0;
-    while (v >= 10.0) v /= 10.0;
-    int d = static_cast<int>(v);
-    if (d < 1) d = 1;
-    if (d > 9) d = 9;
-    return d;
+    /* Read the digit off the decimal rendering at 15 significant digits
+     * (R's own print precision). Repeated x10 / /10 accumulated an ulp of
+     * error per step and misread 2e-300 as 1 and 7e120 as 6. */
+    char buf[40];
+    if (v < 2.2250738585072014e-308) {
+        /* a subnormal holds fewer than 15 significant digits: 1e-310 is
+         * stored as 9.99999999999997e-311, and 15 digits read it as 9.
+         * The digit of the shortest decimal that round-trips to the same
+         * double -- what R prints -- is the one meant. */
+        for (int prec = 0; prec <= 16; ++prec) {
+            std::snprintf(buf, sizeof buf, "%.*e", prec, v);
+            if (std::strtod(buf, nullptr) == v) break;
+        }
+    } else {
+        std::snprintf(buf, sizeof buf, "%.14e", v);
+    }
+    const int d = buf[0] - '0';
+    return (d < 1) ? 1 : (d > 9) ? 9 : d;
 }
 
 void rmbl_first_digit_counts(const double *a, R_xlen_t n, double *out) {
@@ -379,7 +452,7 @@ void rmbl_first_digit_counts(const double *a, R_xlen_t n, double *out) {
 /* .Call wrappers                                                    */
 /* ---------------------------------------------------------------- */
 
-SEXP C_rmbl_moments(SEXP x) {
+SEXP C_rmbl_moments_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     SEXP out = PROTECT(Rf_allocVector(REALSXP, 4));
     rmbl_moments(REAL(x), XLENGTH(x), REAL(out));
@@ -393,7 +466,7 @@ SEXP C_rmbl_moments(SEXP x) {
     return out;
 }
 
-SEXP C_rmbl_quantile(SEXP x, SEXP probs) {
+SEXP C_rmbl_quantile_impl(SEXP x, SEXP probs) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     probs = PROTECT(Rf_coerceVector(probs, REALSXP));
     R_xlen_t np = XLENGTH(probs);
@@ -403,41 +476,41 @@ SEXP C_rmbl_quantile(SEXP x, SEXP probs) {
     return out;
 }
 
-SEXP C_rmbl_median(SEXP x) {
+SEXP C_rmbl_median_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_median(REAL(x), XLENGTH(x));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_mad(SEXP x, SEXP constant) {
+SEXP C_rmbl_mad_impl(SEXP x, SEXP constant) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_mad(REAL(x), XLENGTH(x), Rf_asReal(constant));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_trimmed_mean(SEXP x, SEXP trim) {
+SEXP C_rmbl_trimmed_mean_impl(SEXP x, SEXP trim) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_trimmed_mean(REAL(x), XLENGTH(x), Rf_asReal(trim));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_winsorized_mean(SEXP x, SEXP trim) {
+SEXP C_rmbl_winsorized_mean_impl(SEXP x, SEXP trim) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_winsorized_mean(REAL(x), XLENGTH(x), Rf_asReal(trim));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_weighted(SEXP x, SEXP w) {
+SEXP C_rmbl_weighted_impl(SEXP x, SEXP w) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     w = PROTECT(Rf_coerceVector(w, REALSXP));
     R_xlen_t n = XLENGTH(x);
     if (XLENGTH(w) != n) {
         UNPROTECT(2);
-        Rf_error("`x` and `w` must have the same length");
+        RMBL_ARG_ERROR("`x` and `w` must have the same length");
     }
     SEXP out = PROTECT(Rf_allocVector(REALSXP, 2));
     REAL(out)[0] = rmbl_weighted_mean(REAL(x), REAL(w), n);
@@ -446,19 +519,19 @@ SEXP C_rmbl_weighted(SEXP x, SEXP w) {
     return out;
 }
 
-SEXP C_rmbl_cor_spearman(SEXP x, SEXP y) {
+SEXP C_rmbl_cor_spearman_impl(SEXP x, SEXP y) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     y = PROTECT(Rf_coerceVector(y, REALSXP));
     if (XLENGTH(x) != XLENGTH(y)) {
         UNPROTECT(2);
-        Rf_error("`x` and `y` must have the same length");
+        RMBL_ARG_ERROR("`x` and `y` must have the same length");
     }
     double r = rmbl_cor_spearman(REAL(x), REAL(y), XLENGTH(x));
     UNPROTECT(2);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_midranks(SEXP x) {
+SEXP C_rmbl_midranks_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     R_xlen_t n = XLENGTH(x);
     SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
@@ -467,12 +540,12 @@ SEXP C_rmbl_midranks(SEXP x) {
     return out;
 }
 
-SEXP C_rmbl_cov_matrix(SEXP x) {
+SEXP C_rmbl_cov_matrix_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     SEXP dim = Rf_getAttrib(x, R_DimSymbol);
     if (dim == R_NilValue || XLENGTH(dim) != 2) {
         UNPROTECT(1);
-        Rf_error("`x` must be a matrix");
+        RMBL_ARG_ERROR("`x` must be a matrix");
     }
     R_xlen_t n = INTEGER(dim)[0], p = INTEGER(dim)[1];
     SEXP out = PROTECT(Rf_allocMatrix(REALSXP, static_cast<int>(p),
@@ -482,7 +555,7 @@ SEXP C_rmbl_cov_matrix(SEXP x) {
     return out;
 }
 
-SEXP C_rmbl_ks(SEXP x, SEXP y) {
+SEXP C_rmbl_ks_impl(SEXP x, SEXP y) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     y = PROTECT(Rf_coerceVector(y, REALSXP));
     R_xlen_t nx = XLENGTH(x), ny = XLENGTH(y);
@@ -499,12 +572,12 @@ SEXP C_rmbl_ks(SEXP x, SEXP y) {
     return out;
 }
 
-SEXP C_rmbl_psi(SEXP p, SEXP q, SEXP eps) {
+SEXP C_rmbl_psi_impl(SEXP p, SEXP q, SEXP eps) {
     p = PROTECT(Rf_coerceVector(p, REALSXP));
     q = PROTECT(Rf_coerceVector(q, REALSXP));
     if (XLENGTH(p) != XLENGTH(q)) {
         UNPROTECT(2);
-        Rf_error("`p` and `q` must have the same length");
+        RMBL_ARG_ERROR("`p` and `q` must have the same length");
     }
     SEXP out = PROTECT(Rf_allocVector(REALSXP, 2));
     REAL(out)[0] = rmbl_psi(REAL(p), REAL(q), XLENGTH(p), Rf_asReal(eps));
@@ -513,7 +586,7 @@ SEXP C_rmbl_psi(SEXP p, SEXP q, SEXP eps) {
     return out;
 }
 
-SEXP C_rmbl_first_digit_counts(SEXP x) {
+SEXP C_rmbl_first_digit_counts_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     SEXP out = PROTECT(Rf_allocVector(REALSXP, 9));
     rmbl_first_digit_counts(REAL(x), XLENGTH(x), REAL(out));

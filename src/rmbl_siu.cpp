@@ -5,7 +5,9 @@
  * package). Same hand-rolled zero-dependency style as rmbl_core/rmbl_fetch:
  * no Rcpp, Rf_-prefixed API only.
  */
+#ifndef R_NO_REMAP
 #define R_NO_REMAP
+#endif
 #include <R.h>
 #include <Rinternals.h>
 
@@ -14,35 +16,63 @@
 #include "siu_parse.h"
 #include "siu_resolve.h"
 #include "siu_schema.h"
+#include "rmbl_entry.h"
 
 namespace {
+
+// Every SIU entry runs under the barrier, so the core's interrupt hook may throw:
+// rmbl::Interrupt unwinds through the C++ frames (destructors run) and the barrier
+// raises R's interrupt. Installed once, when the shared object loads.
+static void siu_interrupt_hook() { rmbl::check_interrupt(); }
+static const bool siu_hook_installed = (siu::interrupt_hook() = siu_interrupt_hook, true);
+
+// The split count of the last normalize_text() as an attribute, for the R
+// wrapper to turn into a warning (a warning from here could longjmp over the
+// barrier's live objects).
+static SEXP with_split_attr(SEXP ans) {
+    if (siu::last_split_lines() > 0) {
+        PROTECT(ans);
+        Rf_setAttrib(ans, Rf_install("split_lines"), Rf_ScalarInteger(static_cast<int>(siu::last_split_lines())));
+        UNPROTECT(1);
+    }
+    return ans;
+}
 
 std::string as_string(SEXP x, const char *what) {
     if (TYPEOF(x) != STRSXP || Rf_xlength(x) != 1 ||
         STRING_ELT(x, 0) == NA_STRING) {
-        Rf_error("%s must be a single non-NA character string", what);
+        RMBL_ARG_ERROR("%s must be a single non-NA character string", what);
     }
-    return std::string(CHAR(STRING_ELT(x, 0)));
+    /* an SIU report page is a few hundred KB; the parsers run regular
+     * expressions over lines of it (normalize_text() caps the lines), and
+     * the whole input is copied a dozen times on the way */
+    if (LENGTH(STRING_ELT(x, 0)) > (2 << 20)) {
+        RMBL_ARG_ERROR("%s is larger than 2 MiB: not a report page", what);
+    }
+    /* in UTF-8 whatever the input's declared encoding: the core reads UTF-8,
+     * so a latin1 page came back as invalid UTF-8 marked UTF-8 and a latin1
+     * "d\xe9cembre" was no month (review of 1.0.0, M10) */
+    return std::string(Rf_translateCharUTF8(STRING_ELT(x, 0)));
 }
 
 }  // namespace
 
 extern "C" {
 
-SEXP C_rmbl_siu_html_to_text(SEXP html) {
+SEXP C_rmbl_siu_html_to_text_impl(SEXP html) {
     const std::string out = siu::html_to_text(as_string(html, "html"));
-    SEXP ans = PROTECT(Rf_allocVector(STRSXP, 1));
+    SEXP ans = PROTECT(rmbl::alloc_vector(STRSXP, 1));
     SET_STRING_ELT(ans, 0, Rf_mkCharCE(out.c_str(), CE_UTF8));
     UNPROTECT(1);
-    return ans;
+    return with_split_attr(ans);
 }
 
-SEXP C_rmbl_siu_parse_html(SEXP html) {
+SEXP C_rmbl_siu_parse_html_impl(SEXP html) {
     const siu::ParsedFields fields =
         siu::parse_report_html(as_string(html, "html"));
     const R_xlen_t n = static_cast<R_xlen_t>(fields.size());
-    SEXP ans = PROTECT(Rf_allocVector(STRSXP, n));
-    SEXP nms = PROTECT(Rf_allocVector(STRSXP, n));
+    SEXP ans = PROTECT(rmbl::alloc_vector(STRSXP, n));
+    SEXP nms = PROTECT(rmbl::alloc_vector(STRSXP, n));
     R_xlen_t i = 0;
     for (const auto &kv : fields) {
         SET_STRING_ELT(nms, i, Rf_mkCharCE(kv.first.c_str(), CE_UTF8));
@@ -51,60 +81,61 @@ SEXP C_rmbl_siu_parse_html(SEXP html) {
     }
     Rf_setAttrib(ans, R_NamesSymbol, nms);
     UNPROTECT(2);
-    return ans;
+    return with_split_attr(ans);
 }
 
-SEXP C_rmbl_siu_to_iso_date(SEXP human) {
-    const std::string out = siu::to_iso_date(as_string(human, "x"));
-    SEXP ans = PROTECT(Rf_allocVector(STRSXP, 1));
+SEXP C_rmbl_siu_to_iso_date_impl(SEXP human) {
+    const std::string in = as_string(human, "x");
+    /* a date string is a few dozen bytes; the regex engine is recursive and a
+     * 100,000-character input overflowed the C stack */
+    if (in.size() > 4096) {
+        /* an error, not "" -- a silent "" at a size boundary looked like "no date" (0.5.7 and 0.5.8 reviews) */
+        rmbl::fail("`x` is longer than 4096 bytes: not a date");
+    }
+    const std::string out = siu::to_iso_date(in);
+    SEXP ans = PROTECT(rmbl::alloc_vector(STRSXP, 1));
     SET_STRING_ELT(ans, 0, Rf_mkCharCE(out.c_str(), CE_UTF8));
     UNPROTECT(1);
     return ans;
 }
 
-SEXP C_rmbl_siu_strip_boilerplate(SEXP text) {
-    const std::string out = siu::strip_boilerplate(as_string(text, "text"));
-    SEXP ans = PROTECT(Rf_allocVector(STRSXP, 1));
-    SET_STRING_ELT(ans, 0, Rf_mkCharCE(out.c_str(), CE_UTF8));
-    UNPROTECT(1);
-    return ans;
-}
-
-SEXP C_rmbl_siu_resolve_so(SEXP text) {
+SEXP C_rmbl_siu_resolve_so_impl(SEXP text) {
+    /* plain text from the caller: the same whitespace/line discipline the
+     * HTML path gets, before any regex sees it */
     const siu::SoResolution res =
-        siu::resolve_subject_officers(as_string(text, "text"));
-    SEXP ans = PROTECT(Rf_allocVector(VECSXP, 2));
-    SEXP nms = PROTECT(Rf_allocVector(STRSXP, 2));
+        siu::resolve_subject_officials(siu::normalize_text(as_string(text, "text")));
+    SEXP ans = PROTECT(rmbl::alloc_vector(VECSXP, 2));
+    SEXP nms = PROTECT(rmbl::alloc_vector(STRSXP, 2));
     SET_STRING_ELT(nms, 0, Rf_mkChar("count"));
     SET_STRING_ELT(nms, 1, Rf_mkChar("reason"));
-    SEXP cnt = PROTECT(Rf_allocVector(INTSXP, 1));
+    SEXP cnt = PROTECT(rmbl::alloc_vector(INTSXP, 1));
     INTEGER(cnt)[0] = res.count.has_value() ? *res.count : NA_INTEGER;
-    SEXP rsn = PROTECT(Rf_allocVector(STRSXP, 1));
+    SEXP rsn = PROTECT(rmbl::alloc_vector(STRSXP, 1));
     SET_STRING_ELT(rsn, 0, Rf_mkCharCE(res.reason.c_str(), CE_UTF8));
     SET_VECTOR_ELT(ans, 0, cnt);
     SET_VECTOR_ELT(ans, 1, rsn);
     Rf_setAttrib(ans, R_NamesSymbol, nms);
     UNPROTECT(4);
-    return ans;
+    return with_split_attr(ans);
 }
 
-SEXP C_rmbl_siu_schema(SEXP unused) {
+SEXP C_rmbl_siu_schema_impl(SEXP unused) {
     (void) unused;
     const auto &fields = siu::schema();
     const R_xlen_t n = static_cast<R_xlen_t>(fields.size());
-    SEXP name = PROTECT(Rf_allocVector(STRSXP, n));
-    SEXP is_count = PROTECT(Rf_allocVector(LGLSXP, n));
-    SEXP desc = PROTECT(Rf_allocVector(STRSXP, n));
+    SEXP name = PROTECT(rmbl::alloc_vector(STRSXP, n));
+    SEXP is_count = PROTECT(rmbl::alloc_vector(LGLSXP, n));
+    SEXP desc = PROTECT(rmbl::alloc_vector(STRSXP, n));
     for (R_xlen_t i = 0; i < n; ++i) {
         const siu::Field &f = fields[static_cast<size_t>(i)];
         SET_STRING_ELT(name, i, Rf_mkCharCE(f.name.c_str(), CE_UTF8));
         LOGICAL(is_count)[i] = f.is_count ? TRUE : FALSE;
         SET_STRING_ELT(desc, i, Rf_mkCharCE(f.desc.c_str(), CE_UTF8));
     }
-    SEXP ans = PROTECT(Rf_allocVector(VECSXP, 3));
-    SEXP nms = PROTECT(Rf_allocVector(STRSXP, 3));
+    SEXP ans = PROTECT(rmbl::alloc_vector(VECSXP, 3));
+    SEXP nms = PROTECT(rmbl::alloc_vector(STRSXP, 3));
     SET_STRING_ELT(nms, 0, Rf_mkChar("name"));
-    SET_STRING_ELT(nms, 1, Rf_mkChar("is_count"));
+    SET_STRING_ELT(nms, 1, Rf_mkChar("count"));
     SET_STRING_ELT(nms, 2, Rf_mkChar("description"));
     SET_VECTOR_ELT(ans, 0, name);
     SET_VECTOR_ELT(ans, 1, is_count);

@@ -8,12 +8,12 @@
 ## under-specified.
 ##
 ## Provides:
-##   make_synthetic_csv(schema, out_path, n_rows, seed)
-##   make_synthetic_column(spec, n, base_p)
+##   mksyncsv: a schema to a CSV of n rows under a seed
+##   mksyncol: one column from its spec
 ##
 ## Schema format (from data_provenance.json schema.synthetic_recipe):
 ##   {
-##     "n_rows": 75000,                       # target rows
+##     "nrows": 75000,                       # target rows
 ##     "seed":   91735246,                    # reproducible seed
 ##     "columns": {
 ##       "EndFiscalYear": {
@@ -39,7 +39,7 @@
 ##       },
 ##       "UniqueIndividual_ID": {
 ##         "type":    "id_pattern",
-##         "pattern": "{year}-{seq:05d}-RC",
+##         pattern, e.g. year-seq-RC with a 5-digit zero-padded seq,
 ##         "year_col": "EndFiscalYear"
 ##       }
 ##     }
@@ -50,61 +50,125 @@
 
 #' Generate One Synthetic Column From a Spec
 #'
-#' Builds a single synthetic data column according to a column spec drawn
-#' from a provenance synthetic recipe. Supported `type` s are
-#' `"sample"` (categorical, optionally weighted), `"bernoulli"`
-#' (two-label draw with optional per-row base rate), `"poisson"`
-#' (counts with a floor), `"id_pattern"` (templated IDs, optionally
-#' per-year sequenced), and `"sequence"` (a running integer sequence).
+#' @description
+#' Builds one column of synthetic (made-up) data from a short specification,
+#' such as \dQuote{sample these categories with these weights} or \dQuote{Poisson counts
+#' with mean 25}. It is the building block of
+#' \code{\link{mksyncsv}}, which assembles a whole table from a
+#' recipe. Use synthetic columns to develop and test an analysis pipeline
+#' before, or instead of, touching restricted data.
 #'
-#' @param spec A list describing the column; recognised fields
-#' depend on `spec$type` (e.g. `values`, `weights`,
-#' `p`, `p_with_baserate`, `labels`, `lambda`,
-#' `min`, `pattern`, `year_col`, `from`) .
-#' @param n Number of values to generate.
-#' @param ctx Named list of already-generated columns, letting
-#' later columns (such as `id_pattern` with a `year_col`)
-#' reference earlier ones. Defaults to an empty list.
-#' @param base_p Optional numeric vector of per-row latent
-#' propensities used by the `"bernoulli"` type to add row-level
-#' variation.
-#' @return A vector of length `n` for the requested column type.
-#' Errors on an unknown `type`.
-#' @examples
+#' @details
+#' The supported \code{spec$type}s and the fields each reads (defaults in
+#' parentheses):
+#' \describe{
+#'   \item{\code{"sample"} (the default type)}{\code{values}, a vector or
+#'     list of categories; \code{weights} (default equal), their probabilities.
+#'     Drawn with replacement.}
+#'   \item{\code{"bernoulli"}}{\code{p} (default 0.1), the probability of the first
+#'     label; \code{labels} (default \code{c("Yes", "No")}); \code{p_with_baserate}
+#'     (default 0), added as \code{p_with_baserate * basep} to give row-level
+#'     variation when \code{basep} is supplied. A per-row probability above
+#'     1 behaves as 1.}
+#'   \item{\code{"poisson"}}{\code{lambda} (default 1); \code{min} (default 0), a floor:
+#'     draws below it are raised to it (so the result is not Poisson below
+#'     the floor).}
+#'   \item{\code{"id_pattern"}}{\code{pattern} (default \code{"id-\{seq:05d\}"}), in
+#'     which \code{\{seq:05d\}} becomes a five-digit zero-padded sequence
+#'     number and \code{\{year\}} the year; \code{year_col}, the name of a
+#'     column in \code{ctx} whose values supply \code{\{year\}} and restart
+#'     the sequence within each year. With \code{year_col}, that column must
+#'     have \code{n} values. No other tokens are recognised.}
+#'   \item{\code{"sequence"}}{\code{from} (default 1): \code{from, from + 1, ...}.}
+#'   \item{\code{"fitted"}}{\code{fit}, a \code{\link{dstfit}} result, and \code{family}
+#'     (default the first-ranked converged fit): draws from that fitted distribution.}
+#' }
+#' Random draws use R's random number generator, so call \code{set.seed()}
+#' first for a reproducible column. Errors: \code{spec} not a list; an
+#' unknown \code{type}; errors from \code{sample()} or \code{rpois()} on
+#' invalid weights or rates.
+#'
+#' @param spec A list describing the column: \code{type} and the fields
+#'   listed in Details. Lists as parsed from JSON (for example
+#'   \code{values = list("a", "b")}) are accepted.
+#' @param n Whole number: how many values to generate.
+#' @param ctx Named list of already-generated columns. Later columns can then
+#'   reference earlier ones, as \code{id_pattern} does with a \code{year_col}.
+#'   Defaults to an empty list.
+#' @param basep Optional numeric vector of per-row latent propensities in
+#'   \eqn{[0, 1]}, length \code{n}, used by the \code{"bernoulli"} type to add
+#'   row-level variation. Default \code{NULL}.
+#' @return A vector for the requested column type: character for
+#'   \code{"sample"} of strings, \code{"bernoulli"} and \code{"id_pattern"},
+#'   numeric or integer for \code{"poisson"} and \code{"sequence"} (and for
+#'   \code{"sample"} of numbers). Its length is \code{n}, except for
+#'   \code{"id_pattern"} with a \code{year_col}.
+#' @seealso \code{\link{mksyncsv}}.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' set.seed(1)
 #' # "sample": categorical draw, optionally weighted.
-#' make_synthetic_column(list(type = "sample", values = list("a", "b"),
-#'                            weights = list(0.7, 0.3)), 5)
+#' mksyncol(list(
+#'   type = "sample", values = list("a", "b"),
+#'   weights = list(0.7, 0.3)
+#' ), 5)
 #'
 #' # "bernoulli": two-label draw at probability p.
-#' make_synthetic_column(list(type = "bernoulli", p = 0.5,
-#'                            labels = list("Yes", "No")), 5)
+#' mksyncol(list(
+#'   type = "bernoulli", p = 0.5,
+#'   labels = list("Yes", "No")
+#' ), 5)
 #'
-#' # "poisson": counts with a floor via `min`.
-#' make_synthetic_column(list(type = "poisson", lambda = 3, min = 1), 5)
+#' # "poisson": counts with a floor via min.
+#' mksyncol(list(type = "poisson", lambda = 3, min = 1), 5)
 #'
 #' # "id_pattern": templated IDs (the {seq:05d} token is zero-padded).
-#' make_synthetic_column(list(type = "id_pattern",
-#'                            pattern = "case-{seq:05d}"), 3)
+#' mksyncol(list(
+#'   type = "id_pattern",
+#'   pattern = "case-{seq:05d}"
+#' ), 3)
 #'
-#' # "sequence": a running integer sequence from `from`.
-#' make_synthetic_column(list(type = "sequence", from = 100), 4)
+#' # ... numbered within each year of an earlier column
+#' yrs <- c(2024, 2024, 2025)
+#' unname(mksyncol(list(type = "id_pattern",
+#'   pattern = "{year}-{seq:05d}", year_col = "year"), 3,
+#'   ctx = list(year = yrs)))
+#'
+#' # "fitted": draws from a distribution fitted by dstfit()
+#' f <- dstfit(stats::rexp(100, 2), fams = "exponential", nboot = 0)
+#' mksyncol(list(type = "fitted", fit = f), 4)
+#'
+#' # "sequence": a running integer sequence from from.
+#' mksyncol(list(type = "sequence", from = 100), 4)
 #'
 #' # An unknown type errors.
-#' try(make_synthetic_column(list(type = "nope"), 3))
+#' try(mksyncol(list(type = "nope"), 3))
 #' @export
-make_synthetic_column <- function(spec, n, ctx = list(), base_p = NULL) {
+mksyncol <- function(spec, n, ctx = list(), basep = NULL) {
+  if (!is.list(spec)) stop("mksyncol: `spec` must be a column spec list (type = ..., ...)", call. = FALSE)
   type <- spec$type %||% "sample"
+  if (is.data.frame(spec) || (length(spec) && is.null(names(spec)))) {
+    stop("mksyncol: `spec` must be a column spec list (type = ..., ...)", call. = FALSE)
+  }
+  n <- .rmbl_num(n, "n", integer = TRUE)
+  if (length(n) != 1L || is.na(n) || n < 0L) stop("mksyncol: `n` must be a single non-negative whole number",
+                                                  call. = FALSE)
+  if (!is.null(basep)) {
+    basep <- .rmbl_num(basep, "basep")
+    if (anyNA(basep) || any(basep < 0 | basep > 1)) stop("`basep` must be probabilities between 0 and 1", call. = FALSE)
+  }
+  if (identical(type, "sample") && !length(unlist(spec$values))) {
+    stop("a \"sample\" column spec needs `values` to draw from", call. = FALSE)
+  }
   switch(type,
     sample = {
       vals <- unlist(spec$values)
-      w    <- if (!is.null(spec$weights)) unlist(spec$weights) else NULL
+      w <- if (!is.null(spec$weights)) unlist(spec$weights) else NULL
       sample(vals, n, replace = TRUE, prob = w)
     },
     bernoulli = {
       p_base <- spec$p %||% 0.1
       p_extra <- spec$p_with_baserate %||% 0
-      p_per_row <- if (!is.null(base_p)) p_base + p_extra * base_p else p_base
+      p_per_row <- if (!is.null(basep)) p_base + p_extra * basep else p_base
       # unlist: schemas parsed from provenance JSON deliver list("Yes","No")
       labels <- unlist(spec$labels %||% c("Yes", "No"))
       ifelse(stats::runif(n) < p_per_row, labels[1], labels[2])
@@ -120,11 +184,14 @@ make_synthetic_column <- function(spec, n, ctx = list(), base_p = NULL) {
       year_col <- spec$year_col %||% NULL
       if (!is.null(year_col) && year_col %in% names(ctx)) {
         years <- ctx[[year_col]]
+        if (length(years) != n) {
+          stop(sprintf("`ctx$%s` has %d values but n = %d", year_col, length(years), n), call. = FALSE)
+        }
         seq_per_yr <- stats::ave(seq_along(years), years, FUN = seq_along)
         ids <- mapply(function(y, s) {
           out <- gsub("\\{year\\}", as.character(y), pattern)
           gsub("\\{seq:05d\\}", sprintf("%05d", s), out)
-        }, years, seq_per_yr)
+        }, years, seq_per_yr, USE.NAMES = FALSE)
         return(ids)
       }
       # vapply: gsub vectorises over x, not replacement -- a bare gsub here
@@ -132,6 +199,15 @@ make_synthetic_column <- function(spec, n, ctx = list(), base_p = NULL) {
       vapply(seq_len(n), function(s) {
         gsub("\\{seq:05d\\}", sprintf("%05d", s), pattern)
       }, character(1))
+    },
+    fitted = {
+      fit <- spec$fit
+      if (!inherits(fit, "rmbl_dstfit") || !length(fit$fits)) {
+        stop("mksyncol: a \"fitted\" column spec needs `fit`, a dstfit() result with a converged fit", call. = FALSE)
+      }
+      fam <- spec$family %||% names(fit$fits)[[1L]]
+      if (!fam %in% names(fit$fits)) stop(sprintf("mksyncol: the fit has no converged %s family", fam), call. = FALSE)
+      .dst_fams()[[fam]]$r(n, fit$fits[[fam]])
     },
     sequence = {
       from <- spec$from %||% 1L
@@ -141,42 +217,63 @@ make_synthetic_column <- function(spec, n, ctx = list(), base_p = NULL) {
   )
 }
 
-#' Null-Coalescing Operator
-#'
-#' Returns `a` unless it is `NULL`, in which case it returns
-#' `b`.
-#'
-#' @param a Left-hand value.
-#' @param b Fallback used when `a` is `NULL`.
-#' @return `a` if it is not `NULL`, otherwise `b`.
-#' @keywords internal
-#' @noRd
-`%||%` <- function(a, b) if (is.null(a)) b else a
-
 ## ----- Main generator -----
 ## `schema` is the synthetic_recipe sub-block of provenance.
-## `out_path` is where to write the CSV.
+## `outpath` is where to write the CSV.
 
 #' Generate a Synthetic CSV From a Schema Recipe
 #'
-#' Generates a reproducible synthetic data set from the
-#' `schema$synthetic_recipe` block of a provenance object and writes
-#' it to a CSV. Columns are produced in declaration order so later columns
-#' can reference earlier ones, a shared per-row latent propensity drives
-#' any Bernoulli columns, and an optional row-replication block expands
-#' per-person rows.
+#' @description
+#' Generates a reproducible synthetic data set from a recipe (the
+#' \code{schema$synthetic_recipe} block of a provenance object, or a list
+#' written by hand) and writes it to a CSV file. Each column is described as
+#' in \code{\link{mksyncol}}. Next to the CSV it writes a
+#' \code{.synthetic} marker file, so the generated rows can never be
+#' mistaken for real data later. Use it to share a runnable version of an
+#' analysis without sharing restricted records.
 #'
-#' @param schema The synthetic recipe (a list with
-#' `columns`, and optional `n_rows`, `seed`, and
-#' `row_replication`) .
-#' @param out_path Path where the CSV is written.
-#' @param n_rows Number of rows (persons, if replicating) to
-#' generate. Defaults to `schema$n_rows`, then 50000.
+#' @details
+#' Columns are produced in declaration order so later columns can reference
+#' earlier ones. A shared per-person latent propensity, uniform on
+#' \eqn{[0, 1]}, drives every \code{"bernoulli"} column through the column's
+#' \code{p_with_baserate} field, so those columns are correlated with each
+#' other. An optional \code{row_replication} block (\code{values} and
+#' \code{weights}) draws how many rows each person gets: person-level
+#' columns are drawn once per person and repeated, while \code{"bernoulli"}
+#' columns are drawn once per row. With replication the file therefore has
+#' more than \code{nrows} rows.
+#'
+#' The data are drawn under \code{seed} and the caller's random number
+#' stream is restored afterwards, so the same recipe and seed give the same
+#' file and the surrounding analysis is not disturbed.
+#'
+#' Side effects: writes \code{outpath} (overwriting it) and
+#' \code{paste0(outpath, ".synthetic")}, a small JSON file with
+#' \code{synthetic: true}, the row count, the seed, the recipe's SHA-256 and
+#' the time; and marks the R session as having made synthetic data, so a
+#' manifest built later in the same session is labelled synthetic. A
+#' progress bar is shown in an interactive session.
+#'
+#' Errors: \code{schema} not a list; any error from
+#' \code{\link{mksyncol}}; an unwritable \code{outpath}.
+#'
+#' @param schema The synthetic recipe: a list with \code{columns} (a named
+#'   list of column specs), and optional \code{nrows}, \code{seed} and
+#'   \code{row_replication}.
+#' @param outpath Character string: the path of the CSV to write.
+#' @param nrows Whole number: the number of rows (persons, if replicating)
+#'   to generate, from 1 to 100 million (the table is built in memory).
+#'   Defaults to \code{schema$nrows}, then 50000.
 #' @param seed Random seed for reproducibility. Defaults to
-#' `schema$seed`, then 91735246.
-#' @return Invisibly, a list with `path`, `rows` (rows written),
-#' and `seed` used.
-#' @examples
+#'   \code{schema$seed}, then 91735246.
+#' @return Invisibly, a list of class \code{bricklayer_synthetic} with
+#'   \code{path}, \code{sidecar} (the \code{<path>.synthetic} marker file;
+#'   \code{\link{vrfcps}} treats its presence as a failed check),
+#'   \code{rows} (rows written), \code{seed} (the seed used) and
+#'   \code{recipe_sha256} (the recipe's digest, \code{NA} when it could not
+#'   be computed). Its print method labels the file as synthetic.
+#' @seealso \code{\link{mksyncol}}, \code{\link{vrfcps}}.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' recipe <- list(
 #'   n_rows = 20, seed = 42,
 #'   columns = list(
@@ -187,22 +284,42 @@ make_synthetic_column <- function(spec, n, ctx = list(), base_p = NULL) {
 #'   )
 #' )
 #' out <- tempfile(fileext = ".csv")
-#' res <- make_synthetic_csv(recipe, out)
-#' res$rows                         # 20
-#' res$seed                         # 42 (reproducible)
+#' res <- mksyncsv(recipe, out)
+#' res$rows # 20
+#' res$seed # 42 (reproducible)
 #'
 #' # The written CSV round-trips and has the declared columns.
 #' df <- utils::read.csv(out)
 #' dim(df)
 #' names(df)
 #'
-#' # `n_rows` overrides the recipe's own row count.
-#' make_synthetic_csv(recipe, tempfile(fileext = ".csv"), n_rows = 5)$rows
+#' # and the marker file says it is synthetic
+#' file.exists(res$sidecar)
+#'
+#' # nrows overrides the recipe's own row count.
+#' mksyncsv(recipe, tempfile(fileext = ".csv"), nrows = 5)$rows
+#'
+#' # one to three rows per person
+#' recipe$row_replication <- list(values = list(1, 2, 3))
+#' mksyncsv(recipe, tempfile(fileext = ".csv"), nrows = 5)$rows
+#'
+#' try(mksyncsv("not a recipe", tempfile()))
 #' @export
-make_synthetic_csv <- function(schema, out_path,
-                                n_rows = NULL, seed = NULL) {
+mksyncsv <- function(schema, outpath,
+                               nrows = NULL, seed = NULL) {
+  outpath <- .rmbl_string1(outpath, "outpath")
+  if (!is.list(schema)) stop("`schema` must be a schema list (columns = ..., ...)", call. = FALSE)
   if (is.null(seed)) seed <- schema$seed %||% 91735246L
-  if (is.null(n_rows)) n_rows <- schema$n_rows %||% 50000L
+  if (is.null(nrows)) nrows <- schema$n_rows %||% 50000L
+  # built in memory: a count of rows, and one a machine can hold (2^31 was a process killed for memory;
+  # CRAN stress test of 0.5.14). Base R only: a staged bundle sources this file on its own.
+  if (!is.numeric(nrows) || length(nrows) != 1L || !is.finite(nrows) || nrows < 1 ||
+      nrows != round(nrows) || inherits(nrows, c("Date", "POSIXt", "difftime"))) {
+    stop("`nrows` must be one whole number of rows, at least 1", call. = FALSE)
+  }
+  if (nrows > 1e8) {
+    stop("`nrows` above 100 million is refused: the synthetic table is built in memory", call. = FALSE)
+  }
   # CRAN policy: restore the caller's RNG state on exit.
   if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
     old_seed <- get(".Random.seed", envir = globalenv())
@@ -213,18 +330,19 @@ make_synthetic_csv <- function(schema, out_path,
   ## Optional: replicate rows per "person" if a multiplier is specified
   reps_spec <- schema$row_replication
   if (!is.null(reps_spec)) {
-    n_persons <- n_rows
+    n_persons <- nrows
     # index-sample the values: sample(x) with a scalar integer x would
     # expand to 1:x (base R gotcha) and break single-value replication.
     rep_vals <- unlist(reps_spec$values)
     rows_per <- rep_vals[sample.int(length(rep_vals), n_persons,
-                                    replace = TRUE,
-                                    prob = unlist(reps_spec$weights))]
+      replace = TRUE,
+      prob = unlist(reps_spec$weights)
+    )]
     expand <- function(x) rep(x, rows_per)
     n_total <- sum(rows_per)
   } else {
     expand <- identity
-    n_total <- n_rows
+    n_total <- nrows
   }
 
   ## Latent per-person "baseline propensity" -- shared across bernoulli
@@ -232,29 +350,77 @@ make_synthetic_csv <- function(schema, out_path,
   ## share the propensity but draw their own outcome (a person's alert
   ## status can change between placements, which is what the treatment
   ## definition in the analyses rests on).
-  base_p <- expand(stats::runif(n_rows, 0, 1))
+  base_p <- expand(stats::runif(nrows, 0, 1))
 
   ## Generate columns in declaration order; later columns can see ctx
   out <- list()
-  ctx <- list()         # one entry per row
-  ctx_person <- list()  # one entry per person, before replication
+  ctx <- list() # one entry per row
+  ctx_person <- list() # one entry per person, before replication
+  # base R only when sourced standalone in a bundle: the bar only when the package is there
+  pg <- if (exists("blprog", mode = "function")) {
+    blprog("synthetic data", length(schema$columns) + 1L)
+  }
+  if (!is.null(pg)) on.exit(pg$done(), add = TRUE)
   for (col_name in names(schema$columns)) {
+    if (!is.null(pg)) pg$tick(0, sprintf("column %s", col_name))
     spec <- schema$columns[[col_name]]
     type <- spec$type %||% "sample"
     if (identical(type, "bernoulli")) {
       ## one draw per row, not one per person copied across rows
-      vals <- make_synthetic_column(spec, n_total, ctx, base_p)
+      vals <- mksyncol(spec, n_total, ctx, base_p)
     } else {
       ## person-level columns (ids, demographics, regions): drawn once per
       ## person from the person-level context, then repeated over rows
-      vals <- make_synthetic_column(spec, n_rows, ctx_person)
+      vals <- mksyncol(spec, nrows, ctx_person)
       ctx_person[[col_name]] <- vals
       vals <- expand(vals)
     }
     ctx[[col_name]] <- vals
     out[[col_name]] <- vals
+    if (!is.null(pg)) pg$tick()
   }
+  if (!is.null(pg)) pg$tick(0, sprintf("writing %s rows", format(n_total, big.mark = ",")))
   out_df <- as.data.frame(out, stringsAsFactors = FALSE)
-  utils::write.csv(out_df, out_path, row.names = FALSE)
-  invisible(list(path = out_path, rows = nrow(out_df), seed = seed))
+  utils::write.csv(out_df, outpath, row.names = FALSE)
+  # The CSV stays a plain CSV so every reader opens it; the sidecar beside
+  # it is what says the rows were generated (seed, recipe digest), and
+  # vrfcps() refuses a capsule whose data file has one. Read back
+  # with read.csv() alone the file was indistinguishable from real data.
+  # This file is also sourced standalone inside a staged bundle, where only
+  # lib_*.R exist: base R only here (the bundle's lib_manifest.R supplies the
+  # digest when it is present; the sidecar is written either way).
+  recipe_sha256 <- if (exists("mnfdgst", mode = "function")) {
+    tryCatch(mnfdgst(schema), error = function(e) NA_character_)
+  } else {
+    NA_character_
+  }
+  .rmbl_synth_state$made <- TRUE
+  sidecar <- paste0(outpath, ".synthetic")
+  jstr <- function(x) paste0("\"", gsub("\"", "\\\\\"", as.character(x)), "\"")
+  writeLines(c(
+    "{",
+    "  \"synthetic\": true,",
+    sprintf("  \"rows\": %d,", nrow(out_df)),
+    sprintf("  \"seed\": %s,", format(seed)),
+    sprintf("  \"recipe_sha256\": %s,", if (is.na(recipe_sha256)) "null" else jstr(recipe_sha256)),
+    sprintf("  \"generated_utc\": %s", jstr(format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))),
+    "}"
+  ), sidecar)
+  res <- list(path = outpath, sidecar = sidecar, rows = nrow(out_df),
+              seed = seed, recipe_sha256 = recipe_sha256)
+  class(res) <- c("bricklayer_synthetic", "list")
+  invisible(res)
 }
+
+#' @export
+format.bricklayer_synthetic <- function(x, ...) {
+  c("SYNTHETIC data (generated from a recipe, not fetched)",
+    sprintf("  file    %s", x$path),
+    sprintf("  sidecar %s", x$sidecar),
+    sprintf("  rows %d, seed %s, recipe sha256 %s", x$rows, format(x$seed),
+            substr(x$recipe_sha256, 1L, 16L)))
+}
+
+#' @export
+#' @method print bricklayer_synthetic
+print.bricklayer_synthetic <- .rmbl_print_via_format

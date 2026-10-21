@@ -14,34 +14,735 @@
  * One implementation, every language -- the ecosystem's C++-first rule.
  */
 
-#include <R.h>
-#include <Rinternals.h>
-#include <curl/curl.h>
+/* C++ standard headers first: Rinternals.h defines a `length` macro that
+ * breaks libc++'s <locale>, which <vector> pulls in on macOS. */
+#include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
+#include <cerrno>
+#include <cstdlib>
+#include <functional>
+#include <chrono>
+#include <atomic>
+#include <cmath>
+#include <cstdarg>
+#include <thread>
+#include <R.h>
+#include <Rinternals.h>
+#include <curl/curl.h>
+#include "rmbl_entry.h"
+#include "rmbl_ascii.h"
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
 const char *kUA = "morie-bricklayer/1.0 (+https://github.com/rootcoder007/rmorie-bricklayer)";
 
+/* Caps every transfer gets. Redirects are bounded and pinned to http(s)
+ * (a file:// URL, or a redirect to one, is refused), a download to a file
+ * is bounded in size, and a response read into memory is bounded too:
+ * write_to_string() appended without limit, so one hostile response could
+ * exhaust memory. CURLOPT_PROTOCOLS_STR arrived in libcurl 7.85; older
+ * builds take the bitmask form, so the pin holds everywhere. */
+const curl_off_t kMaxDownload = static_cast<curl_off_t>(2) << 30;  /* 2 GiB */
+const size_t kMaxBody = static_cast<size_t>(16) << 20;             /* 16 MiB: a model list, an OCSP reply, a manifest */
+
+/* ------------------------------------------------------------------ *
+ * Where a request may go.
+ *
+ * Every URL this file fetches is checked HERE, in one place, before the
+ * transport sees it, and again on every redirect: the resolvers hand the
+ * package URLs a CKAN or Socrata record (or a tampered one) chose, so an
+ * unchecked hop is a request to the cloud metadata service, a loopback
+ * admin port or an internal mirror, made with this host's standing.
+ *
+ * The check does not pattern-match spellings. It parses the authority the
+ * way a URL parser does (the host ends at the first "/", "?" or "#"; a "@"
+ * anywhere in it is refused outright), reads an IPv4 literal with the
+ * inet_aton grammar every stack accepts (127.1, 0177.0.0.1, 0x7f000001,
+ * 2130706433 are all 127.0.0.1), parses IPv6 literals with inet_pton, and
+ * for a hostname resolves it and tests every address it resolves to --
+ * then pins the connection to exactly those addresses with CURLOPT_RESOLVE,
+ * so a second lookup cannot answer differently (DNS rebinding). Redirects
+ * are not followed by libcurl; each Location is run through the same check.
+ * ------------------------------------------------------------------ */
+struct UrlParts {
+    std::string scheme, host, port;
+    bool bracketed = false;
+};
+
+bool parse_url(const std::string &url, UrlParts &u, std::string &why) {
+    const size_t p = url.find("://");
+    if (p == std::string::npos || p == 0) { why = "no URL scheme"; return false; }
+    u.scheme = url.substr(0, p);
+    for (char &c : u.scheme) c = static_cast<char>(rmbl_ascii_lower(c));
+    size_t a = p + 3;
+    size_t e = url.find_first_of("/?#", a);
+    if (e == std::string::npos) e = url.size();
+    std::string auth = url.substr(a, e - a);
+    if (auth.empty()) { why = "empty host"; return false; }
+    if (auth.find('@') != std::string::npos) {
+        why = "userinfo in the authority is refused";
+        return false;
+    }
+    if (auth[0] == '[') {
+        const size_t rb = auth.find(']');
+        if (rb == std::string::npos) { why = "unterminated IPv6 literal"; return false; }
+        u.host = auth.substr(1, rb - 1);
+        u.bracketed = true;
+        std::string rest = auth.substr(rb + 1);
+        if (!rest.empty()) {
+            if (rest[0] != ':') { why = "malformed authority"; return false; }
+            u.port = rest.substr(1);
+        }
+    } else {
+        const size_t c = auth.rfind(':');
+        if (c != std::string::npos) { u.host = auth.substr(0, c); u.port = auth.substr(c + 1); }
+        else u.host = auth;
+    }
+    for (char &c : u.host) c = static_cast<char>(rmbl_ascii_lower(c));
+    if (!u.port.empty()) {
+        for (char c : u.port) if (c < '0' || c > '9') { why = "malformed port"; return false; }
+        if (u.port.size() > 5 || std::atoi(u.port.c_str()) > 65535) { why = "port out of range"; return false; }
+    }
+    if (u.host.empty()) { why = "empty host"; return false; }
+    return true;
+}
+
+/* inet_aton semantics: 1-4 parts, each decimal, octal (leading 0) or hex
+ * (0x); the last part fills the remaining bytes. Returns false when the
+ * text is not an IPv4 literal at all (then it may be a hostname). */
+bool ipv4_literal(const std::string &h, uint32_t &out) {
+    std::vector<unsigned long> parts;
+    size_t i = 0;
+    while (i <= h.size()) {
+        size_t j = h.find('.', i);
+        if (j == std::string::npos) j = h.size();
+        std::string t = h.substr(i, j - i);
+        if (t.empty()) return false;
+        int base = 10;
+        if (t.size() > 1 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) { base = 16; t = t.substr(2); if (t.empty()) return false; }
+        else if (t.size() > 1 && t[0] == '0') { base = 8; }
+        for (char c : t) {
+            const bool ok = base == 16 ? std::isxdigit(static_cast<unsigned char>(c)) != 0
+                          : base == 8 ? (c >= '0' && c <= '7') : (c >= '0' && c <= '9');
+            if (!ok) return false;
+        }
+        errno = 0;
+        char *end = nullptr;
+        unsigned long v = std::strtoul(t.c_str(), &end, base);
+        if (errno != 0 || (end && *end)) return false;
+        parts.push_back(v);
+        if (parts.size() > 4) return false;
+        if (j == h.size()) break;
+        i = j + 1;
+    }
+    if (parts.empty()) return false;
+    const size_t n = parts.size();
+    for (size_t k = 0; k + 1 < n; ++k) if (parts[k] > 255) return false;
+    const int fill = static_cast<int>(4 - (n - 1));            /* bytes the last part covers */
+    const unsigned long maxlast = fill == 4 ? 0xFFFFFFFFul : (1ul << (8 * fill)) - 1ul;
+    if (parts[n - 1] > maxlast) return false;
+    uint32_t v = 0;
+    for (size_t k = 0; k + 1 < n; ++k) v = (v << 8) | static_cast<uint32_t>(parts[k]);
+    /* fill == 4 only when the literal is one number: it is the whole address
+     * (a shift by 32 of a 32-bit value is undefined) */
+    v = (fill == 4) ? static_cast<uint32_t>(parts[0]) : ((v << (8 * fill)) | static_cast<uint32_t>(parts[n - 1]));
+    out = v;
+    return true;
+}
+
+/* loopback, unspecified, private, link-local, CGNAT, benchmark, documentation,
+ * multicast and reserved: everything a request from this host must not reach
+ * on a stranger's say-so */
+bool ipv4_private(uint32_t a) {
+    const uint32_t b0 = a >> 24, b1 = (a >> 16) & 0xff, b2 = (a >> 8) & 0xff;
+    if (b0 == 0 || b0 == 10 || b0 == 127) return true;
+    if (b0 == 100 && b1 >= 64 && b1 <= 127) return true;
+    if (b0 == 169 && b1 == 254) return true;
+    if (b0 == 172 && b1 >= 16 && b1 <= 31) return true;
+    if (b0 == 192 && b1 == 0 && (b2 == 0 || b2 == 2)) return true;
+    if (b0 == 192 && b1 == 88 && b2 == 99) return true;
+    if (b0 == 192 && b1 == 168) return true;
+    if (b0 == 198 && (b1 == 18 || b1 == 19)) return true;
+    if (b0 == 198 && b1 == 51 && b2 == 100) return true;
+    if (b0 == 203 && b1 == 0 && b2 == 113) return true;
+    if (b0 >= 224) return true;
+    return false;
+}
+
+bool ipv6_private(const unsigned char b[16]) {
+    bool zero12 = true;
+    for (int i = 0; i < 10; ++i) if (b[i]) zero12 = false;
+    if (zero12 && b[10] == 0 && b[11] == 0) {
+        /* ::, ::1 and ::a.b.c.d (deprecated compatible form): check as v4 */
+        const uint32_t v4 = (static_cast<uint32_t>(b[12]) << 24) | (b[13] << 16) | (b[14] << 8) | b[15];
+        if (v4 <= 1) return true;
+        return ipv4_private(v4);
+    }
+    if (zero12 && b[10] == 0xff && b[11] == 0xff) {   /* ::ffff:a.b.c.d */
+        const uint32_t v4 = (static_cast<uint32_t>(b[12]) << 24) | (b[13] << 16) | (b[14] << 8) | b[15];
+        return ipv4_private(v4);
+    }
+    if (b[0] == 0 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) { /* 64:ff9b::/96 NAT64 */
+        bool mid = true;
+        for (int i = 4; i < 12; ++i) if (b[i]) mid = false;
+        if (mid) {
+            const uint32_t v4 = (static_cast<uint32_t>(b[12]) << 24) | (b[13] << 16) | (b[14] << 8) | b[15];
+            return ipv4_private(v4);
+        }
+    }
+    /* 2002::/16 6to4 embeds an IPv4 address in bytes 2..5: [2002:7f00:1::] is 127.0.0.1 (CRAN stress
+     * test of 0.5.14) */
+    if (b[0] == 0x20 && b[1] == 0x02) {
+        const uint32_t v4 = (static_cast<uint32_t>(b[2]) << 24) | (b[3] << 16) | (b[4] << 8) | b[5];
+        return ipv4_private(v4);
+    }
+    /* 2001::/32 Teredo hides its client's IPv4 address (XORed) in the last bytes: never a public host to
+     * fetch from; 64:ff9b:1::/48 is a local-use NAT64 prefix (RFC 8215); 100::/64 discards */
+    if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0 && b[3] == 0) return true;
+    if (b[0] == 0 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && b[4] == 0 && b[5] == 1) return true;
+    if (b[0] == 0x01 && b[1] == 0) {
+        bool z = true;
+        for (int i = 2; i < 8; ++i) if (b[i]) z = false;
+        if (z) return true;
+    }
+    if ((b[0] & 0xfe) == 0xfc) return true;                  /* fc00::/7 unique local */
+    if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return true;  /* fe80::/10 link-local */
+    if (b[0] == 0xfe && (b[1] & 0xc0) == 0xc0) return true;  /* fec0::/10 site-local */
+    if (b[0] == 0xff) return true;                           /* multicast */
+    if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8) return true; /* 2001:db8::/32 */
+    return false;
+}
+
+bool ipv6_literal(const std::string &h, unsigned char out[16]) {
+    std::string t = h;
+    const size_t z = t.find('%');            /* zone id */
+    if (z != std::string::npos) t = t.substr(0, z);
+    struct in6_addr a6;
+    if (inet_pton(AF_INET6, t.c_str(), &a6) != 1) return false;
+    std::memcpy(out, &a6, 16);
+    return true;
+}
+
+/* a hostname is letters, digits and hyphens in dot-separated labels; the
+ * names below are local by definition whatever DNS says. A trailing dot
+ * (the fully qualified spelling) is taken off the URL itself before this
+ * runs (canonical_url()), so a dot still here is an empty label. */
+bool hostname_ok(const std::string &h, std::string &why) {
+    if (h.empty() || h.size() > 253) { why = "malformed hostname"; return false; }
+    size_t i = 0;
+    bool all_digits_tld = true;
+    while (i <= h.size()) {
+        size_t j = h.find('.', i);
+        if (j == std::string::npos) j = h.size();
+        const size_t len = j - i;
+        if (len == 0 || len > 63) { why = "malformed hostname"; return false; }
+        all_digits_tld = true;
+        for (size_t k = i; k < j; ++k) {
+            const char c = h[k];
+            /* '_' is outside RFC 1123 but common in deployed names (and harmless
+             * to the checks here: it never forms an address) */
+            const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+            if (!ok) { why = "hostname has characters outside letters, digits, hyphens and underscores"; return false; }
+            if (c < '0' || c > '9') all_digits_tld = false;
+        }
+        if (h[i] == '-' || h[j - 1] == '-') { why = "malformed hostname"; return false; }
+        if (j == h.size()) break;
+        i = j + 1;
+    }
+    if (all_digits_tld) { why = "malformed address"; return false; }
+    /* a public name has a registrable suffix: "metadata", "instance-data" and
+     * every other single label resolve only inside some network (the cloud
+     * metadata hosts among them), so the pre-flight refuses them by shape
+     * without a DNS lookup */
+    if (h.find('.') == std::string::npos) { why = "a single-label name is not a public host"; return false; }
+    static const char *const kLocal[] = {"localhost", ".localhost", ".local", ".internal",
+                                         ".localdomain", ".home.arpa", ".in-addr.arpa", ".ip6.arpa"};
+    for (const char *suf : kLocal) {
+        const std::string sfx(suf);
+        if (sfx[0] != '.') { if (h == sfx) { why = "a local name"; return false; } continue; }
+        if (h.size() >= sfx.size() && h.compare(h.size() - sfx.size(), sfx.size(), sfx) == 0) {
+            why = "a local or internal name";
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The URL with one trailing dot taken off a hostname ("https://example.com./"
+ * is "https://example.com/"). The check, the CURLOPT_RESOLVE pin and the URL
+ * libcurl is handed must all name the host the same way: the check used to
+ * strip the dot from its own copy only, so the pin said "example.com" while
+ * libcurl, asked for "example.com.", found no pin and resolved the name again
+ * itself (the rebinding the pin is there to stop; review of 1.0.0, H2). A
+ * bracketed IPv6 literal has no trailing dot to take. */
+std::string canonical_url(const std::string &url) {
+    const size_t p = url.find("://");
+    if (p == std::string::npos) return url;
+    const size_t a = p + 3;
+    size_t e = url.find_first_of("/?#", a);
+    if (e == std::string::npos) e = url.size();
+    if (a >= e || url[a] == '[') return url;
+    const size_t c = url.find(':', a);
+    const size_t hend = (c != std::string::npos && c < e) ? c : e;
+    if (hend > a + 1 && url[hend - 1] == '.') {
+        return url.substr(0, hend - 1) + url.substr(hend);
+    }
+    return url;
+}
+
+/* The address a socket is about to connect to, by the same rules as a
+ * resolved name: libcurl calls guard_socket() (CURLOPT_OPENSOCKETFUNCTION)
+ * for every connection it opens, so an address the pin did not supply -- a
+ * proxy named by http_proxy / https_proxy, or a second resolution -- meets
+ * the policy too. Anything that is not IPv4 or IPv6 is refused. */
+bool sockaddr_private(const struct sockaddr *sa) {
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *s4 = reinterpret_cast<const struct sockaddr_in *>(sa);
+        return ipv4_private(ntohl(s4->sin_addr.s_addr));
+    }
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *s6 = reinterpret_cast<const struct sockaddr_in6 *>(sa);
+        unsigned char b[16];
+        std::memcpy(b, &s6->sin6_addr, 16);
+        return ipv6_private(b);
+    }
+    return true;
+}
+
+/* `local_ok` is set for a hop the policy admitted to the loopback host or a
+ * LAN literal (allow_loopback); every other hop connects to public
+ * addresses only. */
+struct SockGuard {
+    bool local_ok;
+};
+
+curl_socket_t guard_socket(void *ud, curlsocktype, struct curl_sockaddr *a) {
+    const SockGuard *g = static_cast<const SockGuard *>(ud);
+    if (!g->local_ok && sockaddr_private(&a->addr)) return CURL_SOCKET_BAD;
+    return socket(a->family, a->socktype, a->protocol);
+}
+
+bool allow_http_option() {
+    SEXP v = Rf_GetOption1(Rf_install("rmoriebricklayer.allowhttp"));
+    return v != R_NilValue && Rf_asLogical(v) == TRUE;
+}
+
+/* A local model server (Ollama on 127.0.0.1:11434) is plain http on the
+ * loopback interface, which the policy refuses twice over. The R caller that
+ * KNOWS the address came from the user's own environment passes
+ * `allow_loopback` down this one call (never a global option: the fourth
+ * review turned options(allow_loopback) into a process-wide SSRF switch).
+ * Exactly the loopback host is admitted, nothing else private, and only when
+ * the request STARTED on the loopback host: a remote server cannot redirect
+ * the package into the loopback interface. */
+
+bool loopback_host(const UrlParts &u) {
+    if (u.bracketed) {
+        unsigned char b[16];
+        if (!ipv6_literal(u.host, b)) return false;
+        for (int i = 0; i < 15; ++i) if (b[i]) return false;
+        return b[15] == 1;
+    }
+    uint32_t a = 0;
+    if (ipv4_literal(u.host, a)) return (a >> 24) == 127u;
+    std::string h = u.host;
+    for (char &c : h) c = static_cast<char>(rmbl_ascii_lower(c));
+    return h == "localhost";
+}
+
+/* A private LAN literal: RFC 1918 and IPv6 ULA. Link-local (169.254/16, the
+ * cloud metadata range), CGNAT and every other reserved range stay refused. */
+bool lan_private_v4(uint32_t a) {
+    const uint32_t b0 = a >> 24, b1 = (a >> 16) & 0xff;
+    return b0 == 10 || (b0 == 172 && b1 >= 16 && b1 <= 31) || (b0 == 192 && b1 == 168);
+}
+/* The addresses `allow_loopback` admits over plain http: the loopback host and
+ * a LITERAL private LAN address (an LM Studio or vLLM box on the same network,
+ * the documented use of MORIE_LLM_BASE_URL; diff review D4 found it refused by
+ * two rules with no way through). A name is never admitted this way: it would
+ * be resolved by whoever answers DNS. */
+bool local_host(const UrlParts &u) {
+    if (loopback_host(u)) return true;
+    if (u.bracketed) {
+        unsigned char b[16];
+        return ipv6_literal(u.host, b) && (b[0] & 0xfe) == 0xfc;
+    }
+    uint32_t a = 0;
+    return ipv4_literal(u.host, a) && lan_private_v4(a);
+}
+
+/* The whole check. `addrs` receives the dotted/colon addresses the host
+ * resolved to (empty for a literal), for CURLOPT_RESOLVE. `resolve = false`
+ * (the R validator's pre-flight) stops at the literal checks. Returns "" when
+ * the URL may be fetched, else the reason. */
+std::string url_check(const std::string &url_in, bool allow_http, bool resolve,
+                      UrlParts *parts_out, std::vector<std::string> *addrs,
+                      bool allow_loopback = false) {
+    const std::string url = canonical_url(url_in);
+    UrlParts u;
+    std::string why;
+    std::string sch;
+    {
+        const size_t p = url.find("://");
+        sch = p == std::string::npos ? "" : url.substr(0, p);
+        for (char &c : sch) c = static_cast<char>(rmbl_ascii_lower(c));
+        if (sch != "https" && sch != "http") return "scheme " + sch + ":// is refused";
+    }
+    if (!parse_url(url, u, why)) return why;
+    if (allow_loopback && local_host(u)) {
+        if (parts_out) *parts_out = u;
+        return "";
+    }
+    if (sch == "http" && !allow_http) {
+        return "plain http is refused (options(rmoriebricklayer.allowhttp = TRUE) admits a trusted mirror)";
+    }
+    uint32_t v4 = 0;
+    unsigned char v6[16];
+    if (u.bracketed) {
+        if (!ipv6_literal(u.host, v6)) return "malformed IPv6 literal";
+        if (ipv6_private(v6)) return "a local or private address (" + u.host + ")";
+    } else if (ipv4_literal(u.host, v4)) {
+        if (ipv4_private(v4)) return "a local or private address (" + u.host + ")";
+    } else {
+        if (!hostname_ok(u.host, why)) return why + " (" + u.host + ")";
+        if (resolve) {
+            struct addrinfo hints;
+            std::memset(&hints, 0, sizeof hints);
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            struct addrinfo *res = nullptr;
+            if (getaddrinfo(u.host.c_str(), nullptr, &hints, &res) != 0 || !res) {
+                return "could not resolve " + u.host;
+            }
+            std::string bad;
+            for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+                char buf[INET6_ADDRSTRLEN];
+                buf[0] = '\0';
+                if (ai->ai_family == AF_INET) {
+                    const struct sockaddr_in *sa = reinterpret_cast<const struct sockaddr_in *>(ai->ai_addr);
+                    const uint32_t a = ntohl(sa->sin_addr.s_addr);
+                    inet_ntop(AF_INET, &sa->sin_addr, buf, sizeof buf);
+                    if (ipv4_private(a)) { bad = buf; break; }
+                } else if (ai->ai_family == AF_INET6) {
+                    const struct sockaddr_in6 *sa = reinterpret_cast<const struct sockaddr_in6 *>(ai->ai_addr);
+                    unsigned char b[16];
+                    std::memcpy(b, &sa->sin6_addr, 16);
+                    inet_ntop(AF_INET6, &sa->sin6_addr, buf, sizeof buf);
+                    if (ipv6_private(b)) { bad = buf; break; }
+                } else {
+                    continue;
+                }
+                if (addrs && buf[0]) addrs->push_back(buf);
+            }
+            freeaddrinfo(res);
+            if (!bad.empty()) return u.host + " resolves to a local or private address (" + bad + ")";
+            if (addrs && addrs->empty()) return "could not resolve " + u.host;
+        }
+    }
+    if (parts_out) *parts_out = u;
+    return "";
+}
+
+/* Which request headers may follow a redirect to ANOTHER origin. The old rule
+ * named three credential headers and let everything else travel, so an
+ * X-Api-Key, api-key, X-Auth-Token or Private-Token reached whatever host the
+ * origin named (fourth review). Now a header travels only when it is on this
+ * short list of content-negotiation headers; anything else, named by the
+ * caller, identifies the caller to the first origin and stays there. */
+bool header_travels(const std::string &hdr) {
+    std::string name = hdr.substr(0, hdr.find(':'));
+    for (char &c : name) c = static_cast<char>(rmbl_ascii_lower(c));
+    while (!name.empty() && name.back() == ' ') name.pop_back();
+    static const char *const kTravels[] = {
+        "accept", "accept-encoding", "accept-language", "user-agent", "content-type",
+        "content-length", "range", "if-none-match", "if-modified-since", "expect",
+        "cache-control", "pragma", nullptr};
+    for (const char *const *k = kTravels; *k; ++k) if (name == *k) return true;
+    return false;
+}
+
+/* The origin of a parsed URL: scheme, host and EFFECTIVE port, lower-cased.
+ * A redirect that keeps the host but changes the port or the scheme reaches a
+ * different service and must not carry the caller's headers (fourth review:
+ * 127.0.0.1:18081 -> 127.0.0.1:18082 forwarded the bearer). */
+std::string origin_of(const UrlParts &u) {
+    std::string sch = u.scheme, host = u.host;
+    for (char &c : sch) c = static_cast<char>(rmbl_ascii_lower(c));
+    for (char &c : host) c = static_cast<char>(rmbl_ascii_lower(c));
+    const std::string port = u.port.empty() ? (sch == "https" ? "443" : "80") : u.port;
+    return sch + "://" + host + ":" + port;
+}
+
+/* The redirect rule, as one pure function so it can be tested without a
+ * network: `to` must pass the same URL check as a first request, an https
+ * start may not be bounced to plain http (even when the option admits http),
+ * and `drop_auth` says whether the credential headers must be left behind
+ * (the host changed). Returns "" when the hop may be followed. */
+std::string redirect_policy(const std::string &from, const std::string &to,
+                            bool allow_http, bool resolve, bool *drop_auth,
+                            UrlParts *to_parts, std::vector<std::string> *addrs,
+                            bool allow_loopback = false) {
+    UrlParts f;
+    std::string why;
+    if (!parse_url(from, f, why)) return "the request URL is malformed: " + why;
+    std::string fs = f.scheme;
+    for (char &c : fs) c = static_cast<char>(rmbl_ascii_lower(c));
+    UrlParts t;
+    /* the local relaxation follows a redirect only when it STAYS on the same
+     * local host (a path or port change on your own box); a hop to any other
+     * address, local or not, meets the full policy, and a remote origin never
+     * gets to redirect into a local address */
+    bool same_local = false;
+    if (allow_loopback && local_host(f)) {
+        UrlParts t0;
+        std::string w0;
+        if (parse_url(to, t0, w0)) {
+            std::string a = f.host, b = t0.host;
+            for (char &c : a) c = static_cast<char>(rmbl_ascii_lower(c));
+            for (char &c : b) c = static_cast<char>(rmbl_ascii_lower(c));
+            same_local = a == b;
+        }
+    }
+    why = url_check(to, allow_http && fs != "https", resolve, &t, addrs, same_local);
+    if (!why.empty()) {
+        std::string ts = to.substr(0, to.find("://"));
+        for (char &c : ts) c = static_cast<char>(rmbl_ascii_lower(c));
+        if (fs == "https" && ts == "http") return "a redirect from https to plain http is refused";
+        return why;
+    }
+    if (drop_auth) *drop_auth = (origin_of(f) != origin_of(t));
+    if (to_parts) *to_parts = t;
+    return "";
+}
+
+/* One request, redirects included, every hop checked and pinned. `reset`
+ * discards whatever a redirect response wrote to the sink. `headers` are the
+ * request headers; the credential ones are sent to the first host only. */
+CURLcode secure_perform(CURL *h, const std::string &start_url,
+                        const std::function<void()> &reset, std::string *err,
+                        const std::vector<std::string> *headers, bool allow_loopback = false,
+                        bool same_origin = false) {
+    const bool allow_http = allow_http_option();
+    std::string url = canonical_url(start_url);
+    bool drop_auth = false;
+    for (int hop = 0; hop <= 5; ++hop) {
+        UrlParts u;
+        std::vector<std::string> addrs;
+        std::string why;
+        if (hop == 0) {
+            why = url_check(url, allow_http, true, &u, &addrs, allow_loopback);
+        } else {
+            bool drop = false;
+            why = redirect_policy(canonical_url(start_url), url, allow_http, true, &drop, &u, &addrs,
+                                  allow_loopback);
+            drop_auth = drop_auth || drop;
+            /* an API call (a JSON reply the caller acts on: Save Page Now, a model, OCSP) takes its answer
+             * only from the origin it asked: after a redirect to another host that host's reply was
+             * recorded as archive.org's (review of e57fed5) */
+            if (why.empty() && same_origin && drop) {
+                why = "the reply was redirected to another host (" + origin_of(u) + "), and an API answer is taken only "
+                      "from the host that was asked";
+            }
+        }
+        if (!why.empty()) {
+            if (err) *err = "refused: " + why;
+            return CURLE_URL_MALFORMAT;
+        }
+        struct curl_slist *pin = nullptr;
+        if (!addrs.empty()) {
+            std::string entry = u.host + ":" + (u.port.empty() ? (u.scheme == "https" ? "443" : "80") : u.port) + ":";
+            for (size_t i = 0; i < addrs.size(); ++i) entry += (i ? "," : "") + addrs[i];
+            pin = curl_slist_append(nullptr, entry.c_str());
+        }
+        struct curl_slist *hdr = nullptr;
+        if (headers) {
+            for (const std::string &line : *headers) {
+                if (drop_auth && !header_travels(line)) continue;
+                hdr = curl_slist_append(hdr, line.c_str());
+            }
+        }
+        /* the hop the policy admitted to a local host may connect there; every other socket must
+         * reach a public address (the pin's, when there is one) */
+        SockGuard guard = {allow_loopback && local_host(u)};
+        curl_easy_setopt(h, CURLOPT_OPENSOCKETFUNCTION, guard_socket);
+        curl_easy_setopt(h, CURLOPT_OPENSOCKETDATA, &guard);
+        curl_easy_setopt(h, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(h, CURLOPT_RESOLVE, pin);
+        curl_easy_setopt(h, CURLOPT_HTTPHEADER, hdr);
+        const CURLcode rc = curl_easy_perform(h);
+        long code = 0;
+        if (rc == CURLE_OK) curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
+        std::string next;
+        if (rc == CURLE_OK && (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)) {
+            char *loc = nullptr;
+            curl_easy_getinfo(h, CURLINFO_REDIRECT_URL, &loc);
+            if (loc) next = loc;
+        }
+        curl_easy_setopt(h, CURLOPT_RESOLVE, static_cast<struct curl_slist *>(nullptr));
+        curl_easy_setopt(h, CURLOPT_HTTPHEADER, static_cast<struct curl_slist *>(nullptr));
+        curl_easy_setopt(h, CURLOPT_OPENSOCKETDATA, static_cast<void *>(nullptr));
+        curl_easy_setopt(h, CURLOPT_OPENSOCKETFUNCTION, static_cast<curl_opensocket_callback>(nullptr));
+        if (pin) curl_slist_free_all(pin);
+        if (hdr) curl_slist_free_all(hdr);
+        if (next.empty()) return rc;
+        if (hop == 5) {
+            if (err) *err = "too many redirects";
+            return CURLE_TOO_MANY_REDIRECTS;
+        }
+        /* after a 301, 302 or 303 a redirected POST becomes a GET, as every browser does; a 307 or 308
+         * says to repeat the request as it was (RFC 9110 15.4.8-9), so a POST stays a POST with its
+         * body, to the same host only (it became a GET; CRAN stress test of 0.5.14). The redirect's
+         * own body is not the answer either way. */
+        if (code != 307 && code != 308) curl_easy_setopt(h, CURLOPT_HTTPGET, 1L);
+        reset();
+        url = canonical_url(next);
+    }
+    return CURLE_TOO_MANY_REDIRECTS;
+}
+
+/* Download progress: the R closure (bytes so far, total or 0) at most ten
+ * times a second, and a pending Ctrl-C ends the transfer. */
+struct Progress {
+    SEXP fn;
+    std::chrono::steady_clock::time_point last;
+    bool first;
+    bool interrupted;
+    bool failed;
+};
+
+int xferinfo(void *ud, curl_off_t dltotal, curl_off_t dlnow, curl_off_t, curl_off_t) {
+    Progress *p = static_cast<Progress *>(ud);
+    if (rmbl_interrupt_pending()) {
+        p->interrupted = true;
+        return 1;
+    }
+    if (p->fn == R_NilValue) return 0;
+    const auto now = std::chrono::steady_clock::now();
+    if (!p->first && std::chrono::duration<double>(now - p->last).count() < 0.1) return 0;
+    p->first = false;
+    p->last = now;
+    /* each argument protected while the next allocates (review of 1.0.0, M4) */
+    SEXP now_b = PROTECT(Rf_ScalarReal(static_cast<double>(dlnow)));
+    SEXP tot_b = PROTECT(Rf_ScalarReal(static_cast<double>(dltotal)));
+    SEXP call = PROTECT(Rf_lang3(p->fn, now_b, tot_b));
+    int errored = 0;
+    R_tryEvalSilent(call, R_GlobalEnv, &errored);
+    UNPROTECT(3);
+    if (errored) {
+        p->failed = true;
+        return 1;
+    }
+    return 0;
+}
+
+struct FileSink {
+    std::FILE *fp;
+    std::string path;
+    curl_off_t written;
+    curl_off_t cap;      /* per-call byte limit for a body without Content-Length */
+    bool overflow;       /* the limit ended the transfer */
+};
+
+void harden(CURL *h) {
+    /* redirects are followed by secure_perform(), one checked hop at a time */
+    curl_easy_setopt(h, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(h, CURLOPT_MAXREDIRS, 0L);
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(h, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(h, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(h, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    curl_easy_setopt(h, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
+    curl_easy_setopt(h, CURLOPT_MAXFILESIZE_LARGE, kMaxDownload);
+    /* a server that trickles bytes held the connection for the whole timeout
+     * (an hour for bricklayer_download()): under 64 bytes/s for 30 s ends it */
+    curl_easy_setopt(h, CURLOPT_LOW_SPEED_LIMIT, 64L);
+    curl_easy_setopt(h, CURLOPT_LOW_SPEED_TIME, 30L);
+}
+
+/* The reply's Retry-After (seconds, as the text the server sent), for the API calls: a rate-limited
+ * Save Page Now or model call waits as long as it is told to (review of e57fed5, E7). Each response
+ * of a redirect chain starts over at its status line, so the value is the final reply's. */
+size_t note_retry_after(char *ptr, size_t sz, size_t nm, void *ud) {
+    const size_t n = sz * nm;
+    std::string *ra = static_cast<std::string *>(ud);
+    std::string line(ptr, n);
+    if (line.compare(0, 5, "HTTP/") == 0) { ra->clear(); return n; }
+    static const char key[] = "retry-after:";
+    if (line.size() > sizeof key - 1) {
+        bool match = true;
+        for (size_t i = 0; i + 1 < sizeof key; ++i) {
+            if (rmbl_ascii_lower(line[i]) != key[i]) { match = false; break; }
+        }
+        if (match) {
+            std::string v = line.substr(sizeof key - 1);
+            const size_t a = v.find_first_not_of(" \t"), b = v.find_last_not_of(" \t\r\n");
+            *ra = (a == std::string::npos) ? "" : v.substr(a, b - a + 1).substr(0, 64);
+        }
+    }
+    return n;
+}
+
 size_t write_to_string(char *ptr, size_t sz, size_t nm, void *ud) {
-    static_cast<std::string *>(ud)->append(ptr, sz * nm);
+    std::string *s = static_cast<std::string *>(ud);
+    if (s->size() + sz * nm > kMaxBody) {
+        /* aborts the transfer; the partial body is not an answer and is not
+         * handed back labelled "transport failure" (fourth review) */
+        s->clear();
+        return 0;
+    }
+    s->append(ptr, sz * nm);
     return sz * nm;
 }
 
 size_t write_to_file(char *ptr, size_t sz, size_t nm, void *ud) {
-    return std::fwrite(ptr, sz, nm, static_cast<std::FILE *>(ud));
+    FileSink *fs = static_cast<FileSink *>(ud);
+    const size_t n = sz * nm;
+    if (!fs->fp) return 0;   /* the stream could not be reopened after a redirect */
+    if (fs->written + static_cast<curl_off_t>(n) > fs->cap) {  /* a chunked body has no Content-Length to cap */
+        fs->overflow = true;
+        return 0;
+    }
+    fs->written += static_cast<curl_off_t>(n);
+    return std::fwrite(ptr, 1, n, fs->fp);
+}
+
+/* A pending Ctrl-C (or a setTimeLimit() limit, which R checks in the same place) ends a GET as it
+ * ends a POST. rmbl_interrupt_pending() takes the pending interrupt, so the callback records it: asked
+ * again after the transfer it is gone, and the GET came back as a plain failure (exit 0, a Wayback
+ * run polled on past its time limit; network stress test of 5e1dce5). */
+static int get_xferinfo(void *ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    if (!rmbl_interrupt_pending()) return 0;
+    *static_cast<bool *>(ud) = true;
+    return 1;
 }
 
 /* GET a URL into a std::string. Returns HTTP status, or -1 on transport
- * failure. Follows redirects; hard total-timeout so nothing can hang. */
-long http_get_string(const std::string &url, std::string &out, long timeout_s) {
+ * failure. Follows redirects; hard total-timeout so nothing can hang. A Ctrl-C ends it and is
+ * raised by the entry point's barrier. */
+long http_get_string(const std::string &url, std::string &out, long timeout_s, bool *interrupted = nullptr,
+                     bool allow_loopback = false) {
+    if (interrupted) *interrupted = false;
     CURL *h = curl_easy_init();
     if (!h) return -1;
     out.clear();
     curl_easy_setopt(h, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(h, CURLOPT_FOLLOWLOCATION, 1L);
+    harden(h);
     curl_easy_setopt(h, CURLOPT_TIMEOUT, timeout_s);
     curl_easy_setopt(h, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
@@ -49,7 +750,15 @@ long http_get_string(const std::string &url, std::string &out, long timeout_s) {
     curl_easy_setopt(h, CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_to_string);
     curl_easy_setopt(h, CURLOPT_WRITEDATA, &out);
-    CURLcode rc = curl_easy_perform(h);
+    bool stopped = false;
+    curl_easy_setopt(h, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(h, CURLOPT_XFERINFOFUNCTION, get_xferinfo);
+    curl_easy_setopt(h, CURLOPT_XFERINFODATA, &stopped);
+    CURLcode rc = secure_perform(h, url, [&out] { out.clear(); }, NULL, nullptr, allow_loopback);
+    if (rc == CURLE_ABORTED_BY_CALLBACK && stopped) {
+        rmbl_kernel_interrupted = 1;
+        if (interrupted) *interrupted = true;
+    }
     long code = -1;
     if (rc == CURLE_OK) curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
     curl_easy_cleanup(h);
@@ -65,60 +774,461 @@ long http_get_string(const std::string &url, std::string &out, long timeout_s) {
  * refuse it, so a verifier limited to GET is a verifier that usually
  * cannot check revocation at all.
  */
+/* The native spinner. R sets a label for a long native call (.bl_busy(), .bl_net(), and a model's
+ * wait in .bl_llm_chat()) and every poll for a Ctrl-C turns it: rmbl_interrupt_pending(), which the
+ * kernels call every few hundred milliseconds of work, and libcurl's progress callback, several
+ * times a second while a request waits (a language model can think for a minute before the first
+ * byte). One clock from when the label was set, nothing for the first 0.75 s (a quick call never
+ * flashes a line), at most 12 frames a second, and one look with the R side's spinner: the accent
+ * spinner, the label, the time so far dimmed. When R clears the label the line is wiped, or replaced
+ * by a check (a cross after an error) and the time taken when R says how the call ended.
+ *
+ * Where the console cannot redraw a line (a log, a pipe, knitr, a notebook) a line when the call
+ * has run 0.75 s, one every ten seconds after it, and one at the end: the R side's rule for work
+ * with no count, a line at a stage and never one per poll.
+ *
+ * The frames go through REprintf, or Rprintf where R draws on stdout (the RStudio and Positron
+ * consoles, which print stderr in their error colour), then R_FlushConsole() so a GUI shows them
+ * while the call is still running (RcppProgress draws the same way, REprintf + R_FlushConsole()).
+ * R's console functions belong to R's main thread, so the spinner turns only there: a poll from a
+ * worker thread returns at once. */
+static std::string g_wait_label;
+static bool g_wait_unicode = false, g_wait_dynamic = true, g_wait_stdout = false;
+static int g_wait_colors = 1;   /* 1: none; else the console's colours, as in rmbl_progress_fg() */
+static std::atomic<bool> g_wait_on(false);
+static std::thread::id g_wait_thread;   /* R's main thread: written once, before g_wait_on is first set */
+extern "C" const char *rmbl_progress_spinner(double t, int unicode);                /* rmbl_progress.c */
+extern "C" int rmbl_progress_fg(char *out, int cap, int r, int g, int b, int ncolors);  /* rmbl_progress.c */
+
+struct Wait {
+    bool interrupted;
+};
+
+static std::chrono::steady_clock::time_point g_busy_t0, g_busy_last;
+static size_t g_busy_width = 0;   /* cells of the line on screen, 0 when none */
+static double g_busy_said = -1;   /* no redraw: when the last line was written, -1 before the first */
+
+static void wait_put(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    if (g_wait_stdout) Rvprintf(fmt, ap);
+    else REvprintf(fmt, ap);
+    va_end(ap);
+    R_FlushConsole();
+}
+
+static std::string wait_secs(double s) {
+    char b[48];
+    if (s < 60) std::snprintf(b, sizeof b, "%.1fs", s);
+    else std::snprintf(b, sizeof b, "%dm%02ds", static_cast<int>(s / 60), static_cast<int>(std::fmod(s, 60.0)));
+    return b;
+}
+
+/* the cells a UTF-8 string takes: one per code point (the label is printable text from R) */
+static size_t wait_cells(const std::string &s) {
+    size_t n = 0;
+    for (unsigned char c : s) n += (c & 0xC0) != 0x80;
+    return n;
+}
+
+static std::string wait_paint(const std::string &x, int r, int g, int b) {
+    char fg[64];
+    if (g_wait_colors < 8 || !rmbl_progress_fg(fg, (int) sizeof fg, r, g, b, g_wait_colors)) return x;
+    return std::string(fg) + x + "\033[0m";
+}
+
+static std::string wait_dim(const std::string &x) {
+    if (g_wait_colors < 8) return x;
+    if (g_wait_colors < 256) return "\033[2m" + x + "\033[0m";
+    return wait_paint(x, 135, 135, 145);
+}
+
+/* one frame, on a line whose old content is padded over (no erase-line escape: the RStudio console
+ * redraws on \r but has no cursor control); `end` "\n" makes it the last line */
+static void wait_line(const std::string &line, size_t cells, const char *end) {
+    const size_t pad = g_busy_width > cells ? g_busy_width - cells : 0;
+    wait_put("\r%s%s%s", line.c_str(), std::string(pad, ' ').c_str(), end);
+    g_busy_width = *end ? 0 : (cells > g_busy_width ? cells : g_busy_width);
+}
+
+static void wait_draw(void) {
+    const auto now = std::chrono::steady_clock::now();
+    const double secs = std::chrono::duration<double>(now - g_busy_t0).count();
+    if (secs < 0.75) return;
+    if (!g_wait_dynamic) {
+        if (g_busy_said < 0) wait_put("  %s (%s)\n", g_wait_label.c_str(), wait_secs(secs).c_str());
+        else if (secs - g_busy_said >= 10) wait_put("  %s: still working (%s)\n", g_wait_label.c_str(), wait_secs(secs).c_str());
+        else return;
+        g_busy_said = secs;
+        return;
+    }
+    if (g_busy_width && std::chrono::duration<double>(now - g_busy_last).count() < 1.0 / 12) return;
+    g_busy_last = now;
+    const std::string el = wait_secs(secs);
+    wait_line(wait_paint(rmbl_progress_spinner(secs, g_wait_unicode), 80, 200, 255) + " " + g_wait_label + " " +
+                  wait_dim(el),
+              3 + wait_cells(g_wait_label) + el.size(), "");
+}
+
+/* the end of a label: the line wiped (`status` < 0), or a check (1) or a cross (0) and the time */
+static void wait_end(int status) {
+    if (g_wait_label.empty()) return;
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_busy_t0).count();
+    if (g_wait_dynamic && g_busy_width) {
+        if (status < 0) {
+            wait_put("\r%s\r", std::string(g_busy_width, ' ').c_str());
+        } else {
+            const std::string mark = status ? wait_paint(g_wait_unicode ? "\xe2\x9c\x94" : "v", 120, 220, 140)
+                                            : wait_paint(g_wait_unicode ? "\xe2\x9c\x96" : "x", 255, 120, 120);
+            const std::string tail = g_wait_unicode ? "\xc2\xb7 " + wait_secs(secs) : "(" + wait_secs(secs) + ")";
+            const std::string text = status ? g_wait_label : g_wait_label + "  stopped";
+            wait_line(mark + " " + text + " " + wait_dim(tail), 3 + wait_cells(text) + wait_cells(tail), "\n");
+        }
+    } else if (!g_wait_dynamic && g_busy_said >= 0 && status >= 0) {
+        wait_put("  %s: %s (%s)\n", g_wait_label.c_str(), status ? "done" : "stopped", wait_secs(secs).c_str());
+    }
+    g_busy_width = 0;
+}
+
+extern "C" void rmbl_wait_tick(void) {
+    if (!g_wait_on.load(std::memory_order_acquire) || std::this_thread::get_id() != g_wait_thread) return;
+    wait_draw();
+}
+
+int wait_xferinfo(void *ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    Wait *w = static_cast<Wait *>(ud);
+    if (rmbl_interrupt_pending()) {
+        w->interrupted = true;
+        return 1;
+    }
+    rmbl_wait_tick();
+    return 0;
+}
+
 long http_post_bytes(const std::string &url, const unsigned char *body,
                      size_t bodylen, const std::string &content_type,
-                     std::string &out, long timeout_s) {
+                     std::string &out, long timeout_s,
+                     const std::vector<std::string> &extra_headers,
+                     std::string *err = NULL, bool allow_loopback = false,
+                     std::string *retry_after = NULL, bool *interrupted = NULL) {
     CURL *h = curl_easy_init();
     if (!h) return -1;
     out.clear();
-    struct curl_slist *hdr = NULL;
-    const std::string ct = "Content-Type: " + content_type;
-    hdr = curl_slist_append(hdr, ct.c_str());
+    std::string ra_sink;
+    curl_easy_setopt(h, CURLOPT_HEADERFUNCTION, note_retry_after);
+    curl_easy_setopt(h, CURLOPT_HEADERDATA, retry_after ? retry_after : &ra_sink);
+    /* the request headers travel with secure_perform(), which drops the
+     * credential ones on a cross-host redirect */
+    std::vector<std::string> hdrs;
+    hdrs.push_back("Content-Type: " + content_type);
+    /* e.g. "Authorization: Bearer ..." for the data key at data.rmorie.com, or a provider key */
+    for (size_t i = 0; i < extra_headers.size(); ++i) hdrs.push_back(extra_headers[i]);
     /* libcurl would otherwise announce Expect: 100-continue and wait */
-    hdr = curl_slist_append(hdr, "Expect:");
+    hdrs.push_back("Expect:");
     curl_easy_setopt(h, CURLOPT_URL, url.c_str());
     curl_easy_setopt(h, CURLOPT_POST, 1L);
     curl_easy_setopt(h, CURLOPT_POSTFIELDS, body);
-    curl_easy_setopt(h, CURLOPT_POSTFIELDSIZE,
-                     static_cast<long>(bodylen));
-    curl_easy_setopt(h, CURLOPT_HTTPHEADER, hdr);
-    curl_easy_setopt(h, CURLOPT_FOLLOWLOCATION, 1L);
+    /* _LARGE: a long is 32 bits on Windows */
+    curl_easy_setopt(h, CURLOPT_POSTFIELDSIZE_LARGE,
+                     static_cast<curl_off_t>(bodylen));
+    harden(h);
+    /* an API POST waits for its answer in silence (a language model thinks for minutes before the
+     * first byte of a reply that is not streamed): the stall guard for downloads would end it at
+     * 30 s, so here only the total timeout of the call bounds it */
+    curl_easy_setopt(h, CURLOPT_LOW_SPEED_TIME, 0L);
     curl_easy_setopt(h, CURLOPT_TIMEOUT, timeout_s);
     curl_easy_setopt(h, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(h, CURLOPT_USERAGENT, kUA);
     curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_to_string);
     curl_easy_setopt(h, CURLOPT_WRITEDATA, &out);
-    CURLcode rc = curl_easy_perform(h);
+    char errbuf[CURL_ERROR_SIZE] = {0};   /* libcurl's own sentence ("Operation too slow ...") */
+    curl_easy_setopt(h, CURLOPT_ERRORBUFFER, errbuf);
+    /* the poll for a Ctrl-C (or a setTimeLimit() limit) on every POST, as on every GET; it turns the
+     * spinner of the label R set, when there is one. Installed only with a label, a POST without a
+     * terminal or with quiet output ran to its curl timeout through a Ctrl-C and came back as an
+     * ordinary failure (Wayback /save, OCSP, the data-key check; CRAN stress test of b617a3f, #4) */
+    Wait wait = {false};
+    curl_easy_setopt(h, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(h, CURLOPT_XFERINFOFUNCTION, wait_xferinfo);
+    curl_easy_setopt(h, CURLOPT_XFERINFODATA, &wait);
+    std::string refused;
+    CURLcode rc = secure_perform(h, url, [&out] { out.clear(); }, &refused, &hdrs, allow_loopback, true);
+    /* a Ctrl-C that ended the wait is raised by the barrier once this returns: the caller never
+     * sees a status to retry on, so the prompt is not sent again (review of 29a55d8, G1) */
+    if (interrupted) *interrupted = wait.interrupted;
+    if (wait.interrupted) rmbl_kernel_interrupted = 1;   /* raised by the barrier, whoever called */
     long code = -1;
     if (rc == CURLE_OK) curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
-    curl_slist_free_all(hdr);
+    else {
+        out.clear();
+        if (err) *err = wait.interrupted ? "interrupted (Ctrl-C)"
+                      : rc == CURLE_WRITE_ERROR ? "the reply is larger than the 16 MiB in-memory limit"
+                      : !refused.empty() ? refused : errbuf[0] ? std::string(errbuf) : curl_easy_strerror(rc);
+    }
+    curl_easy_cleanup(h);
+    return (rc == CURLE_OK) ? code : -1;
+}
+
+/* PUT a file, streamed from disk (an archive.org item upload can be gigabytes, which a body held
+ * in memory would not survive). Same hardening and Ctrl-C poll as the POST above; the reply body
+ * comes back in `out`. The file is rewound when a redirect makes libcurl send it again. */
+#ifdef _WIN32
+#define RMBL_FSEEK _fseeki64
+#define RMBL_FTELL _ftelli64
+#else
+#define RMBL_FSEEK fseeko
+#define RMBL_FTELL ftello
+#endif
+static size_t put_read(char *buf, size_t sz, size_t n, void *ud) {
+    return fread(buf, 1, sz * n, static_cast<FILE *>(ud));
+}
+static int put_seek(void *ud, curl_off_t off, int origin) {
+    return RMBL_FSEEK(static_cast<FILE *>(ud), off, origin) == 0 ? CURL_SEEKFUNC_OK : CURL_SEEKFUNC_FAIL;
+}
+long http_put_file(const std::string &url, const std::string &path, const std::string &content_type,
+                   std::string &out, long timeout_s, const std::vector<std::string> &extra_headers,
+                   std::string *err = NULL, bool allow_loopback = false,
+                   std::string *retry_after = NULL, bool *interrupted = NULL) {
+    out.clear();
+    FILE *f = fopen(path.c_str(), "rb");
+    if (!f) {
+        if (err) *err = "cannot open the file to upload";
+        return -1;
+    }
+    curl_off_t size = -1;
+    if (RMBL_FSEEK(f, 0, SEEK_END) == 0) size = static_cast<curl_off_t>(RMBL_FTELL(f));
+    if (size < 0 || RMBL_FSEEK(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        if (err) *err = "cannot read the size of the file to upload";
+        return -1;
+    }
+    CURL *h = curl_easy_init();
+    if (!h) {
+        fclose(f);
+        return -1;
+    }
+    std::string ra_sink;
+    curl_easy_setopt(h, CURLOPT_HEADERFUNCTION, note_retry_after);
+    curl_easy_setopt(h, CURLOPT_HEADERDATA, retry_after ? retry_after : &ra_sink);
+    std::vector<std::string> hdrs;
+    hdrs.push_back("Content-Type: " + content_type);
+    for (size_t i = 0; i < extra_headers.size(); ++i) hdrs.push_back(extra_headers[i]);
+    hdrs.push_back("Expect:");
+    curl_easy_setopt(h, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(h, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(h, CURLOPT_READFUNCTION, put_read);
+    curl_easy_setopt(h, CURLOPT_READDATA, f);
+    curl_easy_setopt(h, CURLOPT_SEEKFUNCTION, put_seek);
+    curl_easy_setopt(h, CURLOPT_SEEKDATA, f);
+    curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, size);
+    harden(h);
+    curl_easy_setopt(h, CURLOPT_LOW_SPEED_TIME, 0L);
+    curl_easy_setopt(h, CURLOPT_TIMEOUT, timeout_s);
+    curl_easy_setopt(h, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(h, CURLOPT_USERAGENT, kUA);
+    curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_to_string);
+    curl_easy_setopt(h, CURLOPT_WRITEDATA, &out);
+    char errbuf[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(h, CURLOPT_ERRORBUFFER, errbuf);
+    Wait wait = {false};
+    curl_easy_setopt(h, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(h, CURLOPT_XFERINFOFUNCTION, wait_xferinfo);
+    curl_easy_setopt(h, CURLOPT_XFERINFODATA, &wait);
+    std::string refused;
+    CURLcode rc = secure_perform(h, url, [&out, f] { out.clear(); RMBL_FSEEK(f, 0, SEEK_SET); }, &refused, &hdrs,
+                                 allow_loopback, true);
+    if (interrupted) *interrupted = wait.interrupted;
+    if (wait.interrupted) rmbl_kernel_interrupted = 1;
+    long code = -1;
+    if (rc == CURLE_OK) curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
+    else {
+        out.clear();
+        if (err) *err = wait.interrupted ? "interrupted (Ctrl-C)"
+                      : rc == CURLE_WRITE_ERROR ? "the reply is larger than the 16 MiB in-memory limit"
+                      : !refused.empty() ? refused : errbuf[0] ? std::string(errbuf) : curl_easy_strerror(rc);
+    }
+    curl_easy_cleanup(h);
+    fclose(f);
+    return (rc == CURLE_OK) ? code : -1;
+}
+
+/* GET a URL into a string with extra headers (the bearer key of the hosted
+ * MORIE tier). Returns HTTP status, -1 on failure. */
+long http_get_string(const std::string &url, std::string &out, long timeout_s,
+                     const std::vector<std::string> &extra_headers,
+                     std::string *err = NULL, bool allow_loopback = false,
+                     std::string *retry_after = NULL, bool *interrupted = NULL) {
+    CURL *h = curl_easy_init();
+    if (!h) return -1;
+    out.clear();
+    std::string ra_sink;
+    bool got_interrupt = false;
+    curl_easy_setopt(h, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(h, CURLOPT_XFERINFOFUNCTION, get_xferinfo);
+    curl_easy_setopt(h, CURLOPT_XFERINFODATA, &got_interrupt);
+    curl_easy_setopt(h, CURLOPT_HEADERFUNCTION, note_retry_after);
+    curl_easy_setopt(h, CURLOPT_HEADERDATA, retry_after ? retry_after : &ra_sink);
+    curl_easy_setopt(h, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(h, CURLOPT_HTTPGET, 1L);
+    harden(h);
+    curl_easy_setopt(h, CURLOPT_TIMEOUT, timeout_s);
+    curl_easy_setopt(h, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(h, CURLOPT_USERAGENT, kUA);
+    curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_to_string);
+    curl_easy_setopt(h, CURLOPT_WRITEDATA, &out);
+    char errbuf[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(h, CURLOPT_ERRORBUFFER, errbuf);
+    std::string refused;
+    CURLcode rc = secure_perform(h, url, [&out] { out.clear(); }, &refused, &extra_headers, allow_loopback, true);
+    const bool stopped = rc == CURLE_ABORTED_BY_CALLBACK && got_interrupt;
+    if (interrupted) *interrupted = stopped;
+    long code = -1;
+    if (rc == CURLE_OK) curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
+    else {
+        out.clear();
+        if (err) *err = stopped ? "interrupted (Ctrl-C)"
+                      : rc == CURLE_WRITE_ERROR ? "the reply is larger than the 16 MiB in-memory limit"
+                      : !refused.empty() ? refused : errbuf[0] ? std::string(errbuf) : curl_easy_strerror(rc);
+    }
     curl_easy_cleanup(h);
     return (rc == CURLE_OK) ? code : -1;
 }
 
 /* GET a URL straight to a file path. Returns HTTP status, -1 on failure.
  * A 4xx/5xx still writes the error body; callers check the return code. */
-long http_get_file(const std::string &url, const std::string &path, long timeout_s) {
-    std::FILE *fp = std::fopen(path.c_str(), "wb");
-    if (!fp) return -1;
+/* `headers` and `progress` may be null / R_NilValue (the C API passes none).
+ * The body is written beside the destination and moved over it only on a
+ * 2xx, so a refused URL or a failed transfer leaves whatever was at `path`
+ * untouched. `written` receives the byte count; `err` the refusal or curl
+ * error; `interrupted` whether a pending Ctrl-C ended the transfer. */
+long http_get_file(const std::string &url, const std::string &path, long timeout_s,
+                   const std::vector<std::string> *headers, SEXP progress,
+                   curl_off_t *written, std::string *err, bool *interrupted,
+                   curl_off_t max_bytes = kMaxDownload, bool allow_loopback = false,
+                   bool *local_fail = nullptr, std::string *retry_after = nullptr) {
+    if (written) *written = 0;
+    if (retry_after) retry_after->clear();
+    if (local_fail) *local_fail = false;
+    if (interrupted) *interrupted = false;
+    if (max_bytes < 1 || max_bytes > kMaxDownload) max_bytes = kMaxDownload;
+    {
+        /* refuse before touching the file system (the transport checks and
+         * pins again, hop by hop) */
+        const std::string why = url_check(url, allow_http_option(), false, NULL, NULL, allow_loopback);
+        if (!why.empty()) {
+            if (err) *err = "refused: " + why;
+            return -1;
+        }
+    }
+    /* a private scratch name beside the destination: a sibling `.rmbl-part`
+     * that another process (or an earlier run) left is not ours to truncate */
+    static unsigned long part_seq = 0;
+    const std::string part = path + ".rmbl-part." +
+        std::to_string(static_cast<unsigned long long>(
+            std::chrono::steady_clock::now().time_since_epoch().count() % 1000000007ULL)) +
+        "-" + std::to_string(++part_seq);
+    FileSink fs;
+    /* "x": the scratch name is created here or not at all, never an existing file reopened */
+    fs.fp = std::fopen(part.c_str(), "wbx");
+    fs.path = part;
+    fs.written = 0;
+    fs.cap = max_bytes;
+    fs.overflow = false;
+    if (!fs.fp) {
+        if (err) *err = "cannot write " + part;
+        if (local_fail) *local_fail = true;
+        return -1;
+    }
     CURL *h = curl_easy_init();
-    if (!h) { std::fclose(fp); return -1; }
+    if (!h) { std::fclose(fs.fp); std::remove(part.c_str()); return -1; }
     curl_easy_setopt(h, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(h, CURLOPT_FOLLOWLOCATION, 1L);
+    harden(h);
     curl_easy_setopt(h, CURLOPT_TIMEOUT, timeout_s);
     curl_easy_setopt(h, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(h, CURLOPT_USERAGENT, kUA);
-    curl_easy_setopt(h, CURLOPT_FAILONERROR, 1L);   /* 4xx -> CURLE_HTTP_RETURNED_ERROR */
     curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_to_file);
-    curl_easy_setopt(h, CURLOPT_WRITEDATA, fp);
-    CURLcode rc = curl_easy_perform(h);
+    curl_easy_setopt(h, CURLOPT_WRITEDATA, &fs);
+    /* a busy server's Retry-After, for the caller that waits and asks again */
+    std::string ra_sink;
+    curl_easy_setopt(h, CURLOPT_HEADERFUNCTION, note_retry_after);
+    curl_easy_setopt(h, CURLOPT_HEADERDATA, retry_after ? retry_after : &ra_sink);
+    /* the per-call cap is the sink's own byte count, the same on every libcurl and for a
+ * chunked body; CURLOPT_MAXFILESIZE_LARGE (set above for every handle) stays the hard
+ * 2 GiB ceiling that stops a declared giant before the first byte */
+    char errbuf[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(h, CURLOPT_ERRORBUFFER, errbuf);
+    Progress prog;
+    prog.fn = progress ? progress : R_NilValue;
+    prog.last = std::chrono::steady_clock::now();
+    prog.first = true;
+    prog.interrupted = false;
+    prog.failed = false;
+    curl_easy_setopt(h, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(h, CURLOPT_XFERINFOFUNCTION, xferinfo);
+    curl_easy_setopt(h, CURLOPT_XFERINFODATA, &prog);
+    std::string refused;
+    CURLcode rc = secure_perform(h, url, [&fs] {
+        /* a redirect response's body is not the file: start over. freopen() closes the old stream
+         * whether or not it opens the new one, so on failure the sink has none (write_to_file()
+         * then ends the transfer) rather than a pointer to a closed FILE */
+        std::FILE *re = fs.fp ? std::freopen(fs.path.c_str(), "wb", fs.fp) : nullptr;
+        fs.fp = re;
+        fs.written = 0;
+    }, &refused, headers, allow_loopback);
     long code = -1;
     curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
     curl_easy_cleanup(h);
-    std::fclose(fp);
-    if (rc != CURLE_OK) { std::remove(path.c_str()); return -1; }
+    const bool lost_stream = fs.fp == nullptr;
+    if (fs.fp) std::fclose(fs.fp);
+    if (written) *written = fs.written;
+    if (interrupted) *interrupted = prog.interrupted;
+    /* a completed transfer with a 4xx/5xx status is the server's answer: report the status,
+     * not "never reached" (read from the response itself, not from FAILONERROR, whose
+     * error code differs across libcurl builds and protocols; macOS reported a 404 as -1) */
+    if (rc == CURLE_OK && code >= 400) {
+        std::remove(part.c_str());
+        if (err) *err = "HTTP " + std::to_string(code);
+        return code;
+    }
+    if (rc != CURLE_OK && lost_stream) {
+        std::remove(part.c_str());
+        if (err) *err = "cannot write " + part;
+        if (local_fail) *local_fail = true;
+        return -1;
+    }
+    if (rc != CURLE_OK) {
+        std::remove(part.c_str());
+        if (err) {
+            *err = prog.interrupted ? "interrupted"
+                 : prog.failed ? "the progress callback failed"
+                 : (fs.overflow || rc == CURLE_FILESIZE_EXCEEDED)
+                     ? "the body is larger than the " + std::to_string(static_cast<long long>(max_bytes)) + "-byte limit for this download"
+                 : !refused.empty() ? refused : errbuf[0] ? std::string(errbuf) : curl_easy_strerror(rc);
+        }
+        return -1;
+    }
+    if (code < 200 || code >= 300) {
+        /* a 1xx/3xx final answer (a 304, a redirect without Location) has no body to keep */
+        std::remove(part.c_str());
+        if (err) *err = "HTTP " + std::to_string(code);
+        return code;
+    }
+    /* move the finished body over the destination. POSIX rename() replaces it atomically, so a
+     * failed rename leaves the old file as it was; only Windows, where rename() cannot replace,
+     * clears the destination first (review of 1.0.0, M3) */
+#ifdef _WIN32
+    std::remove(path.c_str());
+#endif
+    if (std::rename(part.c_str(), path.c_str()) != 0) {
+        std::remove(part.c_str());
+        if (err) *err = "cannot move the download into place at " + path;
+        if (local_fail) *local_fail = true;
+        return -1;
+    }
     return code;
 }
 
@@ -136,17 +1246,39 @@ std::string url_encode(const std::string &s) {
  * `url`. Returns the https snapshot URL, or "" if none is archived. Uses a
  * tiny hand-rolled extract (no JSON dep) -- the response shape is fixed:
  * {"archived_snapshots":{"closest":{..."url":"http://web.archive.org/..."}}} */
-std::string wayback_snapshot(const std::string &url, long timeout_s) {
-    std::string api = "https://archive.org/wayback/available?url=" + url_encode(url);
+/* `base` is the availability API's origin: archive.org, or (the package's tests only, through the
+ * .Call entries) a local server, which is then reachable on the loopback address. */
+std::string wayback_snapshot(const std::string &url, long timeout_s, bool *interrupted = nullptr,
+                             const std::string &base = "") {
+    bool stop = false;
+    if (interrupted) *interrupted = false;
+    if (timeout_s < 1) timeout_s = 30;   /* 0 would be no limit at all (M1) */
+    const bool local = !base.empty();
+    std::string api = (local ? base : std::string("https://archive.org")) + "/wayback/available?url=" + url_encode(url);
     std::string body;
-    if (http_get_string(api, body, timeout_s) != 200) return "";
+    /* the availability API answers 429 / 5xx now and then: one more try before "no snapshot", but
+     * not after a Ctrl-C (the retry ran to its full timeout; CRAN stress test of b617a3f, #5) */
+    if (http_get_string(api, body, timeout_s, &stop, local) != 200) {
+        if (stop) { if (interrupted) *interrupted = true; return ""; }
+        body.clear();
+        if (http_get_string(api, body, timeout_s, &stop, local) != 200) {
+            if (stop && interrupted) *interrupted = true;
+            return "";
+        }
+    }
     size_t c = body.find("\"closest\"");
     if (c == std::string::npos) return "";
     /* require "available": true within the closest object */
     size_t avail = body.find("\"available\"", c);
     if (avail == std::string::npos) return "";
-    size_t t = body.find("true", avail);
-    if (t == std::string::npos || t - avail > 24) return "";
+    /* the value right after the colon must be the literal true: a string
+     * value containing "true" within 24 bytes used to satisfy this */
+    size_t colon0 = body.find(':', avail);
+    if (colon0 == std::string::npos) return "";
+    size_t v0 = colon0 + 1;
+    while (v0 < body.size() && (body[v0] == ' ' || body[v0] == '\t' ||
+                                body[v0] == '\n' || body[v0] == '\r')) ++v0;
+    if (body.compare(v0, 4, "true") != 0) return "";
     /* extract the value of "url": the FIRST quoted string after "url": */
     size_t u = body.find("\"url\"", c);
     if (u == std::string::npos) return "";
@@ -154,11 +1286,85 @@ std::string wayback_snapshot(const std::string &url, long timeout_s) {
     if (colon == std::string::npos) return "";
     size_t open = body.find('"', colon + 1);   /* opening quote of value */
     if (open == std::string::npos) return "";
-    size_t close = body.find('"', open + 1);    /* closing quote of value */
-    if (close == std::string::npos) return "";
-    std::string snap = body.substr(open + 1, close - open - 1);
+    /* the JSON string, unescaped: an escaped quote ended it early and a "\/" stayed in the URL.
+     * Only the escapes a URL can contain are read; a control character (an escaped newline or NUL) or a
+     * surrogate is not part of any snapshot address, and the whole value is refused */
+    std::string snap;
+    size_t k = open + 1;
+    for (;; ++k) {
+        if (k >= body.size()) return "";
+        const char ch = body[k];
+        if (ch == '"') break;
+        if (static_cast<unsigned char>(ch) < 0x20) return "";
+        if (ch != '\\') { snap += ch; continue; }
+        if (++k >= body.size()) return "";
+        const char e = body[k];
+        if (e == '"' || e == '\\' || e == '/') { snap += e; continue; }
+        if (e != 'u' || k + 4 >= body.size()) return "";
+        unsigned cp = 0;
+        for (int q = 1; q <= 4; ++q) {
+            const int hv = std::isxdigit(static_cast<unsigned char>(body[k + q]))
+                ? (std::isdigit(static_cast<unsigned char>(body[k + q])) ? body[k + q] - '0'
+                   : (rmbl_ascii_lower(body[k + q]) - 'a' + 10)) : -1;
+            if (hv < 0) return "";
+            cp = cp * 16 + static_cast<unsigned>(hv);
+        }
+        k += 4;
+        if (cp < 0x20 || (cp >= 0xD800 && cp <= 0xDFFF)) return "";
+        if (cp < 0x80) {
+            snap += static_cast<char>(cp);
+        } else if (cp < 0x800) {
+            snap += static_cast<char>(0xC0 | (cp >> 6));
+            snap += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            snap += static_cast<char>(0xE0 | (cp >> 12));
+            snap += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            snap += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
     if (snap.rfind("http://", 0) == 0) snap = "https://" + snap.substr(7);
+    /* anything that is not an https URL is not a snapshot to fetch */
+    if (snap.rfind("https://", 0) != 0) return "";
     return snap;
+}
+
+/* A Ctrl-C ends the pipeline where it lands: the Wayback lookup and the snapshot GET after an
+ * interrupted download ran to their timeouts and the call came back as an ordinary error (CRAN
+ * stress test of b617a3f, #5). `*interrupted` says so; the exported wrappers raise it. */
+static int fetch_with_fallback(const char *url, const char *wayback, const char *path, int timeout_s,
+                               bool *interrupted, const std::string &base = "") {
+    if (timeout_s < 1) timeout_s = 120;   /* the C API's callers too: 0 would be no limit (M1) */
+    const bool local = !base.empty();
+    bool local_fail = false;
+    long code = http_get_file(url, path, timeout_s, nullptr, R_NilValue, nullptr, nullptr, interrupted,
+                              kMaxDownload, local, &local_fail);
+    if (code >= 200 && code < 300) return 0;
+    if (*interrupted) return -1;
+    /* the destination could not be written: no snapshot would fare better (review of 1.0.0, M2) */
+    if (local_fail) return -2;
+    std::string wb = (wayback && wayback[0]) ? std::string(wayback)
+                                             : wayback_snapshot(url, timeout_s, interrupted, base);
+    if (*interrupted) return -1;
+    if (!wb.empty()) {
+        long c2 = http_get_file(wb, path, timeout_s, nullptr, R_NilValue, nullptr, nullptr, interrupted,
+                                kMaxDownload, local, &local_fail);
+        if (c2 >= 200 && c2 < 300) return 1;
+        if (*interrupted) return -1;
+        if (local_fail) return -2;
+    }
+    long live = code > 0 ? code : 1;
+    return (int) -(10 * live + (wb.empty() ? 0 : 1));
+}
+
+static int wayback_into(const char *url, char *out, int cap, int timeout_s, bool *interrupted,
+                        const std::string &base = "") {
+    std::string s = wayback_snapshot(url, timeout_s, interrupted, base);
+    if (s.empty() || cap <= 0) { if (cap > 0) out[0] = '\0'; return 0; }
+    int n = (int) s.size();
+    if (n >= cap) n = cap - 1;
+    std::memcpy(out, s.data(), n);
+    out[n] = '\0';
+    return n;
 }
 
 }  // namespace
@@ -169,83 +1375,450 @@ extern "C" {
  * auto-resolved Wayback snapshot. Returns:
  *   0  live URL succeeded
  *   1  live failed, wayback fallback succeeded
- *  -1  both failed (nothing written)
- */
+ *  -2  the destination could not be written (a local failure: its
+ *      directory is missing or read-only, or the file could not be moved
+ *      into place); the Wayback Machine is not asked
+ *  <=-10  both failed (nothing written): -(10 * live + w), where live is the
+ *      live URL's HTTP status (1 when the server was never reached) and
+ *      w is 1 when a snapshot was found but its download failed, 0 when
+ *      the Wayback Machine had none (so the caller can say which).
+ * A Ctrl-C raises R's interrupt: by our barrier after the call, or, called through the C API with
+ * none, here, from a frame that holds no C++ object (they were lost before). */
+static int fetch_raise(const char *url, const char *wayback, const char *path, int timeout_s, const char *base) {
+    bool interrupted = false;
+    const int r = fetch_with_fallback(url, wayback, path, timeout_s, &interrupted, base);
+    if (interrupted) {
+        rmbl_kernel_interrupted = 1;
+        rmbl_interrupt_raise_unbarriered();
+    }
+    return r;
+}
+
 int rmbl_fetch_with_fallback(const char *url, const char *wayback,
                              const char *path, int timeout_s) {
-    long code = http_get_file(url, path, timeout_s);
-    if (code >= 200 && code < 300) return 0;
-    std::string wb = (wayback && wayback[0]) ? std::string(wayback)
-                                             : wayback_snapshot(url, timeout_s);
-    if (!wb.empty()) {
-        long c2 = http_get_file(wb, path, timeout_s);
-        if (c2 >= 200 && c2 < 300) return 1;
-    }
-    return -1;
+    return fetch_raise(url, wayback, path, timeout_s, "");
 }
 
 /* Resolve a Wayback snapshot URL for `url` into `out` (size `cap`). Returns
- * strlen written (0 if none / truncated-safe). */
-int rmbl_wayback_snapshot(const char *url, char *out, int cap, int timeout_s) {
-    std::string s = wayback_snapshot(url, timeout_s);
-    if (s.empty() || cap <= 0) { if (cap > 0) out[0] = '\0'; return 0; }
-    int n = (int) s.size();
-    if (n >= cap) n = cap - 1;
-    std::memcpy(out, s.data(), n);
-    out[n] = '\0';
+ * strlen written (0 if none / truncated-safe). A Ctrl-C is raised as above. */
+static int wayback_raise(const char *url, char *out, int cap, int timeout_s, const char *base) {
+    bool interrupted = false;
+    const int n = wayback_into(url, out, cap, timeout_s, &interrupted, base);
+    if (interrupted) {
+        rmbl_kernel_interrupted = 1;
+        rmbl_interrupt_raise_unbarriered();
+    }
     return n;
+}
+
+int rmbl_wayback_snapshot(const char *url, char *out, int cap, int timeout_s) {
+    return wayback_raise(url, out, cap, timeout_s, "");
 }
 
 /* ---- .Call wrappers for bricklayer's own R side ------------------------ */
 
+/* A timeout argument, in whole seconds: a finite number from 1 to 1e7, or
+ * `def`. NA, 0 and a negative value used to reach CURLOPT_TIMEOUT, where 0
+ * means no limit and a negative value is refused by libcurl without a word,
+ * leaving none either: a POST (no stall guard) could then wait forever
+ * (review of 1.0.0, M1). Every entry point that takes a timeout reads it
+ * here; NaN or 1e300 is never cast to long (undefined behaviour). */
+static long tmo_arg(SEXP x, long def) {
+    const double d = (TYPEOF(x) == INTSXP || TYPEOF(x) == REALSXP || TYPEOF(x) == LGLSXP) &&
+                     XLENGTH(x) == 1 ? Rf_asReal(x) : NA_REAL;
+    return R_FINITE(d) && d >= 1 && d <= 1e7 ? static_cast<long>(d) : def;
+}
+
+/* A destination or source path as the file system names it: "~" expanded
+ * (R_ExpandFileName(), as file() and path.expand() do) and in the native
+ * encoding. fopen() was handed "~/x.html" as it stood and could not write
+ * it (review of 1.0.0, M2). The string check is rmbl_str0()'s. */
+static std::string path_arg(SEXP x, const char *name) {
+    (void) rmbl_str0(x, name);
+    return std::string(R_ExpandFileName(Rf_translateChar(STRING_ELT(x, 0))));
+}
+
+/* The label of the native spinner ("" to end it), with braille or ASCII frames, and the mode: TRUE
+ * or FALSE for colour (the older form: a redrawn line on stderr, 256 colours or none), or
+ * c(colours, redraws, to stdout) from .bl_busy(), with a fourth element when ending a label: 1 when
+ * the call ended well (a check), 0 after an error or an interrupt (a cross); see wait_draw(). */
+SEXP C_rmbl_wait_label_impl(SEXP label, SEXP unicode, SEXP color) {
+    if (TYPEOF(label) != STRSXP || XLENGTH(label) != 1 || STRING_ELT(label, 0) == NA_STRING) {
+        rmbl::fail("`label` must be a single string");
+    }
+    int colors = 1, status = -1;
+    bool dynamic = true, to_stdout = false;
+    if (TYPEOF(color) == LGLSXP) {
+        colors = Rf_asLogical(color) == TRUE ? 256 : 1;
+    } else if (TYPEOF(color) == REALSXP && (XLENGTH(color) == 3 || XLENGTH(color) == 4)) {
+        const double *m = REAL(color);
+        for (R_xlen_t i = 0; i < XLENGTH(color); ++i) {
+            if (!R_FINITE(m[i]) || m[i] < 0) rmbl::fail("`color` must be TRUE, FALSE or c(colours, redraws, to stdout)");
+        }
+        colors = m[0] >= 16777216 ? 16777216 : static_cast<int>(m[0]);
+        dynamic = m[1] != 0;
+        to_stdout = m[2] != 0;
+        if (XLENGTH(color) == 4) status = m[3] != 0;
+    } else {
+        rmbl::fail("`color` must be TRUE, FALSE or c(colours, redraws, to stdout)");
+    }
+    /* the line of the label before ends on the stream and in the mode it was drawn with */
+    g_wait_on.store(false, std::memory_order_release);
+    wait_end(status);
+    if (g_wait_thread == std::thread::id()) g_wait_thread = std::this_thread::get_id();
+    g_busy_width = 0;
+    g_busy_said = -1;
+    g_busy_t0 = g_busy_last = std::chrono::steady_clock::now();
+    g_wait_label = std::string(Rf_translateCharUTF8(STRING_ELT(label, 0))).substr(0, 200);
+    g_wait_unicode = Rf_asLogical(unicode) == TRUE;
+    g_wait_colors = colors;
+    g_wait_dynamic = dynamic;
+    g_wait_stdout = to_stdout;
+    g_wait_on.store(!g_wait_label.empty(), std::memory_order_release);
+    return R_NilValue;
+}
+
 /* POST raw bytes, return the reply as raw bytes and the HTTP status.
  * Used only by the OCSP path, which is opt-in. */
-SEXP C_rmbl_http_post(SEXP url, SEXP body, SEXP content_type,
-                      SEXP timeout) {
+static std::vector<std::string> header_lines(SEXP headers);
+
+SEXP C_rmbl_http_post_impl(SEXP url, SEXP body, SEXP content_type,
+                      SEXP timeout, SEXP headers, SEXP allow_loopback) {
     if (TYPEOF(url) != STRSXP || XLENGTH(url) != 1) {
-        Rf_error("`url` must be a single string");
+        rmbl::fail("`url` must be a single string");
     }
-    if (TYPEOF(body) != RAWSXP) Rf_error("`body` must be a raw vector");
+    if (TYPEOF(body) != RAWSXP) rmbl::fail("`body` must be a raw vector");
     if (TYPEOF(content_type) != STRSXP || XLENGTH(content_type) != 1) {
-        Rf_error("`content_type` must be a single string");
+        rmbl::fail("`content_type` must be a single string");
     }
-    const long tmo = (TYPEOF(timeout) == INTSXP && XLENGTH(timeout) == 1)
-        ? static_cast<long>(INTEGER(timeout)[0]) : 30L;
-    std::string out;
+    const long tmo = tmo_arg(timeout, 30L);
+    const std::vector<std::string> extra = header_lines(headers);
+    std::string out, err;
+    std::string ra;
+    bool interrupted = false;
     const long code = http_post_bytes(
-        CHAR(STRING_ELT(url, 0)), RAW(body),
+        rmbl_str0(url, "url"), RAW(body),
         static_cast<size_t>(XLENGTH(body)),
-        CHAR(STRING_ELT(content_type, 0)), out, tmo);
-    SEXP res = PROTECT(Rf_allocVector(VECSXP, 2));
-    SEXP raw_out = PROTECT(Rf_allocVector(RAWSXP,
+        rmbl_str0(content_type, "content_type"), out, tmo, extra, &err,
+        Rf_asLogical(allow_loopback) == TRUE, &ra, &interrupted);
+    if (interrupted) rmbl_kernel_interrupted = 1;
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 4));
+    SEXP raw_out = PROTECT(rmbl::alloc_vector(RAWSXP,
         static_cast<R_xlen_t>(out.size())));
     if (!out.empty()) {
         std::memcpy(RAW(raw_out), out.data(), out.size());
     }
     SET_VECTOR_ELT(res, 0, Rf_ScalarInteger(static_cast<int>(code)));
     SET_VECTOR_ELT(res, 1, raw_out);
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 2));
+    SET_VECTOR_ELT(res, 2, Rf_mkString(err.c_str()));
+    SET_VECTOR_ELT(res, 3, Rf_mkString(ra.c_str()));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
     SET_STRING_ELT(nm, 0, Rf_mkChar("status"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("body"));
+    SET_STRING_ELT(nm, 2, Rf_mkChar("error"));
+    SET_STRING_ELT(nm, 3, Rf_mkChar("retry_after"));
     Rf_setAttrib(res, R_NamesSymbol, nm);
     UNPROTECT(3);
     return res;
 }
 
-SEXP C_rmbl_fetch_fallback(SEXP url, SEXP wayback, SEXP path, SEXP timeout) {
-    const char *u = CHAR(STRING_ELT(url, 0));
-    const char *w = (wayback == R_NilValue || Rf_length(wayback) == 0)
-                        ? "" : CHAR(STRING_ELT(wayback, 0));
-    const char *p = CHAR(STRING_ELT(path, 0));
-    int t = Rf_asInteger(timeout);
-    return Rf_ScalarInteger(rmbl_fetch_with_fallback(u, w, p, t));
+/* PUT a file with headers; reply as list(status, body, error, retry_after), as the POST above. */
+SEXP C_rmbl_http_put_impl(SEXP url, SEXP path, SEXP content_type, SEXP timeout, SEXP headers,
+                          SEXP allow_loopback) {
+    if (TYPEOF(url) != STRSXP || XLENGTH(url) != 1) rmbl::fail("`url` must be a single string");
+    if (TYPEOF(path) != STRSXP || XLENGTH(path) != 1) rmbl::fail("`path` must be a single string");
+    if (TYPEOF(content_type) != STRSXP || XLENGTH(content_type) != 1) {
+        rmbl::fail("`content_type` must be a single string");
+    }
+    const long tmo = tmo_arg(timeout, 3600L);
+    (void) rmbl_str0(url, "url");
+    (void) rmbl_str0(path, "path");
+    (void) rmbl_str0(content_type, "content_type");
+    const std::vector<std::string> extra = header_lines(headers);
+    const std::string src = path_arg(path, "path");
+    std::string out, err, ra;
+    bool interrupted = false;
+    const long code = http_put_file(rmbl_str0(url, "url"), src,
+                                    rmbl_str0(content_type, "content_type"), out, tmo, extra, &err,
+                                    Rf_asLogical(allow_loopback) == TRUE, &ra, &interrupted);
+    if (interrupted) rmbl_kernel_interrupted = 1;
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 4));
+    SEXP raw_out = PROTECT(rmbl::alloc_vector(RAWSXP, static_cast<R_xlen_t>(out.size())));
+    if (!out.empty()) std::memcpy(RAW(raw_out), out.data(), out.size());
+    SET_VECTOR_ELT(res, 0, Rf_ScalarInteger(static_cast<int>(code)));
+    SET_VECTOR_ELT(res, 1, raw_out);
+    SET_VECTOR_ELT(res, 2, Rf_mkString(err.c_str()));
+    SET_VECTOR_ELT(res, 3, Rf_mkString(ra.c_str()));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
+    SET_STRING_ELT(nm, 0, Rf_mkChar("status"));
+    SET_STRING_ELT(nm, 1, Rf_mkChar("body"));
+    SET_STRING_ELT(nm, 2, Rf_mkChar("error"));
+    SET_STRING_ELT(nm, 3, Rf_mkChar("retry_after"));
+    Rf_setAttrib(res, R_NamesSymbol, nm);
+    UNPROTECT(3);
+    return res;
 }
 
-SEXP C_rmbl_wayback(SEXP url, SEXP timeout) {
-    const char *u = CHAR(STRING_ELT(url, 0));
-    char buf[2048];
-    int n = rmbl_wayback_snapshot(u, buf, (int) sizeof(buf), Rf_asInteger(timeout));
-    return Rf_ScalarString(n > 0 ? Rf_mkChar(buf) : R_BlankString);
+/* GET with headers, reply as raw bytes plus the HTTP status: the hosted
+ * tier's model list. */
+SEXP C_rmbl_http_get_impl(SEXP url, SEXP timeout, SEXP headers, SEXP allow_loopback) {
+    if (TYPEOF(url) != STRSXP || XLENGTH(url) != 1) {
+        rmbl::fail("`url` must be a single string");
+    }
+    const long tmo = tmo_arg(timeout, 30L);
+    const std::vector<std::string> extra = header_lines(headers);
+    std::string out, err;
+    std::string ra;
+    bool interrupted = false;
+    const long code = http_get_string(rmbl_str0(url, "url"), out, tmo, extra, &err,
+                                      Rf_asLogical(allow_loopback) == TRUE, &ra, &interrupted);
+    if (interrupted) rmbl_kernel_interrupted = 1;
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 4));
+    SEXP raw_out = PROTECT(rmbl::alloc_vector(RAWSXP,
+        static_cast<R_xlen_t>(out.size())));
+    if (!out.empty()) {
+        std::memcpy(RAW(raw_out), out.data(), out.size());
+    }
+    SET_VECTOR_ELT(res, 0, Rf_ScalarInteger(static_cast<int>(code)));
+    SET_VECTOR_ELT(res, 1, raw_out);
+    SET_VECTOR_ELT(res, 2, Rf_mkString(err.c_str()));
+    SET_VECTOR_ELT(res, 3, Rf_mkString(ra.c_str()));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
+    SET_STRING_ELT(nm, 0, Rf_mkChar("status"));
+    SET_STRING_ELT(nm, 1, Rf_mkChar("body"));
+    SET_STRING_ELT(nm, 2, Rf_mkChar("error"));
+    SET_STRING_ELT(nm, 3, Rf_mkChar("retry_after"));
+    Rf_setAttrib(res, R_NamesSymbol, nm);
+    UNPROTECT(3);
+    return res;
 }
 
+/* `api`: "" for archive.org; the tests give a local server's origin (see wayback_snapshot()) */
+SEXP C_rmbl_fetch_fallback_impl(SEXP url, SEXP wayback, SEXP path, SEXP timeout, SEXP api) {
+    const char *u = rmbl_str0(url, "url");
+    const char *w = (wayback == R_NilValue || Rf_length(wayback) == 0 ||
+                     (TYPEOF(wayback) == STRSXP && STRING_ELT(wayback, 0) == NA_STRING))
+                        ? "" : rmbl_str0(wayback, "wayback");
+    const char *b = rmbl_str0(api, "api");
+    const int t = static_cast<int>(tmo_arg(timeout, 120L));
+    /* R_ExpandFileName() returns a static buffer: copied before anything else can reuse it */
+    const std::string p = path_arg(path, "path");
+    /* the C API's own entry when no test server is named: the path other packages call */
+    int r = b[0] ? fetch_raise(u, w, p.c_str(), t, b) : rmbl_fetch_with_fallback(u, w, p.c_str(), t);
+    return Rf_ScalarInteger(r);
+}
+
+/* The request headers, one "Name: value" each. A line break inside one (a key pasted with a
+ * trailing newline, or one carrying "\r\nX-Injected: ...") would reach the wire as a second
+ * header: refused here, for every caller (review of 29a55d8, L3). */
+static std::vector<std::string> header_lines(SEXP headers) {
+    /* a missing string is refused before anything is built (rmbl_str_at() raises an R error) */
+    if (TYPEOF(headers) == STRSXP) {
+        for (R_xlen_t i = 0; i < XLENGTH(headers); ++i) (void) rmbl_str_at(headers, i, "headers");
+    }
+    std::vector<std::string> extra;
+    if (TYPEOF(headers) == STRSXP) {
+        for (R_xlen_t i = 0; i < XLENGTH(headers); ++i) {
+            const std::string h = rmbl_str_at(headers, i, "headers");
+            if (h.find('\r') != std::string::npos || h.find('\n') != std::string::npos) {
+                rmbl::fail("a request header has a line break in it (check the key or the value it was set from)");
+            }
+            extra.push_back(h);
+        }
+    } else if (headers != R_NilValue) {
+        rmbl::fail("`headers` must be a character vector or NULL");
+    }
+    return extra;
+}
+
+/* GET a URL to a file through the hardened transport, with request headers
+ * and an R progress closure: bricklayer_download()'s transport. Returns
+ * list(status, bytes, error); a pending Ctrl-C is raised by the barrier. */
+SEXP C_rmbl_http_download_impl(SEXP url, SEXP path, SEXP timeout, SEXP headers, SEXP progress,
+                               SEXP max_bytes, SEXP allow_loopback) {
+    /* both checked before either string is built: an error raised over a live std::string leaked it */
+    (void) rmbl_str0(url, "url");
+    (void) rmbl_str0(path, "path");
+    const std::string u = rmbl_str0(url, "url");
+    const std::string p = path_arg(path, "path");
+    /* anything but a finite number of seconds from 1 to 1e7 is the default (an hour) */
+    const long tmo = tmo_arg(timeout, 3600L);
+    if (progress != R_NilValue && !Rf_isFunction(progress)) {
+        rmbl::fail("`progress` must be a function or NULL");
+    }
+    const std::vector<std::string> extra = header_lines(headers);
+    curl_off_t cap = kMaxDownload;
+    if (max_bytes != R_NilValue) {
+        const double mb = Rf_asReal(max_bytes);
+        if (!(mb >= 1)) rmbl::fail("`maxbytes` must be a number of bytes, at least one");
+        if (mb < static_cast<double>(kMaxDownload)) cap = static_cast<curl_off_t>(mb);
+    }
+    curl_off_t written = 0;
+    std::string err;
+    bool interrupted = false;
+    std::string ra;
+    const long code = http_get_file(u, p, tmo, &extra, progress, &written, &err, &interrupted,
+                                    cap, Rf_asLogical(allow_loopback) == TRUE, nullptr, &ra);
+    if (interrupted) rmbl_kernel_interrupted = 1;
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 4));
+    SET_VECTOR_ELT(res, 0, Rf_ScalarInteger(static_cast<int>(code)));
+    SET_VECTOR_ELT(res, 1, Rf_ScalarReal(static_cast<double>(written)));
+    SET_VECTOR_ELT(res, 2, Rf_mkString(err.c_str()));
+    SET_VECTOR_ELT(res, 3, Rf_mkString(ra.c_str()));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
+    SET_STRING_ELT(nm, 0, Rf_mkChar("status"));
+    SET_STRING_ELT(nm, 1, Rf_mkChar("bytes"));
+    SET_STRING_ELT(nm, 2, Rf_mkChar("error"));
+    SET_STRING_ELT(nm, 3, Rf_mkChar("retry_after"));
+    Rf_setAttrib(res, R_NamesSymbol, nm);
+    UNPROTECT(2);
+    return res;
+}
+
+/* The redirect rule for the tests: list(ok, why, drop_auth) for a hop from
+ * `from` to `to`, without resolving or connecting. */
+SEXP C_rmbl_redirect_check_impl(SEXP from, SEXP to, SEXP allow_http, SEXP allow_loopback) {
+    bool drop = false;
+    (void) rmbl_str0(from, "from");   /* checked before the first argument's std::string is built */
+    (void) rmbl_str0(to, "to");
+    const std::string why = redirect_policy(rmbl_str0(from, "from"), rmbl_str0(to, "to"),
+                                            Rf_asLogical(allow_http) == TRUE, false, &drop, NULL, NULL,
+                                            Rf_asLogical(allow_loopback) == TRUE);
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 3));
+    SET_VECTOR_ELT(res, 0, Rf_ScalarLogical(why.empty()));
+    SET_VECTOR_ELT(res, 1, Rf_mkString(why.c_str()));
+    SET_VECTOR_ELT(res, 2, Rf_ScalarLogical(drop));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 3));
+    SET_STRING_ELT(nm, 0, Rf_mkChar("ok"));
+    SET_STRING_ELT(nm, 1, Rf_mkChar("why"));
+    SET_STRING_ELT(nm, 2, Rf_mkChar("drop_auth"));
+    Rf_setAttrib(res, R_NamesSymbol, nm);
+    UNPROTECT(2);
+    return res;
+}
+
+/* The snapshot URL whole, as a string: the fixed 2048-byte buffer of the C API cut a long one
+ * short without a word (review of 1.0.0). A Ctrl-C is raised by the barrier. */
+SEXP C_rmbl_wayback_impl(SEXP url, SEXP timeout, SEXP api) {
+    const char *u = rmbl_str0(url, "url");
+    const char *b = rmbl_str0(api, "api");
+    const int t = static_cast<int>(tmo_arg(timeout, 30L));
+    bool interrupted = false;
+    const std::string snap = wayback_snapshot(u, t, &interrupted, b);
+    if (interrupted) rmbl_kernel_interrupted = 1;
+    return Rf_mkString(snap.c_str());
+}
+
+/* The C API's rmbl_wayback_snapshot() as another package calls it, into a buffer of `cap`
+ * bytes, with the availability API at `api` (a test server): its truncation and its raise of a
+ * Ctrl-C had no caller in the package, so no test reached them. */
+SEXP C_rmbl_wayback_into_impl(SEXP url, SEXP timeout, SEXP api, SEXP cap) {
+    const char *u = rmbl_str0(url, "url");
+    const char *b = rmbl_str0(api, "api");
+    const int t = static_cast<int>(tmo_arg(timeout, 30L));
+    const int c = Rf_asInteger(cap);
+    if (c == NA_INTEGER || c < 1 || c > 65536) rmbl::fail("`cap` must be from 1 to 65536 bytes");
+    std::vector<char> out(static_cast<size_t>(c));
+    const int n = wayback_raise(u, out.data(), c, t, b);
+    SEXP res = PROTECT(Rf_mkString(out.data()));
+    Rf_setAttrib(res, Rf_install("n"), Rf_ScalarInteger(n));
+    UNPROTECT(1);
+    return res;
+}
+
+/* The pieces of the transport policy that need no network, for the tests (review of 1.0.0, H2
+ * and M1): list(url, host, connect, timeout). `url` is the URL libcurl would be handed and `host`
+ * the name its CURLOPT_RESOLVE pin would carry (they must agree); `connect` is guard_socket()'s
+ * answer for the IP literal `addr` (NA when it is not one), with `local_ok` as a hop admitted to a
+ * local host would have it; `timeout` is what the timeout argument `tmo` becomes. */
+SEXP C_rmbl_net_probe_impl(SEXP url, SEXP addr, SEXP local_ok, SEXP tmo) {
+    (void) rmbl_str0(url, "url");
+    (void) rmbl_str0(addr, "addr");
+    const std::string cu = canonical_url(rmbl_str0(url, "url"));
+    UrlParts u;
+    std::string why;
+    const std::string host = parse_url(cu, u, why) ? u.host : std::string();
+    int connect = NA_LOGICAL;
+    {
+        const std::string a = rmbl_str0(addr, "addr");
+        struct sockaddr_in s4;
+        struct sockaddr_in6 s6;
+        std::memset(&s4, 0, sizeof s4);
+        std::memset(&s6, 0, sizeof s6);
+        /* struct curl_sockaddr declares `addr` as a 16-byte struct sockaddr; libcurl's own storage
+         * behind it is large enough for an IPv6 address, and so is this */
+        union {
+            struct curl_sockaddr sa;
+            unsigned char room[sizeof(struct curl_sockaddr) + sizeof(struct sockaddr_in6)];
+        } store;
+        std::memset(&store, 0, sizeof store);
+        struct curl_sockaddr &ca = store.sa;
+        unsigned char *at = store.room + offsetof(struct curl_sockaddr, addr);
+        ca.socktype = SOCK_STREAM;
+        if (inet_pton(AF_INET, a.c_str(), &s4.sin_addr) == 1) {
+            s4.sin_family = AF_INET;
+            ca.family = AF_INET;
+            std::memcpy(at, &s4, sizeof s4);
+        } else if (inet_pton(AF_INET6, a.c_str(), &s6.sin6_addr) == 1) {
+            s6.sin6_family = AF_INET6;
+            ca.family = AF_INET6;
+            std::memcpy(at, &s6, sizeof s6);   /* within `room` */
+        }
+        if (ca.family) {
+            SockGuard g = {Rf_asLogical(local_ok) == TRUE};
+            errno = 0;
+            const curl_socket_t fd = guard_socket(&g, CURLSOCKTYPE_IPCXN, &ca);
+            connect = fd != CURL_SOCKET_BAD;
+            /* a host without that address family (a kernel booted with ipv6.disable=1) cannot say
+             * whether the policy admits the address: NA, not "refused" (the test read it as a
+             * refusal and R CMD check failed there; final audit of 1.0.0, #1) */
+            if (fd == CURL_SOCKET_BAD && !g.local_ok && !sockaddr_private(&ca.addr) &&
+                (errno == EAFNOSUPPORT || errno == EPROTONOSUPPORT)) {
+                connect = NA_LOGICAL;
+            }
+#ifdef _WIN32
+            if (fd != CURL_SOCKET_BAD) closesocket(fd);
+#else
+            if (fd != CURL_SOCKET_BAD) close(fd);
+#endif
+        }
+    }
+    SEXP res = PROTECT(rmbl::alloc_vector(VECSXP, 4));
+    SET_VECTOR_ELT(res, 0, Rf_mkString(cu.c_str()));
+    SET_VECTOR_ELT(res, 1, Rf_mkString(host.c_str()));
+    SET_VECTOR_ELT(res, 2, Rf_ScalarLogical(connect));
+    SET_VECTOR_ELT(res, 3, Rf_ScalarReal(static_cast<double>(tmo_arg(tmo, 30L))));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
+    SET_STRING_ELT(nm, 0, Rf_mkChar("url"));
+    SET_STRING_ELT(nm, 1, Rf_mkChar("host"));
+    SET_STRING_ELT(nm, 2, Rf_mkChar("connect"));
+    SET_STRING_ELT(nm, 3, Rf_mkChar("timeout"));
+    Rf_setAttrib(res, R_NamesSymbol, nm);
+    UNPROTECT(2);
+    return res;
+}
+
+/* The URL check for the R-level validator: "" when the URL may be fetched,
+ * else the reason. `resolve` adds the DNS step (every address checked). */
+SEXP C_rmbl_url_check_impl(SEXP url, SEXP allow_http, SEXP resolve, SEXP allow_loopback) {
+    const std::string u = rmbl_str0(url, "url");
+    const bool http = Rf_asLogical(allow_http) == TRUE;
+    const bool res = Rf_asLogical(resolve) == TRUE;
+    const std::string why = url_check(u, http, res, NULL, NULL, Rf_asLogical(allow_loopback) == TRUE);
+    return Rf_mkString(why.c_str());
+}
 }  // extern "C"
+
+#ifdef RMBL_FUZZ_EXPORTS
+/* The fuzz target (inst/fuzz/fuzz_url.cpp) reaches the URL policy through these
+ * two wrappers; a normal build never defines RMBL_FUZZ_EXPORTS. */
+extern "C" int rmbl_fuzz_url_check(const char *url, int allow_http, int allow_loopback) {
+    return url_check(std::string(url), allow_http != 0, false, nullptr, nullptr, allow_loopback != 0).empty() ? 1 : 0;
+}
+extern "C" int rmbl_fuzz_redirect_check(const char *from, const char *to, int allow_http, int allow_loopback) {
+    bool drop = false;
+    const std::string why = redirect_policy(std::string(from), std::string(to), allow_http != 0, false, &drop,
+                                            nullptr, nullptr, allow_loopback != 0);
+    return (why.empty() ? 1 : 0) | (drop ? 2 : 0);
+}
+#endif

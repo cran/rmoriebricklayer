@@ -2,61 +2,72 @@
 
 #' Agent-assisted reproducibility-bundle help
 #'
-#' Forwards a bundle-building request to the \code{rmorie} command-line
-#' agent (optional binary from rmorie-cli), with a rmoriebricklayer-focused
-#' preamble. The agent can run R and read/write files to help assemble or
-#' repair a brick-proof bundle. See \code{rmorie::agent} for requirements.
+#' Asks a language model to plan a brick-proof, reproducible data bundle,
+#' through \code{\link{llmask}}: your own key, your own
+#' endpoint or a local Ollama server, with the packages' help at hand (the
+#' model reads the help pages of the functions it proposes before it
+#' answers). Use it to get a first draft of the steps and R code for
+#' packaging an analysis: finding the portal's download URL, fetching with a
+#' Wayback fallback, recording hashes and a manifest, writing a synthetic
+#' stand-in, then packaging, signing and verifying the bundle.
 #'
-#' @param request Character scalar describing the bundle
-#' task.
-#' @param model Optional model id, e.g.
-#' \code{"minimax-m3:cloud"} for an Ollama server or
-#' \code{"claude-sonnet-5"} for Anthropic; defaults to
-#'   \code{$RMORIE_AGENT_MODEL} or the CLI's auto-pick.
-#' @param backend \code{"auto"} (default), \code{"ollama"}
-#' (server from
-#'   \code{$RMORIE_AGENT_OLLAMA_URL}) or \code{"anthropic"}
-#' ( \code{$RMORIE_AGENT_API_KEY}) .
-#' @return Character scalar: the agent's output, or a message if the
-#'   \code{rmorie} binary is not installed.
-#' @examples
-#' \donttest{
-#' # Routed to the optional rmorie CLI agent when it is installed; with no
-#' # binary on PATH each call returns an install hint instantly (no error,
-#' # no network), so this is safe to execute anywhere.
-#' agent_bundle("scaffold a bundle for analysis.R using the Toronto CKAN dataset")
+#' @details
+#' The request is sent with a fixed system prompt that describes that task
+#' and asks for a short plan and R code. The route is chosen as in
+#' [llmask()]; when no route is set up, the
+#' function returns a
+#' message saying what to set up (a provider key, a local Ollama or your own
+#' endpoint) instead of an error, and makes no network request. When a
+#' route is set up, the request and the prompt are sent to that provider or
+#' server. The answer is model output: check the code it proposes against
+#' the help pages before running it.
 #'
-#' # Free local/cloud route: an Ollama server (RMORIE_AGENT_OLLAMA_URL, default
-#' # http://localhost:11434) serving the model the MORIE stack uses.
-#' agent_bundle("add a Wayback fallback to my fetch step",
-#'              backend = "ollama", model = "minimax-m3:cloud")
+#' Errors: \code{req} not a single non-empty string; \code{route} not one
+#' of the names listed; \code{route = "hosted"} (the hosted tier is retired);
+#' and errors raised by [llmask()].
 #'
-#' # Anthropic route (needs RMORIE_AGENT_API_KEY); the CLI's default model.
-#' agent_bundle("repair the SHA256 provenance for my capsule",
-#'              backend = "anthropic", model = "claude-sonnet-5")
+#' @param req Character scalar describing the bundle task.
+#' @param model Optional model id, a string; \code{NULL} uses the route's model
+#'   (\code{rmbl models} lists them).
+#' @param route \code{NULL} (the saved route, else the first that is set
+#'   up), \code{"auto"}, \code{"own"}, \code{"ollama"} or a provider id such as
+#'   \code{"anthropic"} or \code{"openai"}.
+#' @return Character scalar: the answer, or a message saying what to set
+#'   up when no route answers.
+#' @examplesIf interactive()
+#' # Needs a language model: a provider key (e.g. ANTHROPIC_API_KEY), your own
+#' # endpoint or a local Ollama.
+#' agentbndl("scaffold a bundle for analysis.R from the Toronto CKAN data")
+#' agentbndl("sign and verify my capsule", route = "ollama")
+#'
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#'
+#' # With every route switched off (no key in the environment and no saved
+#' # settings: the settings folder is pointed at an empty one) the call returns
+#' # a setup hint, not an error, and reaches no network -- safe to run anywhere:
+#' keys <- c("OLLAMA_HOST", "MORIE_LLM_BASE_URL", "XDG_CONFIG_HOME",
+#'           llmprvd()$key_env,
+#'           llmprvd()$alt_env[nzchar(llmprvd()$alt_env)])
+#' old <- Sys.getenv(keys, unset = NA)
+#' Sys.setenv(OLLAMA_HOST = "off", MORIE_LLM_BASE_URL = "off", XDG_CONFIG_HOME = tempfile())
+#' Sys.unsetenv(setdiff(keys, c("OLLAMA_HOST", "MORIE_LLM_BASE_URL", "XDG_CONFIG_HOME")))
+#' cat(agentbndl("hello"))
+#' for (v in keys) {
+#'   if (is.na(old[[v]])) Sys.unsetenv(v) else do.call(Sys.setenv, as.list(old[v]))
 #' }
 #'
-#' # With no rmorie binary on PATH the call returns an install hint, not an
-#' # error -- safe to run anywhere:
-#' if (!nzchar(Sys.which("rmorie"))) agent_bundle("hello")
+#' # argument errors come first
+#' try(agentbndl(""))
+#' try(agentbndl("plan a bundle", route = "hosted"))
 #' @export
-agent_bundle <- function(request, model = NULL, backend = "auto") {
-  stopifnot(is.character(request), length(request) == 1L, nzchar(request))
-  bin <- Sys.which("rmorie")
-  if (!nzchar(bin)) {
-    return("rmorie CLI not found on PATH. Install rmorie-cli to use agent_bundle().")
-  }
-  # nocov start -- forwards to the optional AGPL-licensed rmorie-cli binary
-  preamble <- paste0(
-    "You are helping build a brick-proof, reproducible data bundle with ",
-    "rmoriebricklayer (cross-platform launchers, CKAN resolution, SHA256 + ",
-    "Wayback provenance, synthetic fallback). Request: ", request)
-  # system2() hands `args` to a shell: quote every value, or the first
-  # parenthesis in the request is a shell syntax error.
-  args <- c("agent", "--backend", shQuote(backend))
-  if (!is.null(model)) args <- c(args, "-m", shQuote(model))
-  args <- c(args, shQuote(preamble))
-  paste(suppressWarnings(
-    system2(bin, args = args, stdout = TRUE, stderr = TRUE)), collapse = "\n")
-  # nocov end
+agentbndl <- function(req, model = NULL, route = NULL) {
+  req <- .rmbl_string1(req, "req")
+  model <- .bl_model_name(model)
+  if (identical(route, "hosted")) stop(.bl_hosted_retired(), call. = FALSE)
+  if (!is.null(route)) route <- .rmbl_arg(route, c("auto", .bl_llm_route_names()))
+  if (is.null(.bl_llm_route(route))) return(.bl_no_route_message(route))
+  extra <- paste("The task is a brick-proof, reproducible data bundle: find a portal's download URL, fetch",
+                 "with a Wayback fallback, record provenance (hashes, a manifest), write a synthetic stand-in,",
+                 "then package, sign and verify the bundle. Answer with a short plan and R code.")
+  llmask(req, model = model, route = route, syspro = extra)
 }

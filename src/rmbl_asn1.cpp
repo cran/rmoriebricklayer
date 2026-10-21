@@ -18,11 +18,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <exception>
 #include <vector>
 
 #include <R.h>
 #include <Rinternals.h>
+#include <new>
+#include "rmbl_entry.h"
+
+#include "rmbl_bignum.h"
 
 namespace {
 
@@ -45,24 +51,33 @@ struct Node {
  * structure is worse than one that refuses: the input is a signature
  * envelope, and a lenient reading is exactly how a verifier ends up
  * checking something other than what it was given. */
+/* A structure this verifier should ever see has a few hundred nodes. The
+ * cap is what stops a hostile length field from turning the parse into
+ * unbounded work and allocation: every length is an adversary's input. */
+const size_t kMaxNodes = static_cast<size_t>(1) << 16;
+
 bool parse_one(const unsigned char *p, size_t n, size_t &pos, Node &out,
-               int depth);
+               int depth, size_t &budget);
 
 bool parse_seq(const unsigned char *p, size_t start, size_t len,
-               std::vector<Node> &out, int depth) {
+               std::vector<Node> &out, int depth, size_t &budget) {
     size_t pos = start;
-    const size_t end = start + len;
+    const size_t end = start + len;       /* len <= n - start: no wrap */
     while (pos < end) {
         Node c;
-        if (!parse_one(p, end, pos, c, depth + 1)) return false;
+        const size_t before = pos;
+        if (!parse_one(p, end, pos, c, depth + 1, budget)) return false;
+        if (pos <= before) return false;  /* a child always advances */
         out.push_back(c);
     }
     return pos == end;
 }
 
 bool parse_one(const unsigned char *p, size_t n, size_t &pos, Node &out,
-               int depth) {
+               int depth, size_t &budget) {
     if (depth > 32) return false;          /* no unbounded recursion */
+    if (budget == 0) return false;         /* no unbounded breadth either */
+    --budget;
     if (pos >= n) return false;
     const size_t start = pos;
     unsigned char id = p[pos++];
@@ -71,6 +86,8 @@ bool parse_one(const unsigned char *p, size_t n, size_t &pos, Node &out,
     unsigned long tag = id & 0x1f;
     if (tag == 0x1f) {                      /* high tag number form */
         tag = 0;
+        if (pos >= n) return false;
+        if ((p[pos] & 0x7f) == 0) return false;  /* a leading zero septet: not the shortest form */
         for (;;) {
             if (pos >= n) return false;
             const unsigned char b = p[pos++];
@@ -78,28 +95,40 @@ bool parse_one(const unsigned char *p, size_t n, size_t &pos, Node &out,
             tag = (tag << 7) | (b & 0x7f);
             if ((b & 0x80) == 0) break;
         }
+        if (tag < 0x1f) return false;       /* 0..30 must use the one-byte form */
     }
+    /* DER (X.690 10.1) has no end-of-contents octets, and a universal tag
+     * 0 is exactly that: a BER artefact, never a value */
+    if (out.tag_class == 0 && tag == 0) return false;
     out.tag = tag;
     if (pos >= n) return false;
     size_t len = p[pos++];
     if (len & 0x80) {
         const size_t nbytes = len & 0x7f;
         if (nbytes == 0) return false;      /* indefinite: not DER */
-        if (nbytes > sizeof(size_t)) return false;
-        if (pos + nbytes > n) return false;
+        /* sizeof(size_t) bytes could encode 2^64-1, and pos + len then
+         * wrapped past every bound check below (a 22-byte file aborted R) */
+        if (nbytes >= sizeof(size_t)) return false;
+        if (nbytes > n - pos) return false;
+        /* DER demands the shortest length encoding: no leading zero byte,
+         * and the long form only for lengths of 128 and above. A verifier
+         * that accepts both encodings of one length accepts two different
+         * byte strings as the same signature. */
+        if (p[pos] == 0) return false;
+        if (nbytes == 1 && p[pos] < 0x80) return false;
         len = 0;
         for (size_t i = 0; i < nbytes; ++i) {
             len = (len << 8) | p[pos++];
         }
     }
-    if (pos + len > n) return false;
+    if (len > n - pos) return false;       /* the non-wrapping form */
     out.header_len = pos - start;
     out.length = len;
     out.offset = pos;
     if (out.constructed) {
-        if (!parse_seq(p, pos, len, out.children, depth)) return false;
+        if (!parse_seq(p, pos, len, out.children, depth, budget)) return false;
     }
-    pos += len;
+    pos += len;                            /* <= n, by the check above */
     return true;
 }
 
@@ -154,21 +183,19 @@ SEXP node_to_sexp(const Node &nd, const unsigned char *base) {
  * and remainder. Limbs are 32 bits, least significant first.
  * ------------------------------------------------------------------ */
 
-typedef std::vector<uint32_t> Big;
-
-void trim(Big &a) {
-    while (a.size() > 1 && a.back() == 0) a.pop_back();
-}
+using rmbl_big::Big;
+using rmbl_big::trim;
+using rmbl_big::cmp;
+using rmbl_big::bit_length;
 
 Big from_bytes(const unsigned char *p, size_t n) {
     Big a;
     /* big-endian in, little-endian limbs out */
     size_t i = n;
     while (i >= 4) {
-        a.push_back(static_cast<uint32_t>(p[i - 1]) |
-                    (static_cast<uint32_t>(p[i - 2]) << 8) |
-                    (static_cast<uint32_t>(p[i - 3]) << 16) |
-                    (static_cast<uint32_t>(p[i - 4]) << 24));
+        const uint32_t w = static_cast<uint32_t>(p[i - 1]) | (static_cast<uint32_t>(p[i - 2]) << 8) |
+                           (static_cast<uint32_t>(p[i - 3]) << 16) | (static_cast<uint32_t>(p[i - 4]) << 24);
+        a.push_back(w);
         i -= 4;
     }
     if (i > 0) {
@@ -190,14 +217,6 @@ void to_bytes(const Big &a, unsigned char *out, size_t n) {
             out[n - 1 - pos] = static_cast<unsigned char>(a[i] >> (8 * b));
         }
     }
-}
-
-int cmp(const Big &a, const Big &b) {
-    if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
-    for (size_t i = a.size(); i-- > 0;) {
-        if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
-    }
-    return 0;
 }
 
 void sub_in_place(Big &a, const Big &b) {   /* a >= b */
@@ -250,18 +269,6 @@ bool bit(const Big &a, size_t i) {
     return ((a[limb] >> (i % 32)) & 1u) != 0;
 }
 
-size_t bit_length(const Big &a) {
-    for (size_t i = a.size(); i-- > 0;) {
-        if (a[i] != 0) {
-            uint32_t v = a[i];
-            size_t b = 0;
-            while (v) { ++b; v >>= 1; }
-            return i * 32 + b;
-        }
-    }
-    return 0;
-}
-
 /* a mod m, by shift-and-subtract. Slow by the standards of a real
  * bignum library and entirely fast enough: an RSA-2048 verification
  * with e = 65537 needs seventeen of these. */
@@ -282,12 +289,14 @@ Big mod(const Big &a, const Big &m) {
     return r;
 }
 
+static unsigned long rmbl_modexp_steps = 0;
 Big modexp(const Big &base, const Big &exp, const Big &m) {
     Big result;
     result.push_back(1);
     Big b = mod(base, m);
     const size_t nb = bit_length(exp);
     for (size_t i = nb; i-- > 0;) {
+        if ((++rmbl_modexp_steps & 63) == 0) rmbl::check_interrupt();
         result = mod(mul(result, result), m);
         if (bit(exp, i)) result = mod(mul(result, b), m);
     }
@@ -303,53 +312,133 @@ extern "C" {
  * caller's, which is the point -- the meaning of a field is a matter of
  * which specification you are reading, and that belongs in R next to
  * the OIDs it turns on. */
-SEXP C_rmbl_der_parse(SEXP x) {
-    if (TYPEOF(x) != RAWSXP) Rf_error("`x` must be a raw vector");
+namespace {
+struct ConvCtx {
+    Node *root;
+    const unsigned char *base;
+};
+SEXP conv_run(void *d) {
+    ConvCtx *c = static_cast<ConvCtx *>(d);
+    return node_to_sexp(*c->root, c->base);
+}
+void conv_cleanup(void *d, Rboolean) {
+    ConvCtx *c = static_cast<ConvCtx *>(d);
+    delete c->root;
+    c->root = NULL;
+}
+}  // namespace
+
+SEXP C_rmbl_der_parse_impl(SEXP x) {
+    /* errors without a call (Rf_errorcall(R_NilValue, ...)), like the package's R errors with
+     * call. = FALSE: a malformed certificate read "Error in cert_parse(...)" */
+    if (TYPEOF(x) != RAWSXP) RMBL_ARG_ERROR("`x` must be a raw vector");
     const unsigned char *p = RAW(x);
     const size_t n = static_cast<size_t>(XLENGTH(x));
-    size_t pos = 0;
-    Node root;
-    if (!parse_one(p, n, pos, root, 0)) {
-        Rf_error("not well-formed DER");
+    /* Two rules at this boundary. No C++ exception may cross it: a
+     * std::bad_alloc that escapes an extern "C" function reaches
+     * std::terminate, which no tryCatch() can intercept, and the R process
+     * dies. And rmbl::fail() must not longjmp over a live Node tree: its
+     * std::vector children would never be destroyed. So the tree lives in
+     * its own block, the message is copied into a plain buffer, and the
+     * error is raised only after the block has closed. */
+    char err[128];
+    err[0] = '\0';
+    SEXP out = R_NilValue;
+    /* The tree lives on the heap and is converted under R_UnwindProtect:
+     * node_to_sexp() allocates R vectors, and an allocation failure there is
+     * an R longjmp -- the cleanup deletes the tree on that path too, so no
+     * destructor is skipped whichever way the block is left. */
+    Node *root = new (std::nothrow) Node;
+    if (!root) RMBL_ARG_ERROR("DER parser: out of memory");
+    {
+        size_t pos = 0;
+        size_t budget = kMaxNodes;
+        bool ok = false;
+        try {
+            ok = parse_one(p, n, pos, *root, 0, budget);
+        } catch (const std::exception &e) {
+            std::snprintf(err, sizeof err, "DER parser: %s", e.what());
+        } catch (...) {
+            std::snprintf(err, sizeof err, "DER parser: C++ exception");
+        }
+        if (err[0] == '\0' && !ok) {
+            std::snprintf(err, sizeof err, "not well-formed DER");
+        } else if (err[0] == '\0' && pos != n) {
+            std::snprintf(err, sizeof err,
+                          "trailing bytes after the DER structure: %d of %d consumed",
+                          static_cast<int>(pos), static_cast<int>(n));
+        }
     }
-    if (pos != n) {
-        Rf_error("trailing bytes after the DER structure: %d of %d consumed",
-                 static_cast<int>(pos), static_cast<int>(n));
+    if (err[0] != '\0') {
+        delete root;
+        RMBL_ARG_ERROR("%s", err);
     }
-    return node_to_sexp(root, p);
+    ConvCtx ctx;
+    ctx.root = root;
+    ctx.base = p;
+    out = R_UnwindProtect(conv_run, &ctx, conv_cleanup, &ctx, NULL);
+    return out;
 }
 
 /* s^e mod n, with the result left-padded to the length of n. This is
  * the whole of the RSA operation for a verifier: the recovered block
  * comes back untouched for the caller to check. */
-SEXP C_rmbl_rsa_recover(SEXP sig, SEXP modulus, SEXP exponent) {
+SEXP C_rmbl_rsa_recover_impl(SEXP sig, SEXP modulus, SEXP exponent) {
     if (TYPEOF(sig) != RAWSXP || TYPEOF(modulus) != RAWSXP ||
         TYPEOF(exponent) != RAWSXP) {
-        Rf_error("`sig`, `modulus` and `exponent` must be raw vectors");
+        RMBL_ARG_ERROR("`sig`, `modulus` and `exponent` must be raw vectors");
     }
     if (XLENGTH(modulus) == 0 || XLENGTH(exponent) == 0 ||
         XLENGTH(sig) == 0) {
-        Rf_error("`sig`, `modulus` and `exponent` must be non-empty");
+        RMBL_ARG_ERROR("`sig`, `modulus` and `exponent` must be non-empty");
     }
     if (XLENGTH(modulus) > 1024) {
-        Rf_error("the modulus is implausibly large (%d bytes)",
+        RMBL_ARG_ERROR("the modulus is implausibly large (%d bytes)",
                  static_cast<int>(XLENGTH(modulus)));
     }
-    const Big s = from_bytes(RAW(sig), static_cast<size_t>(XLENGTH(sig)));
-    const Big nn = from_bytes(RAW(modulus),
-                              static_cast<size_t>(XLENGTH(modulus)));
-    const Big e = from_bytes(RAW(exponent),
-                             static_cast<size_t>(XLENGTH(exponent)));
-    if (bit_length(nn) == 0) Rf_error("the modulus is zero");
-    if (cmp(s, nn) >= 0) {
-        Rf_error("the signature is not less than the modulus");
+    /* modexp is linear in the exponent's bits. A public exponent is 3 or
+     * 65537 in every deployed key (RFC 8017 allows larger, nothing issues
+     * them); 64 bytes is already a thousand times that, and a megabyte
+     * delivered in a hostile certificate was hours of uninterruptible work. */
+    if (XLENGTH(exponent) > 64) {
+        RMBL_ARG_ERROR("the public exponent is implausibly large (%d bytes)",
+                 static_cast<int>(XLENGTH(exponent)));
     }
-    const Big r = modexp(s, e, nn);
+    /* RFC 8017 8.2.2 step 1: a signature is exactly k bytes, k the length
+     * of the modulus. Read as a number, 02 and 00 00 02 are the same value,
+     * so without this every leading-zero variant of a valid signature
+     * verified too (a malleable signature; review of 1.0.0, M5). The
+     * modulus is its magnitude, without the DER sign byte. */
+    if (XLENGTH(sig) != XLENGTH(modulus)) {
+        RMBL_ARG_ERROR("the signature is %d bytes, not the modulus length of %d",
+                       static_cast<int>(XLENGTH(sig)), static_cast<int>(XLENGTH(modulus)));
+    }
+    /* the Big values are std::vectors: no rmbl::fail() while they live */
+    const char *err = NULL;
     const size_t outlen = static_cast<size_t>(XLENGTH(modulus));
-    SEXP out = PROTECT(Rf_allocVector(RAWSXP,
+    SEXP out = PROTECT(rmbl::alloc_vector(RAWSXP,
                                       static_cast<R_xlen_t>(outlen)));
-    to_bytes(r, RAW(out), outlen);
+    {
+        const Big s = from_bytes(RAW(sig), static_cast<size_t>(XLENGTH(sig)));
+        const Big nn = from_bytes(RAW(modulus),
+                                  static_cast<size_t>(XLENGTH(modulus)));
+        const Big e = from_bytes(RAW(exponent),
+                                 static_cast<size_t>(XLENGTH(exponent)));
+        if (bit_length(nn) == 0) {
+            err = "the modulus is zero";
+        } else if (cmp(s, nn) >= 0) {
+            err = "the signature is not less than the modulus";
+        } else {
+            try {
+                const Big r = modexp(s, e, nn);
+                to_bytes(r, RAW(out), outlen);
+            } catch (...) {
+                err = "RSA recovery: C++ exception";
+            }
+        }
+    }
     UNPROTECT(1);
+    if (err) RMBL_ARG_ERROR("%s", err);
     return out;
 }
 

@@ -4,8 +4,8 @@
 # option, prettify/minify/validate, serializeJSON, base64, ndjson streaming),
 # pure base R. Ported from the rmorie arm's jsonlt module (same author, same
 # licence); a parity test pins it byte-for-byte to jsonlite whenever that
-# package is installed. Public surface here: bricklayer_json_from_json() and
-# bricklayer_json_to_json(); the rest is internal to the capsule layer.
+# package is installed. Public surface here: fromjs() and
+# tojs(); the rest is internal to the capsule layer.
 
 # jsonlt -- jsonlite's JSON mapping, implemented natively in base R.
 #
@@ -34,8 +34,16 @@
 #'
 #' `digits` is decimal places (jsonlite default 4), `I(n)` means
 #' n significant digits, `NA` means 15 significant digits. Non-finite
-#' values become "NA"/"NaN"/"Inf"/"-Inf" strings, null, or NA_character_
+#' values become \code{"NA"}/\code{"NaN"}/\code{"Inf"}/\code{"-Inf"} strings, null, or
+#' NA_character_
 #' (dropped later) depending on `na_as_string`.
+#' @param x A double or integer vector.
+#' @param digits Decimal places, `I(n)` for n significant digits, NA for 15 significant digits, NULL for full precision.
+#' @param na_as_string TRUE to write non-finite values as strings, FALSE to write them as null, NA to leave them
+#'   missing.
+#' @param use_signif Whether `digits` counts significant digits.
+#' @param always_decimal Whether a whole number is written with \code{".0"}.
+#' @return A character vector, one element per value.
 #' @noRd
 .rmbl_json_num_to_char <- function(x, digits = 4, na_as_string = NA,
                                 use_signif = FALSE, always_decimal = FALSE) {
@@ -96,9 +104,14 @@
   out
 }
 
-# modp_dtoa2(): fixed decimal digits, trailing zeros removed, with its own
-# rounding rule (round half to odd-frac / half-up on rollover). Reproduced
-# step by step so the last digit matches jsonlite's.
+#' Formats a number with fixed decimal digits as jsonlite's modp_dtoa2() does.
+#'
+#' modp_dtoa2(): fixed decimal digits, trailing zeros removed, with its own
+#' rounding rule (round half to odd-frac / half-up on rollover). Reproduced
+#' step by step so the last digit matches jsonlite's.
+#' @param value The number.
+#' @param prec The number of decimal places, from 0 to 9.
+#' @return One string.
 #' @noRd
 .rmbl_json_dtoa2 <- function(value, prec) {
   prec <- max(0L, min(9L, as.integer(prec)))
@@ -140,7 +153,6 @@
     digs <- c(as.character(frac %% 10), digs)
     frac <- frac %/% 10
   }
-  if (frac > 0) whole <- whole + 1
   s <- sprintf("%.0f", whole)
   if (length(digs)) s <- paste0(s, ".", paste(digs, collapse = ""))
   if (neg) s <- paste0("-", s)
@@ -151,6 +163,8 @@
 
 #' Escape a character vector as JSON string literals (jsonlite's
 #' C_escape_chars)
+#' @param x A character vector.
+#' @return The escaped strings, each in double quotes.
 #' @noRd
 .rmbl_json_esc <- function(x) {
   if (!length(x)) return(character(0))
@@ -183,60 +197,77 @@
 #' URL-safe variant. Computed in R with no dependency, so a capsule can
 #' embed binary content in a text manifest wherever this package runs.
 #'
-#' `bricklayer_json_base64_enc()` breaks its output into 72-character
-#' lines, matching jsonlite's encoder; the decoder ignores line breaks and
-#' any other character outside the alphabet, so either form round trips.
+#' `jsb64enc()` breaks its output into 72-character
+#' lines (a newline after each complete block of 54 input bytes), matching
+#' jsonlite's encoder byte for byte; the decoder ignores line breaks, other
+#' white space and \code{=} padding, so either form round trips. Any other
+#' character outside the alphabet is an error rather than being skipped,
+#' because skipping it would decode a corrupted body into a shorter
+#' valid-looking one.
 #'
 #' The URL-safe variant substitutes `-` and `_` for `+` and
 #' `/` and drops the `=` padding, which is what makes it safe in
 #' a URL path, a query string or a filename.
 #'
 #' Base64 is an ENCODING, not encryption or a digest: it hides nothing and
-#' anyone can reverse it. Use [core_sha256()] to
-#' pin content and [core_hmac_sha256()] to
+#' anyone can reverse it. Use [csha256()] to
+#' pin content and [chmac()] to
 #' authenticate it.
 #'
-#' @param input For the encoders, a raw vector or a character
-#' vector (joined with newlines first). For the decoders, base64 text or
-#' its raw bytes.
-#' @return The encoders return a length-1 character vector (
-#' `NA_character_` for `NULL` input); the decoders return a raw
-#' vector.
+#' Errors: an encoder given anything but a raw vector, a character vector or
+#' \code{NULL}; \code{jsb64dec()} given anything but text or
+#' raw bytes, or text with a character outside the standard alphabet;
+#' \code{jsb64udec()} given anything but character text
+#' (raw bytes are refused), \code{NA}, or a character outside the URL-safe
+#' alphabet.
+#'
+#' @param input For the encoders, a raw vector, or a character vector
+#' (its elements are joined with newlines and encoded as UTF-8 bytes), or
+#' \code{NULL}. For \code{jsb64dec()}, base64 text (a
+#' character vector, joined with newlines) or its raw bytes. For
+#' \code{jsb64udec()}, URL-safe base64 text, with or
+#' without \code{=} padding.
+#' @return The encoders return a character scalar (\code{""} for empty input,
+#' \code{NA_character_} for \code{NULL}); the decoders return a raw vector
+#' (use \code{rawToChar()} for text).
 #' @seealso
-#' [json_gzip_encode()], which composes this
+#' [jsgzenc()], which composes this
 #' with gzip.
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # Round trip through the standard alphabet.
-#' b <- bricklayer_json_base64_enc("hello capsule")
+#' b <- jsb64enc("hello capsule")
 #' b
-#' rawToChar(bricklayer_json_base64_dec(b))
+#' rawToChar(jsb64dec(b))
 #'
 #' # Raw input works the same way.
-#' bricklayer_json_base64_enc(charToRaw("abc"))
-#' bricklayer_json_base64_dec(bricklayer_json_base64_enc(charToRaw("abc")))
+#' jsb64enc(charToRaw("abc"))
+#' jsb64dec(jsb64enc(charToRaw("abc")))
 #'
 #' # Padding appears when the length is not a multiple of three.
-#' bricklayer_json_base64_enc("a")
-#' bricklayer_json_base64_enc("ab")
-#' bricklayer_json_base64_enc("abc")
+#' jsb64enc("a")
+#' jsb64enc("ab")
+#' jsb64enc("abc")
 #'
 #' # The URL-safe variant has no "+", "/" or "=" to escape.
-#' bricklayer_json_base64url_enc(as.raw(c(255, 224, 63)))
-#' bricklayer_json_base64_enc(as.raw(c(255, 224, 63)))
-#' bricklayer_json_base64url_dec(
-#'   bricklayer_json_base64url_enc("path/safe?yes")
+#' jsb64uenc(as.raw(c(255, 224, 63)))
+#' jsb64enc(as.raw(c(255, 224, 63)))
+#' jsb64udec(
+#'   jsb64uenc("path/safe?yes")
 #' )
 #'
 #' # Long input is wrapped, and the decoder ignores the breaks.
-#' long <- bricklayer_json_base64_enc(strrep("x", 200))
+#' long <- jsb64enc(strrep("x", 200))
 #' grepl("\n", long)
-#' rawToChar(bricklayer_json_base64_dec(long)) == strrep("x", 200)
-#' @name rmbl_base64
+#' rawToChar(jsb64dec(long)) == strrep("x", 200)
+#'
+#' # A character outside the alphabet is refused, not skipped.
+#' try(jsb64dec("ab$c"))
+#' @name b64
 #' @export
-bricklayer_json_base64_enc <- function(input) {
+jsb64enc <- function(input) {
   if (is.null(input)) return(NA_character_)
   if (is.character(input)) input <- charToRaw(paste(input, collapse = "\n"))
-  stopifnot(is.raw(input))
+  if (!is.raw(input)) stop("jsb64enc: `input` must be a raw vector or text", call. = FALSE)
   b <- as.integer(input)
   n <- length(b)
   if (!n) return("")
@@ -267,16 +298,20 @@ bricklayer_json_base64_enc <- function(input) {
   out
 }
 
-#' @rdname rmbl_base64
+#' @rdname b64
 #' @export
-bricklayer_json_base64_dec <- function(input) {
+jsb64dec <- function(input) {
   if (is.character(input)) input <- charToRaw(paste(input, collapse = "\n"))
-  stopifnot(is.raw(input))
+  if (!is.raw(input)) stop("jsb64dec: `input` must be a raw vector or text", call. = FALSE)
   s <- rawToChar(input)
+  # whitespace and padding may be dropped; anything else is not base64, and
+  # deleting it would decode a corrupt body into a shorter valid-looking one
+  if (grepl("[^A-Za-z0-9+/=[:space:]]", s)) {
+    stop("base64 input contains characters outside the alphabet", call. = FALSE)
+  }
   ch <- strsplit(gsub("[^A-Za-z0-9+/]", "", s), "")[[1]]
   if (!length(ch)) return(raw(0))
   v <- match(ch, .RMBL_JSON_B64) - 1L
-  if (anyNA(v)) stop("Error in base64 decode", call. = FALSE)
   nfull <- length(v) %/% 4L
   rem <- length(v) %% 4L
   out <- integer(0)
@@ -295,49 +330,68 @@ bricklayer_json_base64_dec <- function(input) {
   as.raw(out)
 }
 
-#' @rdname rmbl_base64
+#' @rdname b64
 #' @export
-bricklayer_json_base64url_enc <- function(input) {
-  sub("=+$", "", chartr("+/", "-_", bricklayer_json_base64_enc(input)))
+jsb64uenc <- function(input) {
+  sub("=+$", "", chartr("+/", "-_", jsb64enc(input)))
 }
 
-#' @rdname rmbl_base64
+#' @rdname b64
 #' @export
-bricklayer_json_base64url_dec <- function(input) {
+jsb64udec <- function(input) {
   input <- .rmbl_text_input(input, "input", allow_raw = FALSE)
+  if (!is.character(input) || anyNA(input)) stop("`input` must be base64url text", call. = FALSE)
   if (any(grepl("[^A-Za-z0-9_=-]", gsub("[\r\n]", "", input)))) {
     stop("`input` is not base64url text", call. = FALSE)
   }
-  text <- gsub("[\r\n]", "", chartr("-_", "+/", input))[[1]]
+  if (!length(input)) return(jsb64dec(input))
+  text <- paste(gsub("[\r\n]", "", chartr("-_", "+/", input)), collapse = "")
   mod <- nchar(text) %% 4L
   if (mod > 0L) text <- paste0(text, strrep("=", 4L - mod))
-  bricklayer_json_base64_dec(text)
+  jsb64dec(text)
 }
 
 # ================================================================ collapse
 
 # jsonlite's C collapse helpers. `indent` is NA for compact output, else an
 # integer with attribute indent_spaces (negative = tabs).
+#' Turns the `pretty` argument into the indent the collapse helpers take.
+#' @param pretty FALSE, TRUE (two spaces) or a number of spaces.
+#' @return NA for compact output, else 0 with attribute `indent_spaces`.
 #' @noRd
 .rmbl_json_indent_init <- function(pretty) {
   if (isTRUE(pretty)) pretty <- 2L
   if (is.numeric(pretty)) {
-    stopifnot(abs(pretty) < 20)
+    if (length(pretty) != 1L || is.na(pretty) || abs(pretty) >= 20) {
+      stop("`pretty` must be TRUE, FALSE or one number of spaces below 20", call. = FALSE)
+    }
     structure(0L, indent_spaces = as.integer(pretty))
   } else {
     NA_integer_
   }
 }
+#' Moves an indent one level deeper.
+#' @param indent The indent from `.rmbl_json_indent_init()`.
+#' @return The deeper indent, or NA for compact output.
 #' @noRd
 .rmbl_json_indent_inc <- function(indent) {
   sp <- attr(indent, "indent_spaces")
   if (length(sp)) structure(indent + abs(sp), indent_spaces = sp) else NA_integer_
 }
+#' Makes the white space of an indent.
+#' @param n The number of spaces (or tabs).
+#' @param indent The indent, whose sign says spaces or tabs.
+#' @return One string.
 #' @noRd
 .rmbl_json_ws <- function(n, indent) {
   sp <- attr(indent, "indent_spaces")
   strrep(if (length(sp) && sp < 0) "\t" else " ", n)
 }
+#' Joins encoded values into a JSON array.
+#' @param x The encoded values.
+#' @param inner Whether the array holds scalars and stays on one line.
+#' @param indent The indent, NA for compact output.
+#' @return One string.
 #' @noRd
 .rmbl_json_collapse <- function(x, inner = TRUE, indent = NA_integer_) {
   if (is.na(indent)) return(paste0("[", paste(x, collapse = ","), "]"))
@@ -348,6 +402,11 @@ bricklayer_json_base64url_dec <- function(input) {
   paste0("[\n", paste0(.rmbl_json_ws(ni + sp, indent), x, collapse = ",\n"),
          "\n", .rmbl_json_ws(ni, indent), "]")
 }
+#' Joins encoded keys and values into a JSON object, leaving out missing values.
+#' @param keys The encoded keys.
+#' @param vals The encoded values.
+#' @param indent The indent, NA for compact output.
+#' @return One string.
 #' @noRd
 .rmbl_json_collapse_object <- function(keys, vals, indent = NA_integer_) {
   keep <- !is.na(vals)
@@ -355,22 +414,34 @@ bricklayer_json_base64url_dec <- function(input) {
   vals <- vals[keep]
   if (!length(vals)) return("{}")
   if (is.na(indent)) return(paste0("{", paste0(keys, ":", vals, collapse = ","), "}"))
-  if (!length(vals)) return("{}")
   ni <- as.integer(indent)
   sp <- abs(attr(indent, "indent_spaces"))
   paste0("{\n", paste0(.rmbl_json_ws(ni + sp, indent), keys, ": ", vals, collapse = ",\n"),
          "\n", .rmbl_json_ws(ni, indent), "}")
 }
+#' Collapses each row of a matrix of encoded values into a JSON array.
+#' @param m The matrix.
+#' @param indent The indent, NA for compact output.
+#' @return A character vector, one array per row.
 #' @noRd
 .rmbl_json_row_collapse <- function(m, indent = NA_integer_) {
   vapply(seq_len(nrow(m)), function(i) .rmbl_json_collapse(m[i, ], inner = TRUE, indent = indent),
          character(1))
 }
+#' Collapses each row of a matrix of encoded values into a JSON object.
+#' @param keys The encoded keys, one per column.
+#' @param m The matrix.
+#' @param indent The indent, NA for compact output.
+#' @return A character vector, one object per row.
 #' @noRd
 .rmbl_json_row_collapse_object <- function(keys, m, indent = NA_integer_) {
   vapply(seq_len(nrow(m)), function(i) .rmbl_json_collapse_object(keys, m[i, ], indent),
          character(1))
 }
+#' Makes names usable as JSON keys: an empty one becomes its position, duplicates are made unique.
+#' @param nms The names.
+#' @param no_dots Whether dots are replaced by underscores.
+#' @return The cleaned names.
 #' @noRd
 .rmbl_json_cleannames <- function(nms, no_dots = FALSE) {
   nms[nms == ""] <- NA_character_
@@ -382,8 +453,20 @@ bricklayer_json_base64url_dec <- function(input) {
 
 # ================================================================ encoder
 
-# The encoder is jsonlite's asJSON generic, one branch per class, with the
-# same argument threading (na / oldna / collapse / auto_unbox / indent).
+#' Encodes an R object as JSON text.
+#'
+#' The encoder is jsonlite's asJSON generic, one branch per class, with the
+#' same argument threading (na / oldna / collapse / auto_unbox / indent).
+#' @param x The object.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether a vector is collapsed into one array.
+#' @param na How missing values are written, or NULL for the type's default.
+#' @param oldna The `na` setting passed down to nested values.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @param is_df Whether `x` is a data frame's column list.
+#' @param keep_vec_names Whether a named vector is written as an object.
+#' @return The JSON text, or a character vector of encoded elements when `collapse` is FALSE.
 #' @noRd
 .rmbl_json_as <- function(x, o, collapse = TRUE, na = NULL, oldna = NULL,
                        auto_unbox = o$auto_unbox, indent = o$indent,
@@ -415,6 +498,7 @@ bricklayer_json_base64url_dec <- function(input) {
   }
   if (inherits(x, "Date")) {
     out <- if (identical(o$Date, "epoch")) unclass(x) else format(x)
+    o$always_decimal <- FALSE
     return(.rmbl_json_as(out, o, collapse, na, oldna, auto_unbox, indent))
   }
   if (inherits(x, "POSIXt")) {
@@ -424,7 +508,7 @@ bricklayer_json_base64url_dec <- function(input) {
       o2 <- o
       o2$digits <- NA
       o2$always_decimal <- FALSE
-      tmp <- .rmbl_json_as(df, o2, collapse = FALSE, na = na, oldna = oldna, indent = indent)
+      tmp <- .rmbl_json_as(df, o2, collapse = FALSE, na = na, oldna = oldna, indent = NA_integer_)
       tmp[is.na(x)] <- .rmbl_json_as(NA_character_, o, collapse = FALSE, na = na)
       return(if (isTRUE(collapse)) .rmbl_json_collapse(tmp, inner = FALSE, indent = indent) else tmp)
     }
@@ -446,7 +530,7 @@ bricklayer_json_base64url_dec <- function(input) {
   }
   if (inherits(x, "blob")) {
     if (identical(o$raw, "base64")) {
-      str <- vapply(x, bricklayer_json_base64_enc, character(1))
+      str <- vapply(x, jsb64enc, character(1))
       return(.rmbl_json_as(str, o, collapse, na, oldna, auto_unbox, indent))
     }
     return(.rmbl_json_as(unclass(as.list(x)), o, collapse, na, oldna, auto_unbox, indent))
@@ -455,6 +539,10 @@ bricklayer_json_base64url_dec <- function(input) {
   # an S3 class none of the branches above know: jsonlite's ANY method tries
   # the remaining classes, then unclasses under force = TRUE, else errors
   if (!is.null(oldClass(x)) && !is.data.frame(x)) {
+    if (isS4(x)) {
+      if (isTRUE(o$force)) return(.rmbl_json_as(attributes(x), o, collapse, na, oldna, auto_unbox, indent))
+      stop("No method asJSON S4 class: ", cls, call. = FALSE)
+    }
     if (length(cls) > 1L) {
       class(x) <- cls[-1L]
       return(.rmbl_json_as(x, o, collapse, na, oldna, auto_unbox, indent))
@@ -475,58 +563,75 @@ bricklayer_json_base64url_dec <- function(input) {
   if (is.logical(x)) return(.rmbl_json_as_lgl(x, o, collapse, na, auto_unbox, indent, keep_vec_names))
   if (is.complex(x)) return(.rmbl_json_as_cplx(x, o, collapse, na, oldna, auto_unbox, indent))
   if (is.numeric(x)) return(.rmbl_json_as_num(x, o, collapse, na, auto_unbox, indent, keep_vec_names))
-  if (length(cls) > 1L) {
-    class(x) <- cls[-1L]
-    return(.rmbl_json_as(x, o, collapse, na, oldna, auto_unbox, indent))
-  }
-  if (isS4(x)) {
-    if (isTRUE(o$force)) return(.rmbl_json_as(attributes(x), o, collapse, na, oldna, auto_unbox, indent))
-    stop("No method for S4 class:", cls, call. = FALSE)
-  }
-  if (isTRUE(o$force)) {
-    y <- unclass(x)
-    if (is.atomic(y) || is.list(y) || is.null(y))
-      return(.rmbl_json_as(y, o, collapse, na, oldna, auto_unbox, indent))
-    return(.rmbl_json_as(NULL, o))
-  }
+  # what is left has no class attribute and is not data: an environment, a
+  # symbol, a function, an external pointer
+  if (isTRUE(o$force)) return(.rmbl_json_as(NULL, o))
   stop("No method asJSON S3 class: ", cls, call. = FALSE)
 }
 
+#' Encodes a numeric vector as JSON.
+#' @param x The vector.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the values are collapsed into one array.
+#' @param na How missing values are written, or NULL for \code{"string"}.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @param keep_vec_names Whether a named vector is written as an object.
+#' @return The JSON text, or the encoded elements.
 #' @noRd
 .rmbl_json_as_num <- function(x, o, collapse, na, auto_unbox, indent, keep_vec_names) {
   if (isTRUE(keep_vec_names) && length(names(x))) {
-    message("Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.")
-    return(.rmbl_json_as(as.list(x), o, collapse, na = na, auto_unbox = TRUE, indent = indent))
+    if (!isTRUE(o$quiet_vec_names)) message("Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.")
+    o$always_decimal <- FALSE
+    return(.rmbl_json_as(as.list(x), o, collapse, na = na, auto_unbox = TRUE, indent = NA_integer_))
   }
-  na <- if (is.null(na)) "string" else match.arg(na, c("string", "null", "NA"))
+  na <- if (is.null(na)) "string" else .rmbl_arg(na, c("string", "null", "NA"))
   nas <- switch(na, string = TRUE, null = FALSE, "NA" = NA)
   if (!is.null(attr(x, "dim")) && length(dim(x)) < 2L) x <- c(x)
   tmp <- .rmbl_json_num_to_char(x, o$digits, nas, o$use_signif, o$always_decimal)
   if (isTRUE(auto_unbox) && length(tmp) == 1L) return(tmp)
   if (collapse) .rmbl_json_collapse(tmp, indent = indent) else tmp
 }
+#' Encodes a character vector as JSON.
+#' @param x The vector.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the values are collapsed into one array.
+#' @param na How missing values are written, or NULL for \code{"null"}.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @param keep_vec_names Whether a named vector is written as an object.
+#' @return The JSON text, or the encoded elements.
 #' @noRd
 .rmbl_json_as_chr <- function(x, o, collapse, na, auto_unbox, indent, keep_vec_names) {
   if (isTRUE(keep_vec_names) && length(names(x))) {
-    message("Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.")
-    return(.rmbl_json_as(as.list(x), o, collapse, na = na, auto_unbox = TRUE, indent = indent))
+    if (!isTRUE(o$quiet_vec_names)) message("Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.")
+    return(.rmbl_json_as(as.list(x), o, collapse, na = na, auto_unbox = TRUE, indent = NA_integer_))
   }
   tmp <- .rmbl_json_esc(as.character(x))
   miss <- which(is.na(x))
   if (length(miss)) {
-    na <- if (is.null(na)) "null" else match.arg(na, c("null", "string", "NA"))
+    na <- if (is.null(na)) "null" else .rmbl_arg(na, c("null", "string", "NA"))
     tmp[miss] <- if (na == "null") "null" else if (na == "string") "\"NA\"" else NA_character_
   }
   if (isTRUE(auto_unbox) && length(tmp) == 1L) return(tmp)
   if (isTRUE(collapse)) .rmbl_json_collapse(tmp, indent = indent) else tmp
 }
+#' Encodes a logical vector as JSON.
+#' @param x The vector.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the values are collapsed into one array.
+#' @param na How missing values are written, or NULL for \code{"null"}.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @param keep_vec_names Whether a named vector is written as an object.
+#' @return The JSON text, or the encoded elements.
 #' @noRd
 .rmbl_json_as_lgl <- function(x, o, collapse, na, auto_unbox, indent, keep_vec_names) {
   if (isTRUE(keep_vec_names) && length(names(x))) {
-    message("Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.")
-    return(.rmbl_json_as(as.list(x), o, collapse, na = na, auto_unbox = TRUE, indent = indent))
+    if (!isTRUE(o$quiet_vec_names)) message("Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.")
+    return(.rmbl_json_as(as.list(x), o, collapse, na = na, auto_unbox = TRUE, indent = NA_integer_))
   }
-  na <- if (is.null(na)) "null" else match.arg(na, c("null", "string", "NA"))
+  na <- if (is.null(na)) "null" else .rmbl_arg(na, c("null", "string", "NA"))
   tmp <- ifelse(x, "true", "false")
   if (!identical(na, "NA")) {
     miss <- which(is.na(x))
@@ -536,9 +641,18 @@ bricklayer_json_base64url_dec <- function(input) {
   if (isTRUE(auto_unbox) && length(tmp) == 1L) return(tmp)
   if (collapse) .rmbl_json_collapse(tmp, indent = indent) else tmp
 }
+#' Encodes a complex vector as JSON, as strings or as real and imaginary arrays.
+#' @param x The vector.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the values are collapsed into one array.
+#' @param na How missing values are written, or NULL for \code{"string"}.
+#' @param oldna The `na` setting passed down to nested values.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @return The JSON text, or the encoded elements.
 #' @noRd
 .rmbl_json_as_cplx <- function(x, o, collapse, na, oldna, auto_unbox, indent) {
-  na <- if (is.null(na)) "string" else match.arg(na, c("string", "null", "NA"))
+  na <- if (is.null(na)) "string" else .rmbl_arg(na, c("string", "null", "NA"))
   if (identical(o$complex, "string")) {
     mystring <- prettyNum(x = x, digits = if (is.null(o$digits)) 5 else o$digits)
     miss <- which(!is.finite(x))
@@ -549,19 +663,42 @@ bricklayer_json_base64url_dec <- function(input) {
   .rmbl_json_as(list(real = Re(x), imaginary = Im(x)), o, collapse, na = na, oldna = oldna,
              auto_unbox = auto_unbox, indent = indent)
 }
+#' Encodes a raw vector as JSON in the form `o$raw` names.
+#' @param x The vector.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the values are collapsed into one array.
+#' @param na How missing values are written.
+#' @param oldna The `na` setting passed down to nested values.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @return The JSON text.
 #' @noRd
 .rmbl_json_as_raw <- function(x, o, collapse, na, oldna, auto_unbox, indent) {
   raw <- o$raw
   if (raw == "mongo") {
     type <- if (length(attr(x, "type"))) attr(x, "type") else 5
-    return(.rmbl_json_as(list(`$binary` = bricklayer_json_unbox(bricklayer_json_base64_enc(x)),
-                           `$type` = bricklayer_json_unbox(as.character(type))), o))
+    return(.rmbl_json_as(list(`$binary` = bricklayer_json_unbox(jsb64enc(x)),
+                           `$type` = bricklayer_json_unbox(as.character(type))), o, indent = NA_integer_))
   }
-  if (raw == "hex") return(.rmbl_json_as(format(as.hexmode(as.integer(x)), width = 2L), o, collapse, na, oldna, auto_unbox, indent))
+  if (raw == "hex") return(.rmbl_json_as(as.character.hexmode(x), o, collapse, na, oldna, auto_unbox, indent))
   if (raw == "int") return(.rmbl_json_as(as.integer(x), o, collapse, na, oldna, auto_unbox, indent))
-  if (raw == "js") return(paste0("(new Uint8Array(", .rmbl_json_as(as.integer(x), o, collapse = TRUE), "))"))
-  .rmbl_json_as(bricklayer_json_base64_enc(x), o, collapse, na, oldna, auto_unbox, indent)
+  if (raw == "js") {
+    o$always_decimal <- FALSE
+    return(paste0("(new Uint8Array(", .rmbl_json_as(as.integer(x), o, collapse = TRUE, na = NULL,
+                                                  auto_unbox = FALSE, indent = NA_integer_), "))"))
+  }
+  .rmbl_json_as(jsb64enc(x), o, collapse, na, oldna, auto_unbox, indent)
 }
+#' Encodes a matrix or array as nested JSON arrays.
+#' @param x The matrix or array.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the rows are collapsed into one array.
+#' @param na How missing values are written.
+#' @param oldna The `na` setting passed down to nested values.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @param keep_vec_names Whether a named vector is written as an object.
+#' @return The JSON text, or one encoded element per row.
 #' @noRd
 .rmbl_json_as_array <- function(x, o, collapse, na, oldna, auto_unbox, indent, keep_vec_names) {
   if (identical(na, "NA")) na <- oldna
@@ -579,6 +716,11 @@ bricklayer_json_base64url_dec <- function(input) {
   }
   if (collapse) .rmbl_json_collapse(tmp, inner = FALSE, indent = indent) else tmp
 }
+#' Collapses an array of encoded values into nested JSON arrays, the innermost dimension first.
+#' @param x The array of encoded values.
+#' @param columnmajor Whether the array is written by columns.
+#' @param indent The indent, NA for compact output.
+#' @return An array of encoded values with the last dimension left.
 #' @noRd
 .rmbl_json_collapse_array <- function(x, columnmajor = FALSE, indent) {
   n <- length(dim(x))
@@ -592,8 +734,22 @@ bricklayer_json_base64url_dec <- function(input) {
   }
   x
 }
+#' Encodes a list as a JSON object (when named) or array, at most 100 levels deep.
+#' @param x The list or pairlist.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether an unnamed list is collapsed into one array.
+#' @param na How missing values are written.
+#' @param oldna The `na` setting passed down to nested values.
+#' @param auto_unbox Whether a length-one vector is written as a scalar.
+#' @param indent The indent, NA for compact output.
+#' @param is_df Whether `x` is a data frame's column list.
+#' @return The JSON text, or the encoded elements.
 #' @noRd
 .rmbl_json_as_list <- function(x, o, collapse, na, oldna, auto_unbox, indent, is_df) {
+  # the same cap as the parser's, so what the parser reads the encoder can
+  # write back; the recursion used to run into the C stack ~100 levels down
+  o$depth <- (o$depth %||% 0L) + 1L
+  if (o$depth > 100L) stop("nesting deeper than 100 levels", call. = FALSE)
   if (identical(na, "NA")) na <- oldna
   if (is.pairlist(x)) x <- as.vector(x, mode = "list")
   inc <- .rmbl_json_indent_inc(indent)
@@ -603,14 +759,25 @@ bricklayer_json_base64url_dec <- function(input) {
     vapply(x, function(y) .rmbl_json_as(y, o, na = na, oldna = oldna, auto_unbox = auto_unbox, indent = inc), character(1))
   }
   if (!is.null(names(x))) {
-    keys <- .rmbl_json_esc(.rmbl_json_cleannames(names(x), o$no_dots))
+    keys <- if (isTRUE(o$keep_empty_names)) .rmbl_json_esc(names(x))
+            else .rmbl_json_esc(.rmbl_json_cleannames(names(x), o$no_dots))
     return(.rmbl_json_collapse_object(keys, unname(tmp), indent))
   }
   if (collapse) .rmbl_json_collapse(unname(tmp), inner = FALSE, indent = indent) else unname(tmp)
 }
+#' Encodes a data frame as JSON by rows, columns or values, as `o$dataframe` says.
+#' @param x The data frame.
+#' @param o The options list built by `tojs()`.
+#' @param collapse Whether the rows are collapsed into one array.
+#' @param na How missing values are written.
+#' @param oldna The `na` setting passed down to nested values.
+#' @param indent The indent, NA for compact output.
+#' @param keep_vec_names Not used: a data frame's columns are never written as objects.
+#' @return The JSON text, or one encoded element per row.
 #' @noRd
 .rmbl_json_as_df <- function(x, o, collapse, na, oldna, indent, keep_vec_names) {
   dataframe <- o$dataframe
+  o$keep_vec_names <- FALSE
   has_names <- identical(length(names(x)), ncol(x))
   rn <- attr(x, "row.names")
   if (isTRUE(o$rownames) || (is.null(o$rownames) && is.character(rn) && !all(grepl("^\\d+$", rn)))) {
@@ -623,9 +790,9 @@ bricklayer_json_base64url_dec <- function(input) {
     return(.rmbl_json_as_list(as.list(x), o, collapse = TRUE, na = na, oldna = oldna,
                            auto_unbox = o$auto_unbox, indent = indent, is_df = TRUE))
   if (is.null(na) || !length(na) || identical(na, "NA")) oldna <- NULL else oldna <- na
-  if (dataframe == "rows" && has_names) na <- if (is.null(na)) "NA" else match.arg(na, c("NA", "null", "string"))
+  if (dataframe == "rows" && has_names) na <- if (is.null(na)) "NA" else .rmbl_arg(na, c("NA", "null", "string"))
   if (!nrow(x)) return(.rmbl_json_as(list(), o, collapse = collapse, indent = indent))
-  for (i in which(vapply(x, is.raw, logical(1)))) x[[i]] <- format(as.hexmode(as.integer(x[[i]])), width = 2L)
+  for (i in which(vapply(x, is.raw, logical(1)))) x[[i]] <- as.character.hexmode(x[[i]])
   if (identical(o$complex, "list"))
     for (i in which(vapply(x, is.complex, logical(1))))
       x[[i]] <- data.frame(real = Re(x[[i]]), imaginary = Im(x[[i]]))
@@ -646,38 +813,99 @@ bricklayer_json_base64url_dec <- function(input) {
 
 #' Encode an R object as JSON (jsonlite's toJSON, natively)
 #'
-#' Every option of jsonlite's `toJSON()` with the same default and the
-#' same bytes out: `dataframe`, `matrix`, `Date`,
-#' `POSIXt`, `factor`, `complex`, `raw`, `null`,
-#' `na`, `auto_unbox`, `digits` ( `I(n)` for
-#' significant digits, `NA` for 15), `pretty` (TRUE = 2 spaces,
-#' or a width), `force`, plus `rownames`, `keep_vec_names`,
-#' `json_verbatim`, `always_decimal`, `time_format`,
-#' `UTC`, `no_dots`, `hms`.
+#' Converts R data (vectors, lists, data frames, matrices, dates, factors)
+#' to JSON text, with the same options, the same defaults and the same bytes
+#' out as jsonlite's \code{toJSON()}, but computed by this package's own
+#' code, so manifests, provenance records and capsules can be written where
+#' jsonlite is not installed and their digests stay the same either way. Use
+#' it to write data for an API or a person; use
+#' [jsser()]
+#' when the JSON must rebuild the exact R object (classes, factor levels,
+#' attributes).
 #'
-#' @param x the object to encode.
-#' @param dataframe As in jsonlite.
-#' @param matrix As in jsonlite.
-#' @param Date As in jsonlite.
-#' @param POSIXt As in jsonlite.
-#' @param factor As in jsonlite.
-#' @param complex As in jsonlite.
-#' @param raw As in jsonlite.
-#' @param null As in jsonlite: `NULL` is written as `{}` by default
-#'   (a round trip gives an empty list). Pass `null = "null"` for a
-#'   JSON null; [bricklayer_json_serialize] round-trips `NULL` exactly.
-#' @param na As in jsonlite.
-#' @param auto_unbox As in jsonlite.
-#' @param digits As in jsonlite.
-#' @param pretty As in jsonlite.
-#' @param force As in jsonlite.
-#' @param ... As in jsonlite.
-#' @return a length-one character vector of class `json`.
-#' @examples
-#' bricklayer_json_to_json(list(a = 1:3, b = "x"), auto_unbox = TRUE)
-#' bricklayer_json_to_json(data.frame(id = 1:2, v = c(1.5, NA)), pretty = TRUE)
+#' @details
+#' Atomic vectors become arrays, so a single value is \code{[1]} unless
+#' \code{auto_unbox = TRUE}. Named lists become objects and unnamed lists
+#' arrays. Missing values follow jsonlite: with \code{na} not given, a
+#' missing number is written as the string \code{"NA"} and a missing string
+#' or logical as \code{null}; in a data frame by rows a missing value is
+#' left out of its record.
+#'
+#' Further options of \code{toJSON()} are taken through \code{...}:
+#' \code{rownames}, \code{keep_vec_names}, \code{json_verbatim},
+#' \code{always_decimal}, \code{time_format}, \code{UTC}, \code{no_dots},
+#' \code{hms} (\code{"string"} or \code{"secs"}), and two of this package's
+#' own: \code{keep_empty_names} (an empty-string key is written as
+#' \code{""} rather than replaced by its position) and
+#' \code{quiet_vec_names} (no message when \code{keep_vec_names} is used).
+#' [mnfcanon()] uses both.
+#'
+#' Errors: an option value not among its choices (the message lists them);
+#' an object with no JSON form (a function, a symbol) unless
+#' \code{force = TRUE}.
+#'
+#' @param x The object to encode.
+#' @param dataframe How a data frame is written: \code{"rows"} (the default,
+#'   an array of records), \code{"columns"} (an object of column arrays) or
+#'   \code{"values"} (an array of row arrays, without names).
+#' @param matrix How a matrix is written. \code{"rowmajor"} (the default) gives an
+#'   array of rows, and \code{"columnmajor"} an array of columns.
+#' @param Date How a \code{Date} is written: \code{"ISO8601"} (the default,
+#'   \code{"2024-01-02"}) or \code{"epoch"} (days since 1970-01-01).
+#' @param POSIXt How a date-time is written: \code{"string"} (the default,
+#'   \code{"2024-01-02 03:04:05"}), \code{"ISO8601"}
+#'   (\code{"2024-01-02T03:04:05"}), \code{"epoch"} (milliseconds since
+#'   1970) or \code{"mongo"} (\code{{"$date": ms}}).
+#' @param factor How a factor is written: \code{"string"} (the default, its
+#'   labels) or \code{"integer"} (its codes).
+#' @param complex How a complex number is written: \code{"string"} (the
+#'   default, \code{"1+2i"}) or \code{"list"} (an object of \code{real} and
+#'   \code{imaginary} arrays).
+#' @param raw How a raw vector is written: \code{"base64"} (the default, one
+#'   string), \code{"hex"}, \code{"mongo"}, \code{"int"} or \code{"js"}.
+#' @param null How \code{NULL} inside a list is written: \code{"list"} (the
+#'   default, \code{{}}; a round trip gives an empty list) or \code{"null"}
+#'   (a JSON \code{null}).
+#'   [jsser()] round-trips
+#'   \code{NULL} exactly.
+#' @param na How missing values are written: \code{"null"} or
+#'   \code{"string"} (\code{"NA"}). When not given, the per-type default of
+#'   jsonlite applies (see Details).
+#' @param auto_unbox Logical scalar, default \code{FALSE}: write length-one
+#'   vectors as scalars (\code{1}) rather than arrays (\code{[1]}).
+#' @param digits Numeric scalar, default \code{4}: decimal places kept for
+#'   doubles. \code{I(n)} means \code{n} significant digits (\code{I(17)}
+#'   writes every double exactly) and \code{NA} means 15 significant digits.
+#' @param pretty \code{FALSE} (the default) for compact output, \code{TRUE}
+#'   to indent by two spaces, or a number of spaces.
+#' @param force Logical scalar, default \code{FALSE}: write objects that have
+#'   no JSON form (as \code{{}}) instead of failing.
+#' @param ... Further options of jsonlite's \code{toJSON()} and of this
+#'   package (see Details).
+#' @return A character scalar of class \code{json}, the JSON text.
+#' @seealso [fromjs()] for the
+#'   reverse,
+#'   [jsser()] for an exact
+#'   round trip.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#' tojs(list(a = 1:3, b = "x"), auto_unbox = TRUE)
+#' tojs(data.frame(id = 1:2, v = c(1.5, NA)), pretty = TRUE)
+#'
+#' # a data frame by columns, and a date-time in ISO 8601
+#' df <- data.frame(id = 1:2, v = c(1.5, NA))
+#' tojs(df, dataframe = "columns", na = "null")
+#' tojs(as.POSIXct("2024-01-02 03:04:05", tz = "UTC"), POSIXt = "ISO8601")
+#'
+#' # digits: decimal places by default, significant digits with I()
+#' tojs(pi)
+#' tojs(pi, digits = I(17))
+#'
+#' # a choice that does not exist is refused
+#' try(tojs(df, dataframe = "table"))
 #' @export
-bricklayer_json_to_json <- function(x, dataframe = c("rows", "columns", "values"),
+#' @srrstats {G2.12} List columns are encoded element-wise; test-review-coverage.R:95 tojs(data.frame(a =
+#'   I(list(1:2, 3)))).
+tojs <- function(x, dataframe = c("rows", "columns", "values"),
                                  matrix = c("rowmajor", "columnmajor"),
                                  Date = c("ISO8601", "epoch"),
                                  POSIXt = c("string", "ISO8601", "epoch", "mongo"),
@@ -687,18 +915,25 @@ bricklayer_json_to_json <- function(x, dataframe = c("rows", "columns", "values"
                                  null = c("list", "null"), na = c("null", "string"),
                                  auto_unbox = FALSE, digits = 4, pretty = FALSE,
                                  force = FALSE, ...) {
+  # NULL (full precision, this codec's own) and NA (15 significant digits) are documented forms
+  if (!is.null(digits) && (!(is.numeric(digits) || is.logical(digits)) || length(digits) != 1L ||
+                           (!is.na(digits) && !is.numeric(digits)))) {
+    stop("`digits` must be one number, NA for 15 significant digits, or I(n) for n", call. = FALSE)
+  }
   dots <- list(...)
-  o <- list(dataframe = match.arg(dataframe), matrix = match.arg(matrix),
-            Date = match.arg(Date), POSIXt = match.arg(POSIXt), factor = match.arg(factor),
-            complex = match.arg(complex), raw = match.arg(raw), null = match.arg(null),
+  o <- list(dataframe = .rmbl_arg(dataframe), matrix = .rmbl_arg(matrix),
+            Date = .rmbl_arg(Date), POSIXt = .rmbl_arg(POSIXt), factor = .rmbl_arg(factor),
+            complex = .rmbl_arg(complex), raw = .rmbl_arg(raw), null = .rmbl_arg(null),
             auto_unbox = isTRUE(auto_unbox), digits = digits,
             use_signif = if (!is.null(dots$use_signif)) isTRUE(dots$use_signif) else inherits(digits, "AsIs"),
             force = isTRUE(force), indent = .rmbl_json_indent_init(pretty),
             rownames = dots$rownames, keep_vec_names = isTRUE(dots$keep_vec_names),
             json_verbatim = isTRUE(dots$json_verbatim), always_decimal = isTRUE(dots$always_decimal),
             time_format = dots$time_format, UTC = isTRUE(dots$UTC), no_dots = isTRUE(dots$no_dots),
-            hms = if (is.null(dots$hms)) "string" else match.arg(dots$hms, c("string", "secs")))
-  na <- if (!missing(na)) match.arg(na) else NULL
+            hms = if (is.null(dots$hms)) "string" else .rmbl_arg(dots$hms, c("string", "secs")),
+            keep_empty_names = isTRUE(dots$keep_empty_names),
+            quiet_vec_names = isTRUE(dots$quiet_vec_names), depth = 0L)
+  na <- if (!missing(na)) .rmbl_arg(na) else NULL
   ans <- .rmbl_json_as(x, o, na = na, oldna = NULL, auto_unbox = o$auto_unbox, indent = o$indent)
   class(ans) <- "json"
   ans
@@ -723,6 +958,9 @@ bricklayer_json_unbox <- function(x) {
   if (identical(length(x), 1L)) return(.rmbl_json_as_scalar(x))
   stop("Tried to unbox a vector of length ", length(x), call. = FALSE)
 }
+#' Adds the class `scalar`, so the value is written without brackets.
+#' @param obj The value.
+#' @return `obj` with class `scalar` first.
 #' @noRd
 .rmbl_json_as_scalar <- function(obj) {
   class(obj) <- c("scalar", class(obj))
@@ -748,6 +986,9 @@ bricklayer_json_unbox <- function(x) {
 # the fallback cannot be worse than the rest of the bundle's arithmetic.
 # Inside the installed package the native path is always taken.
 .rmbl_native <- new.env(parent = emptyenv())
+#' Converts decimal text to doubles, correctly rounded where the native converter is there.
+#' @param x The decimal text.
+#' @return A double vector.
 #' @noRd
 .rmbl_strtod <- function(x) {
   have <- .rmbl_native$strtod
@@ -758,13 +999,18 @@ bricklayer_json_unbox <- function(x) {
   if (have) .Call(C_rmbl_strtod, as.character(x)) else as.numeric(x)
 }
 
-# The writer's half of the same argument. sprintf("%.17g") delegates to
-# the platform, and on Windows aarch64 the platform is wrong: it renders
-# the largest double one ulp low, so the text reads back as a different
-# number. Seventeen digits are the package's round-trip guarantee, so
-# the digits are generated by exact integer arithmetic instead. Where no
-# compiled library is present -- a vendored bundle -- fall back to the
-# platform and let the caller's round-trip check stand.
+#' Writes doubles with seventeen significant digits.
+#'
+#' The writer's half of the same argument. sprintf(\dQuote{%.17g}) delegates to
+#' the platform, and on Windows aarch64 the platform is wrong: it renders
+#' the largest double one ulp low, so the text reads back as a different
+#' number. Seventeen digits are the package's round-trip guarantee, so
+#' the digits are generated by exact integer arithmetic instead. Where no
+#' compiled library is present -- a vendored bundle -- fall back to the
+#' platform and let the caller's round-trip check stand.
+#' @param x A double vector.
+#' @return A character vector.
+#' @noRd
 .rmbl_dtoa17 <- function(x) {
   have <- .rmbl_native$dtoa17
   if (is.null(have)) {
@@ -776,156 +1022,274 @@ bricklayer_json_unbox <- function(x) {
 
 # ================================================================ parser
 
-# A yajl-equivalent parser: one pass over the text with a byte cursor.
-# Numbers follow yajl_tree: no '.'/'e' -> integer (double above 2^31-1,
-# character above 2^53 when bigint_as_char); otherwise a decimal.
-#
-# The decimal is converted by this package rather than by the platform.
-# Seventeen significant digits recover any double exactly, but only
-# through a reader that rounds correctly, and not every platform's
-# does -- on macOS arm64 the C library reads the correct decimal for
-# the largest double as infinity, and loses low bits above about 1e100.
-# A manifest written on one machine would then read back as a different
-# number on another, which for a format meant to be checked elsewhere
-# is a bug rather than a caveat. See src/rmbl_strtod.cpp.
+#' Parses JSON text into R values, without simplifying.
+#'
+#' A yajl-equivalent parser: one pass over the text with a byte cursor.
+#' Numbers follow yajl_tree: no '.'/'e' -> integer (double above 2^31-1,
+#' character above 2^53 when bigint_as_char); otherwise a decimal.
+#'
+#' The decimal is converted by this package rather than by the platform.
+#' Seventeen significant digits recover any double exactly, but only
+#' through a reader that rounds correctly, and not every platform's
+#' does -- on macOS arm64 the C library reads the correct decimal for
+#' the largest double as infinity, and loses low bits above about 1e100.
+#' A manifest written on one machine would then read back as a different
+#' number on another, which for a format meant to be checked elsewhere
+#' is a bug rather than a caveat. See src/rmbl_strtod.cpp.
+#' @param txt The JSON text; lines are joined with newlines.
+#' @param bigint_as_char Whether an integer above 2^53 is returned as text.
+#' @param bigint_warn Whether a warning says an integer above 2^53 lost precision.
+#' @param duplicate_keys \code{"error"} refuses an object with a key twice, \code{"keep"}
+#' keeps both.
+#' @return The parsed value: lists, atomic scalars and NULL.
 #' @noRd
-.rmbl_json_parse <- function(txt, bigint_as_char = FALSE) {
+.rmbl_json_parse <- function(txt, bigint_as_char = FALSE, bigint_warn = TRUE,
+                             duplicate_keys = c("error", "keep")) {
+  duplicate_keys <- .rmbl_arg(duplicate_keys)
+  # latin1 text is converted before paste(): in a C locale paste() wrote its accented letters as
+  # "<e9>", and the parser read that text as the data (audit of 30bed8e, #17)
+  lat <- if (is.character(txt)) Encoding(txt) == "latin1" else FALSE
+  if (any(lat)) txt[lat] <- iconv(txt[lat], "latin1", "UTF-8")
   s <- paste(txt, collapse = "\n")
-  s <- enc2utf8(s)
+  # the byte-order mark is tested and removed on the BYTES, before any
+  # encoding conversion: substring(s, 2L) on a string a C locale has not
+  # marked as UTF-8 removed one of the mark's three bytes
   if (.rmbl_has_bom(s)) {
     warning("JSON string contains (illegal) UTF8 byte-order-mark!", call. = FALSE)
-    s <- substring(s, 2L)
+    s <- .rmbl_strip_bom(s)
   }
+  # JSON is UTF-8 (RFC 8259): bytes that are not were read with base R's warnings and garbled.
+  # Checked before the conversion: in a C locale enc2utf8() rewrote an invalid byte as a valid
+  # escape, and the text then failed as "unexpected character" (C-locale check of 1.0.0)
+  if (Encoding(s) != "latin1" && !validUTF8(s)) stop("the JSON text is not valid UTF-8", call. = FALSE)
+  s <- enc2utf8(s)
   if (startsWith(s, "\x1e")) s <- substring(s, 2L)
+  # the package's native path for a well-formed document (85 s for a 15 MiB reply here; CRAN stress
+  # test of 0.5.14); it gives up (NULL) on whatever needs this parser's words: an error, a big integer,
+  # a duplicate key, deep nesting. A staged bundle has no native code and parses here.
+  fast <- .rmbl_native$json
+  if (is.null(fast)) {
+    fast <- exists("C_rmbl_json_fast", inherits = TRUE)
+    .rmbl_native$json <- fast
+  }
+  if (fast) {
+    r <- .Call(C_rmbl_json_fast, s, duplicate_keys == "keep", isTRUE(bigint_as_char))
+    if (!is.null(r)) {
+      if (!is.null(r[[2L]]) && bigint_warn) {
+        warning(sprintf(paste0("integer %s exceeds 2^53 and cannot be held exactly ",
+                               "in a double; pass bigint_as_char = TRUE to keep it as text"), r[[2L]]),
+                call. = FALSE)
+      }
+      return(r[[1L]])
+    }
+  }
   ch <- strsplit(s, "", fixed = TRUE)[[1]]
   n <- length(ch)
-  i <- 1L
-  bad <- function(msg) stop(sprintf("%s at character %d", msg, i), call. = FALSE)
-  ws <- function() while (i <= n && (ch[i] == " " || ch[i] == "\t" || ch[i] == "\n" || ch[i] == "\r")) i <<- i + 1L
+  p <- new.env(parent = emptyenv())   # the cursor, the nesting depth and the big-integer flag
+  p$i <- 1L
+  # The code points once, and the positions the scanner jumps to (the next character that is not
+  # white space, not a digit, or that ends a run of plain string text): one R call per character
+  # took 85 s for a 15 MiB reply (CRAN stress test of 0.5.14).
+  cp <- utf8ToInt(s)
+  is_ws <- cp == 32L | cp == 9L | cp == 10L | cp == 13L
+  not_ws <- as.double(which(!is_ws))   # double: findInterval() copies an integer vector each call
+  is_dig <- cp >= 48L & cp <= 57L
+  not_dig <- as.double(which(!is_dig))
+  spec <- as.double(which(cp == 34L | cp == 92L | cp < 32L))   # a quote, a backslash or a control character
+  # the first position of `v` at or after `pos`, n + 1 when there is none
+  after <- function(pos, v) {
+    j <- v[findInterval(pos - 1L, v, checkSorted = FALSE, checkNA = FALSE) + 1L]
+    if (is.na(j)) n + 1L else as.integer(j)
+  }
+  p$depth <- 0L          # nesting, capped: 20,000 "[" exhausted the C stack
+  p$big_warned <- FALSE  # one warning per document for integers above 2^53
+  bad <- function(msg) stop(.rmbl_fn(), sprintf("%s at character %d", msg, p$i), call. = FALSE)
+  ws <- function() if (p$i <= n && is_ws[p$i]) p$i <- after(p$i, not_ws)
   str_ <- function() {
-    i <<- i + 1L
-    st <- i
-    parts <- character(0)
+    p$i <- p$i + 1L
+    st <- p$i
+    # a string with no escape (nearly every one): its text in one step
+    j <- after(p$i, spec)
+    if (j <= n && cp[j] == 34L) {
+      p$i <- j + 1L
+      return(if (j > st) paste(ch[st:(j - 1L)], collapse = "") else "")
+    }
+    # pieces are appended into a doubling buffer: c(parts, ...) per escape
+    # was quadratic, and 532 bytes of gzip held 250,000 escapes
+    q <- new.env(parent = emptyenv())
+    q$parts <- character(32L)
+    q$np <- 0L
+    push <- function(v) {
+      q$np <- q$np + 1L
+      if (q$np > length(q$parts)) length(q$parts) <- 2L * length(q$parts)
+      q$parts[q$np] <- v
+    }
     repeat {
-      if (i > n) bad("unterminated string")
-      c0 <- ch[i]
+      p$i <- after(p$i, spec)
+      if (p$i > n) bad("unterminated string")
+      c0 <- ch[p$i]
       if (c0 == "\"") break
       if (c0 == "\\") {
-        if (i > st) parts <- c(parts, paste(ch[st:(i - 1L)], collapse = ""))
-        i <<- i + 1L
-        e <- ch[i]
-        parts <- c(parts, switch(e, n = "\n", t = "\t", r = "\r", b = "\b", f = "\f",
+        if (p$i > st) push(paste(ch[st:(p$i - 1L)], collapse = ""))
+        p$i <- p$i + 1L
+        e <- ch[p$i]
+        push(switch(e, n = "\n", t = "\t", r = "\r", b = "\b", f = "\f",
                                  "\"" = "\"", "\\" = "\\", "/" = "/",
                                  u = {
-                                   cp <- strtoi(paste(ch[(i + 1L):(i + 4L)], collapse = ""), 16L)
+                                   cp <- .rmbl_json_hex4(ch[(p$i + 1L):(p$i + 4L)])
                                    if (is.na(cp)) bad("invalid \\u escape")
-                                   i <<- i + 4L
-                                   if (cp >= 0xD800 && cp <= 0xDBFF && i + 6L <= n && ch[i + 1L] == "\\" && ch[i + 2L] == "u") {
-                                     lo <- strtoi(paste(ch[(i + 3L):(i + 6L)], collapse = ""), 16L)
+                                   p$i <- p$i + 4L
+                                   if (cp >= 0xD800 && cp <= 0xDBFF && p$i + 6L <= n && ch[p$i + 1L] == "\\" && ch[p$i + 2L] == "u") {
+                                     lo <- .rmbl_json_hex4(ch[(p$i + 3L):(p$i + 6L)])
                                      if (!is.na(lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
-                                       i <<- i + 6L
+                                       p$i <- p$i + 6L
                                        cp <- 0x10000 + (cp - 0xD800) * 1024 + (lo - 0xDC00)
                                      }
                                    }
                                    if (cp == 0) bad("NUL in string")
+                                   # an unpaired surrogate is not a character;
+                                   # intToUtf8() turned it into the text "NA"
+                                   if (cp >= 0xD800 && cp <= 0xDFFF) bad("lone surrogate escape")
                                    intToUtf8(cp)
                                  },
                                  bad("invalid escape")))
-        i <<- i + 1L
-        st <- i
+        p$i <- p$i + 1L
+        st <- p$i
         next
       }
-      if (utf8ToInt(c0) < 32L) bad("control character in string")
-      i <<- i + 1L
+      bad("control character in string")
     }
-    if (i > st) parts <- c(parts, paste(ch[st:(i - 1L)], collapse = ""))
-    i <<- i + 1L
-    paste(parts, collapse = "")
+    if (p$i > st) push(paste(ch[st:(p$i - 1L)], collapse = ""))
+    p$i <- p$i + 1L
+    paste(q$parts[seq_len(q$np)], collapse = "")
   }
   num_ <- function() {
-    st <- i
-    if (ch[i] == "-") i <<- i + 1L
-    if (i > n || !grepl("[0-9]", ch[i])) bad("invalid number")
-    if (ch[i] == "0") i <<- i + 1L else while (i <= n && grepl("[0-9]", ch[i])) i <<- i + 1L
+    st <- p$i
+    if (ch[p$i] == "-") p$i <- p$i + 1L
+    if (p$i > n || !is_dig[p$i]) bad("invalid number")
+    if (ch[p$i] == "0") p$i <- p$i + 1L else p$i <- after(p$i, not_dig)
     isint <- TRUE
-    if (i <= n && ch[i] == ".") {
+    if (p$i <= n && ch[p$i] == ".") {
       isint <- FALSE
-      i <<- i + 1L
-      if (i > n || !grepl("[0-9]", ch[i])) bad("invalid number")
-      while (i <= n && grepl("[0-9]", ch[i])) i <<- i + 1L
+      p$i <- p$i + 1L
+      if (p$i > n || !is_dig[p$i]) bad("invalid number")
+      p$i <- after(p$i, not_dig)
     }
-    if (i <= n && (ch[i] == "e" || ch[i] == "E")) {
+    if (p$i <= n && (ch[p$i] == "e" || ch[p$i] == "E")) {
       isint <- FALSE
-      i <<- i + 1L
-      if (i <= n && (ch[i] == "+" || ch[i] == "-")) i <<- i + 1L
-      if (i > n || !grepl("[0-9]", ch[i])) bad("invalid number")
-      while (i <= n && grepl("[0-9]", ch[i])) i <<- i + 1L
+      p$i <- p$i + 1L
+      if (p$i <= n && (ch[p$i] == "+" || ch[p$i] == "-")) p$i <- p$i + 1L
+      if (p$i > n || !is_dig[p$i]) bad("invalid number")
+      p$i <- after(p$i, not_dig)
     }
-    t0 <- paste(ch[st:(i - 1L)], collapse = "")
+    t0 <- paste(ch[st:(p$i - 1L)], collapse = "")
     v <- .rmbl_strtod(t0)
-    if (isint) {
-      digs <- sub("^-", "", t0)
-      big <- nchar(digs) > 16L || (nchar(digs) == 16L && digs > "9007199254740992")
-      if (bigint_as_char && big) return(t0)
+    if (!isint && bigint_warn && !p$big_warned && is.finite(v) && v == trunc(v) &&
+        abs(v) >= 9007199254740992 && abs(v) < 18446744073709551616) {
+      # "9007199254740993.0" and "9.007199254740993e15" write an integer in
+      # the identifier range that the double does not hold: the digits
+      # written are compared with the integer the double actually is. A
+      # value beyond 2^64 (1.7976931348623157e308) is a magnitude, not an
+      # identifier, and is left alone.
+      written <- .rmbl_json_written_integer(t0)
+      if (!is.null(written) && !identical(written, sprintf("%.0f", abs(v)))) {
+        p$big_warned <- TRUE
+        warning(sprintf(paste0("number %s is a whole number beyond 2^53 and cannot be held ",
+                               "exactly in a double"), t0), call. = FALSE)
+      }
+    }
+    # fewer than 16 digits cannot pass 2^53: the digit checks are skipped (they were a regex per number)
+    if (isint && nchar(t0) < 16L) {
       if (v > 2147483647 || v < -2147483647) return(v)
       return(as.integer(v))
     }
+    if (isint) {
+      digs <- sub("^0+(?=[0-9])", "", sub("^-", "", t0), perl = TRUE)
+      big <- nchar(digs) > 16L || (nchar(digs) == 16L && digs > "9007199254740992")
+      # inexact: the integer written is not the integer the double holds.
+      # 9007199254740994 is beyond 2^53 and exact (even); 9007199254740993
+      # is not. Only the second deserves a warning.
+      inexact <- big && is.finite(v) && !identical(sprintf("%.0f", abs(v)), digs)
+      if (big) {
+        if (bigint_as_char) return(t0)
+        if (!p$big_warned && bigint_warn && inexact) {
+          p$big_warned <- TRUE
+          warning(sprintf(paste0("integer %s exceeds 2^53 and cannot be held exactly ",
+                                 "in a double; pass bigint_as_char = TRUE to keep it as text"),
+                          t0), call. = FALSE)
+        }
+      }
+      # sixteen digits or more without a leading zero is past the integer range
+    }
     v
   }
+  # the depth is put back on return; an error ends the parse, so no on.exit() (a cost per value)
   value <- function() {
+    p$depth <- p$depth + 1L
+    if (p$depth > 100L) bad("nesting deeper than 100 levels")
+    v <- value_()
+    p$depth <- p$depth - 1L
+    v
+  }
+  value_ <- function() {
     ws()
-    if (i > n) bad("unexpected end of input")
-    c0 <- ch[i]
+    if (p$i > n) bad("unexpected end of input")
+    c0 <- ch[p$i]
     if (c0 == "{") {
-      i <<- i + 1L
+      p$i <- p$i + 1L
       ws()
       keys <- character(0)
       vals <- list()
-      if (i <= n && ch[i] == "}") {
-        i <<- i + 1L
+      if (p$i <= n && ch[p$i] == "}") {
+        p$i <- p$i + 1L
         return(structure(list(), names = character(0)))
       }
       repeat {
         ws()
-        if (i > n || ch[i] != "\"") bad("expected a string key")
+        if (p$i > n || ch[p$i] != "\"") bad("expected a string key")
         k <- str_()
         ws()
-        if (i > n || ch[i] != ":") bad("expected ':'")
-        i <<- i + 1L
+        if (p$i > n || ch[p$i] != ":") bad("expected ':'")
+        p$i <- p$i + 1L
         vals[[length(vals) + 1L]] <- list(value())
-        keys <- c(keys, k)
+        keys[[length(keys) + 1L]] <- k
         ws()
-        if (i <= n && ch[i] == ",") {
-          i <<- i + 1L
+        if (p$i <= n && ch[p$i] == ",") {
+          p$i <- p$i + 1L
           next
         }
-        if (i <= n && ch[i] == "}") {
-          i <<- i + 1L
+        if (p$i <= n && ch[p$i] == "}") {
+          p$i <- p$i + 1L
           break
         }
         bad("expected ',' or '}'")
+      }
+      # two values under one key let a file show a reader one digest and
+      # hand `$` another (the first); refuse unless asked to keep both
+      if (duplicate_keys == "error" && anyDuplicated(keys)) {
+        bad(sprintf("duplicate key \"%s\"", keys[duplicated(keys)][1L]))
       }
       out <- lapply(vals, function(w) w[[1L]])
       names(out) <- keys
       return(out)
     }
     if (c0 == "[") {
-      i <<- i + 1L
+      p$i <- p$i + 1L
       ws()
       vals <- list()
-      if (i <= n && ch[i] == "]") {
-        i <<- i + 1L
+      if (p$i <= n && ch[p$i] == "]") {
+        p$i <- p$i + 1L
         return(list())
       }
       repeat {
         vals[[length(vals) + 1L]] <- list(value())
         ws()
-        if (i <= n && ch[i] == ",") {
-          i <<- i + 1L
+        if (p$i <= n && ch[p$i] == ",") {
+          p$i <- p$i + 1L
           next
         }
-        if (i <= n && ch[i] == "]") {
-          i <<- i + 1L
+        if (p$i <= n && ch[p$i] == "]") {
+          p$i <- p$i + 1L
           break
         }
         bad("expected ',' or ']'")
@@ -933,64 +1297,82 @@ bricklayer_json_unbox <- function(x) {
       return(lapply(vals, function(w) w[[1L]]))
     }
     if (c0 == "\"") return(str_())
-    if (c0 == "t" && identical(substr(s, i, i + 3L), "true")) {
-      i <<- i + 4L
+    if (c0 == "t" && p$i + 3L <= n && identical(paste(ch[p$i:(p$i + 3L)], collapse = ""), "true")) {
+      p$i <- p$i + 4L
       return(TRUE)
     }
-    if (c0 == "f" && identical(substr(s, i, i + 4L), "false")) {
-      i <<- i + 5L
+    if (c0 == "f" && p$i + 4L <= n && identical(paste(ch[p$i:(p$i + 4L)], collapse = ""), "false")) {
+      p$i <- p$i + 5L
       return(FALSE)
     }
-    if (c0 == "n" && identical(substr(s, i, i + 3L), "null")) {
-      i <<- i + 4L
+    if (c0 == "n" && p$i + 3L <= n && identical(paste(ch[p$i:(p$i + 3L)], collapse = ""), "null")) {
+      p$i <- p$i + 4L
       return(NULL)
     }
-    if (c0 == "-" || grepl("[0-9]", c0)) return(num_())
+    if (c0 == "-" || is_dig[p$i]) return(num_())
     bad("unexpected character")
   }
   v <- value()
   ws()
-  if (i <= n) bad("trailing content")
+  if (p$i <= n) bad("trailing content")
   v
+}
+
+#' The code point of a u escape's four characters, or NA unless they are four hex digits.
+#'
+#' strtoi() alone took a space, a sign or \code{"0x"}: the escape \dQuote{u 041} read as
+#' \code{"A"}, and \code{"u-041"} as NA,
+#' which became the key \code{"NA"} (audit of 30bed8e, #12).
+#' @param h The four characters, one per element.
+#' @return An integer, or NA.
+#' @noRd
+.rmbl_json_hex4 <- function(h) {
+  h <- paste(h, collapse = "")
+  if (grepl("^[0-9A-Fa-f]{4}$", h)) strtoi(h, 16L) else NA_integer_
 }
 
 # ================================================================ simplify
 
-#' @noRd
-.rmbl_json_is_namedlist <- function(x) isTRUE(is.list(x) && !is.null(names(x)))
+#' Says whether a list is a list of records: unnamed, each element a named list or NULL, at least one a list.
+#' @param x The value.
+#' @return TRUE or FALSE.
 #' @noRd
 .rmbl_json_is_recordlist <- function(x) {
   if (!(is.list(x) && is.null(names(x)) && length(x))) return(FALSE)
-  one <- FALSE
-  for (el in x) {
-    if (!(.rmbl_json_is_namedlist(el) || is.null(el))) return(FALSE)
-    if (!one && .rmbl_json_is_namedlist(el)) one <- TRUE
-  }
-  one
+  # vectorised, with primitives only: a closure per element made fromjs() on 20,000 sparse records
+  # eight times slower than jsonlite (audit of 30bed8e, #17)
+  named <- vapply(x, is.list, NA) & !vapply(lapply(x, names), is.null, NA)
+  all(named | vapply(x, is.null, NA)) && any(named)
 }
+#' Says whether every element of a list is NULL or an atomic value of length at most one.
+#' @param x The value.
+#' @return TRUE or FALSE.
 #' @noRd
 .rmbl_json_is_scalarlist <- function(x) {
   if (!is.list(x)) return(FALSE)
-  for (el in x) if (!(is.null(el) || (is.atomic(el) && length(el) < 2L))) return(FALSE)
-  TRUE
+  all(vapply(x, is.null, NA) | (vapply(x, is.atomic, NA) & lengths(x) < 2L))
 }
+#' Turns NULL elements into NA, and the strings \code{"NA"}, \code{"NaN"}, \code{"Inf"}
+#' and \code{"-Inf"} into their values when no other string is
+#' present.
+#' @param x A list.
+#' @return The list.
 #' @noRd
 .rmbl_json_null_to_na <- function(x) {
-  n <- length(x)
-  if (!n) return(x)
-  looks_chr <- FALSE
-  for (i in seq_len(n)) {
-    el <- x[[i]]
-    if (is.null(el)) x[i] <- list(NA)
-    else if (!looks_chr && is.character(el) && !(el[1L] %in% c("NA", "NaN", "Inf", "-Inf"))) looks_chr <- TRUE
-  }
-  if (looks_chr) return(x)
-  for (i in seq_len(n)) {
-    el <- x[[i]]
-    if (is.character(el)) x[[i]] <- switch(el[1L], "NA" = NA, "NaN" = NaN, "Inf" = Inf, "-Inf" = -Inf, el)
-  }
+  if (!length(x)) return(x)
+  x[vapply(x, is.null, NA)] <- list(NA)
+  chr <- which(vapply(x, is.character, NA))
+  if (!length(chr)) return(x)
+  first <- vapply(x[chr], function(el) el[1L], "")
+  special <- c("NA", "NaN", "Inf", "-Inf")
+  if (!all(first %in% special)) return(x)
+  x[chr] <- list(NA, NaN, Inf, -Inf)[match(first, special)]
   x
 }
+#' Says whether a list holds date-times, NULLs and \code{"NA"} strings only, with at
+#' least one date-time.
+#' @param x The value.
+#' @return TRUE or FALSE.
 #' @noRd
 .rmbl_json_is_datelist <- function(x) {
   if (!is.list(x) || !length(x)) return(FALSE)
@@ -998,18 +1380,29 @@ bricklayer_json_unbox <- function(x) {
   for (el in x) {
     if (is.null(el)) next
     if (is.character(el) && length(el) && el[1L] == "NA") next
-    if (is.numeric(el) && inherits(el, "POSIXct")) status <- TRUE else return(FALSE)
+    # is.numeric() is FALSE for a POSIXct (it has an is.numeric method), so
+    # the class alone decides
+    if (inherits(el, "POSIXct")) status <- TRUE else return(FALSE)
   }
   status
 }
+#' Turns a list of scalars into a vector, keeping the date-time class.
+#' @param x The list.
+#' @return An atomic vector.
 #' @noRd
 .rmbl_json_list_to_vec <- function(x) {
   isdates <- .rmbl_json_is_datelist(x)
   out <- unlist(.rmbl_json_null_to_na(x), recursive = FALSE, use.names = FALSE)
   if (isdates && is.numeric(out)) structure(out, class = c("POSIXct", "POSIXt")) else out
 }
+#' Says whether every element of a vector equals the first.
+#' @param x The vector.
+#' @return TRUE or FALSE; FALSE for an empty vector.
 #' @noRd
 .rmbl_json_all_identical <- function(x) length(x) > 0L && all(x == x[1L])
+#' Turns a MongoDB `$date` value (milliseconds, or ISO 8601 text) into a date-time.
+#' @param x The value.
+#' @return A POSIXct vector, or `x` when it is neither number nor text.
 #' @noRd
 .rmbl_json_parse_date <- function(x) {
   if (is.numeric(x)) return(structure(x / 1000, class = c("POSIXct", "POSIXt")))
@@ -1020,6 +1413,17 @@ bricklayer_json_unbox <- function(x) {
   x
 }
 
+#' Simplifies parsed JSON into vectors, data frames and matrices, as jsonlite's simplify() does.
+#' @param x The parsed value.
+#' @param simplifyVector Whether arrays of scalars become vectors.
+#' @param simplifyDataFrame Whether arrays of records become data frames.
+#' @param simplifyMatrix Whether arrays of equal-length vectors become matrices.
+#' @param simplifyDate Whether `$date` objects become date-times.
+#' @param homoList Whether empty elements of a list of vectors or data frames take their siblings' type.
+#' @param flatten Whether nested data frames are flattened.
+#' @param columnmajor Whether matrices are read by columns.
+#' @param simplifySubMatrix Whether nested arrays become matrices.
+#' @return The simplified value.
 #' @noRd
 .rmbl_json_simplify <- function(x, simplifyVector = TRUE, simplifyDataFrame = TRUE,
                              simplifyMatrix = TRUE, simplifyDate = simplifyVector,
@@ -1068,18 +1472,30 @@ bricklayer_json_unbox <- function(x) {
     return(.rmbl_json_parse_date(out[["$date"]]))
   out
 }
+#' Says whether a list is unnamed and holds atomic vectors of one length.
+#' @param x The value.
+#' @return TRUE or FALSE.
 #' @noRd
 .rmbl_json_is_matrixlist <- function(x) {
   isTRUE(is.list(x) && length(x) && is.null(names(x)) &&
          all(vapply(x, is.atomic, logical(1))) &&
          .rmbl_json_all_identical(vapply(x, length, integer(1))))
 }
+#' Says whether a list is unnamed and holds arrays of one shape.
+#' @param x The value.
+#' @return TRUE or FALSE.
 #' @noRd
 .rmbl_json_is_arraylist <- function(x) {
   isTRUE(is.list(x) && length(x) && is.null(names(x)) &&
          all(vapply(x, is.array, logical(1))) &&
          .rmbl_json_all_identical(vapply(x, function(y) paste(dim(y), collapse = "-"), character(1))))
 }
+#' Turns a list of records into a data frame, as jsonlite's simplifyDataFrame() does.
+#' @param recordlist The list of records.
+#' @param columns The column names; when missing, every name that occurs in a record.
+#' @param flatten Whether nested data frames are flattened.
+#' @param simplifyMatrix Whether nested arrays become matrices.
+#' @return A data frame.
 #' @noRd
 .rmbl_json_simplify_df <- function(recordlist, columns, flatten, simplifyMatrix) {
   if (!length(recordlist)) {
@@ -1091,14 +1507,34 @@ bricklayer_json_unbox <- function(x) {
     return(data.frame(matrix(nrow = length(recordlist), ncol = 0)))
   if (missing(columns))
     columns <- unique(unlist(lapply(recordlist, names), recursive = FALSE, use.names = FALSE))
+  # each column from the records' values laid end to end, the first value of a repeated key: a
+  # match() per record and column was the hot loop on sparse records (audit of 30bed8e, #17)
+  keys <- lapply(recordlist, names)
+  rid <- rep.int(seq_along(recordlist), lengths(keys))
+  keys <- unlist(keys, use.names = FALSE)
+  vals <- unlist(recordlist, recursive = FALSE, use.names = FALSE)
   columnlist <- lapply(columns, function(nm) {
-    lapply(recordlist, function(rec) {
-      k <- match(nm, names(rec))
-      if (is.na(k)) NULL else rec[[k]]
-    })
+    at <- which(keys == nm)
+    at <- at[!duplicated(rid[at])]
+    pv <- vals[at]
+    # a column of scalars and nulls (the usual case) is a vector at once, its missing cells NA: what
+    # .rmbl_json_simplify() makes of it, without a call per cell. "NA", "Inf" and the like go the
+    # long way, which decides whether they are numbers.
+    len <- lengths(pv)
+    one <- len == 1L
+    u <- if (all(len <= 1L) && all(vapply(pv[!one], is.null, NA))) {
+      unlist(pv[one], recursive = FALSE, use.names = FALSE)
+    }
+    if (is.atomic(u) && !(is.character(u) && any(u %in% c("NA", "NaN", "Inf", "-Inf")))) {
+      col <- rep(NA, length(recordlist))
+      col[rid[at][one]] <- u
+      return(col)
+    }
+    col <- vector("list", length(recordlist))
+    col[rid[at]] <- pv
+    .rmbl_json_simplify(col, simplifyVector = TRUE, simplifyDataFrame = TRUE, simplifyMatrix = FALSE,
+                        simplifySubMatrix = simplifyMatrix, flatten = flatten)
   })
-  columnlist <- lapply(columnlist, .rmbl_json_simplify, simplifyVector = TRUE, simplifyDataFrame = TRUE,
-                       simplifyMatrix = FALSE, simplifySubMatrix = simplifyMatrix, flatten = flatten)
   lens <- vapply(columnlist, function(z) if (length(dim(z)) > 1L) nrow(z) else length(z), integer(1))
   n <- unique(lens)
   if (length(n) > 1L) stop("Elements not of equal length: ", paste(lens, collapse = " "), call. = FALSE)
@@ -1132,30 +1568,105 @@ bricklayer_json_unbox <- function(x) {
 
 #' Parse JSON into R objects (jsonlite's fromJSON, natively)
 #'
-#' @param txt JSON text, a file path, or an http(s) URL.
-#' @param simplifyVector,simplifyDataFrame,simplifyMatrix,flatten as in jsonlite.
-#' @param bigint_as_char integers beyond 2^53 come
-#' back as strings.
-#' @param simplify legacy: `FALSE` turns every
+#' Reads JSON text, a JSON file or a JSON address on the web into R objects,
+#' with the same simplification rules as jsonlite's \code{fromJSON()}: an
+#' array of numbers becomes a numeric vector, an array of records a data
+#' frame, an array of equal-length arrays a matrix. The parser is this
+#' package's own, so it works without jsonlite, and it is stricter in two
+#' places that matter for provenance records: a repeated key is an error by
+#' default, and a whole number too large for a double is flagged.
+#'
+#' @details
+#' A single string shorter than 2,084 bytes that is not valid JSON is taken
+#' as a location: an \code{http(s)} address is fetched (a public \code{https}
+#' host only, redirects re-checked, 60 second timeout, body capped at 16
+#' MiB), otherwise an existing file is read. Anything else is parsed as JSON
+#' text; a character vector is joined with newlines. A connection is read to
+#' its end (and closed when this call opened it).
+#'
+#' Without simplification (\code{simplifyVector = FALSE}) objects become named
+#' lists, arrays unnamed lists, \code{null} \code{NULL}, and numbers integer
+#' or double. Whole numbers beyond \eqn{2^{53}} cannot be held exactly in a
+#' double: they are read as doubles with a warning, or kept as text with
+#' \code{bigint_as_char = TRUE}.
+#'
+#' Errors: \code{txt} not character or a connection; invalid JSON (the message
+#' gives the character offset); a repeated key under
+#' \code{duplicate_keys = "error"}; an address that is not a public
+#' \code{https} host, that cannot be reached or that answers with an HTTP
+#' error.
+#'
+#' @param txt JSON text (a character vector, joined with newlines), a file
+#' path, an \code{http(s)} URL, or a connection. A URL goes through
+#' the same check and the same transport as every other fetch in the
+#' package (public https host, redirects re-checked, body capped).
+#' @param simplifyVector Logical scalar, default \code{TRUE}: turn arrays of
+#' scalars into atomic vectors.
+#' @param simplifyDataFrame Logical scalar, default \code{simplifyVector}: turn
+#' arrays of records into data frames.
+#' @param simplifyMatrix Logical scalar, default \code{simplifyVector}: turn
+#' arrays of equal-length arrays into matrices.
+#' @param flatten Logical scalar, default \code{FALSE}. \code{TRUE} expands
+#' nested data frame columns into columns named \code{outer.inner}.
+#' @param duplicate_keys What to do with an object that repeats a key:
+#' \code{"error"} (default) refuses the document, \code{"keep"} returns both
+#' values under the repeated name, as jsonlite does.
+#' @param bigint_warn Logical scalar, default \code{TRUE}: warn (once per
+#'   document) when a whole number beyond 2^53 is read into a double; the
+#'   package's own readers of API payloads turn this off, since long numeric
+#'   identifiers are routine there.
+#' @param bigint_as_char Logical scalar, default \code{FALSE}: integers beyond
+#' 2^53 come back as strings.
+#' @param simplify Legacy, default \code{NULL}: \code{FALSE} turns every
 #' simplification off.
-#' @param ... ignored, for call compatibility.
-#' @return an R object.
-#' @examples
-#' bricklayer_json_from_json('[{"a":1,"b":"x"},{"a":2,"b":"y"}]')
-#' bricklayer_json_from_json('[[1,2],[3,4]]')
+#' @param ... Ignored, for call compatibility with jsonlite.
+#' @return An R object: a list, an atomic vector, a data frame, a matrix or
+#' \code{NULL}, depending on the JSON and the simplification options.
+#' @seealso [tojs()] for the
+#'   reverse.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#' fromjs('[{"a":1,"b":"x"},{"a":2,"b":"y"}]')
+#' fromjs('[[1,2],[3,4]]')
+#'
+#' # no simplification: nested lists exactly as in the document
+#' str(fromjs('{"a": [1, 2], "b": {"c": null}}', simplifyVector = FALSE))
+#'
+#' # from a file
+#' f <- tempfile(fileext = ".json")
+#' writeLines('[{"a":1},{"a":2,"b":"x"}]', f)
+#' fromjs(f)
+#'
+#' # a large identifier kept exactly, as text
+#' fromjs('[12345678901234567890]', bigint_as_char = TRUE)
+#'
+#' # a repeated key is refused unless asked for
+#' try(fromjs('{"a": 1, "a": 2}'))
+#' fromjs('{"a": 1, "a": 2}', duplicate_keys = "keep")
 #' @export
-bricklayer_json_from_json <- function(txt, simplifyVector = TRUE,
+fromjs <- function(txt, simplifyVector = TRUE,
                                    simplifyDataFrame = simplifyVector,
                                    simplifyMatrix = simplifyVector,
                                    flatten = FALSE, bigint_as_char = FALSE,
-                                   simplify = NULL, ...) {
+                                   simplify = NULL,
+                                   duplicate_keys = c("error", "keep"),
+                                   bigint_warn = TRUE, ...) {
   if (identical(simplify, FALSE)) simplifyVector <- simplifyDataFrame <- simplifyMatrix <- FALSE
   if (!is.character(txt) && !inherits(txt, "connection"))
     stop("Argument 'txt' must be a JSON string, URL or file.", call. = FALSE)
+  if (is.character(txt) && anyNA(txt)) stop("Argument 'txt' must be a JSON string, not NA.", call. = FALSE)
   if (is.character(txt) && length(txt) == 1L && nchar(txt, type = "bytes") < 2084 &&
       !bricklayer_json_validate(txt)) {
     if (grepl("^https?://", txt, useBytes = TRUE)) {
-      txt <- base::url(txt, headers = c(Accept = "application/json, text/*, */*"))
+      # the same gate and the same transport as every other fetch: base R's
+      # url() connected to 127.0.0.1 when asked (0.5.7 review)
+      txt <- .rmbl_check_public_url(txt, "txt")
+      tmp <- tempfile(fileext = ".json")
+      on.exit(unlink(tmp), add = TRUE)
+      res <- .bl_net(txt, .bl_http_download(txt, tmp, 60L, "Accept: application/json, text/*, */*", NULL,
+                                            16777216, FALSE))  # 16 MiB is a large JSON
+      if (res$status < 0) stop(sprintf("fromjs: %s: %s", txt, res$error), call. = FALSE)
+      if (res$status >= 400) stop(sprintf("fromjs: %s answered HTTP %d", txt, res$status), call. = FALSE)
+      txt <- file(tmp)
     } else if (file.exists(txt)) {
       txt <- file(txt)
     }
@@ -1168,49 +1679,31 @@ bricklayer_json_from_json <- function(txt, simplifyVector = TRUE,
     }
     txt <- readLines(con, warn = FALSE, encoding = "UTF-8")
   }
-  obj <- .rmbl_json_parse(txt, bigint_as_char)
+  obj <- .rmbl_json_parse(txt, bigint_as_char, bigint_warn,
+                          duplicate_keys = .rmbl_arg(duplicate_keys))
   if (any(isTRUE(simplifyVector), isTRUE(simplifyDataFrame), isTRUE(simplifyMatrix)))
     return(.rmbl_json_simplify(obj, simplifyVector = simplifyVector, simplifyDataFrame = simplifyDataFrame,
                             simplifyMatrix = simplifyMatrix, flatten = flatten))
   obj
 }
 
-#' @param json JSON text.
-#' @noRd
-bricklayer_json_parse_json <- function(json, simplifyVector = FALSE, ...) {
-  bricklayer_json_from_json(json, simplifyVector = simplifyVector, ...)
-}
-
-#' Read and write JSON files
+#' Says whether a string starts with the UTF-8 byte-order mark.
 #'
-#' @param path file path.
-#' @param simplifyVector as in jsonlite (
-#' `FALSE` by default for files).
-#' @param ... options of
-#' [bricklayer_json_from_json()] /
-#' [bricklayer_json_to_json()].
-#' @return `read_json`: the parsed object; `write_json`:
-#' `path`, invisibly.
+#' A byte-order mark is three bytes; test and strip it on the bytes so a
+#' C locale never has to translate U+FEFF to its native encoding (that
+#' translation is what raised \dQuote{unable to translate '<U+FEFF>...'} and
+#' \dQuote{invalid char string in output conversion}).
+#' @param s One string.
+#' @return TRUE or FALSE.
 #' @noRd
-bricklayer_json_read_json <- function(path, simplifyVector = FALSE, ...) {
-  bricklayer_json_from_json(file(path), simplifyVector = simplifyVector, ...)
-}
-#' @param x object to write.
-#' @noRd
-bricklayer_json_write_json <- function(x, path, ...) {
-  json <- bricklayer_json_to_json(x, ...)
-  writeLines(json, path, useBytes = TRUE)
-  invisible(path)
-}
-
-# A byte-order mark is three bytes; test and strip it on the bytes so a
-# C locale never has to translate U+FEFF to its native encoding (that
-# translation is what raised "unable to translate '<U+FEFF>...'" and
-# "invalid char string in output conversion").
 .rmbl_has_bom <- function(s) {
   r <- charToRaw(s)
   length(r) >= 3L && identical(r[1:3], as.raw(c(0xef, 0xbb, 0xbf)))
 }
+#' Removes a UTF-8 byte-order mark from the start of a string.
+#' @param s One string.
+#' @return The string without the mark, marked UTF-8.
+#' @noRd
 .rmbl_strip_bom <- function(s) {
   if (!.rmbl_has_bom(s)) return(s)
   out <- rawToChar(charToRaw(s)[-(1:3)])
@@ -1223,7 +1716,6 @@ bricklayer_json_write_json <- function(x, path, ...) {
 #' @param txt character; lines are joined with newlines.
 #' @return `TRUE`, or `FALSE` with attributes `err` and
 #' `offset`.
-
 #' @noRd
 bricklayer_json_validate <- function(txt) {
   stopifnot(is.character(txt))
@@ -1231,7 +1723,7 @@ bricklayer_json_validate <- function(txt) {
   if (.rmbl_has_bom(txt))
     return(structure(FALSE, err = "JSON string contains UTF8 byte-order-mark."))
   res <- tryCatch({
-    .rmbl_json_parse(txt)
+    .rmbl_json_parse(txt, bigint_warn = FALSE)
     TRUE
   }, error = function(e) e)
   if (isTRUE(res)) return(TRUE)
@@ -1241,363 +1733,13 @@ bricklayer_json_validate <- function(txt) {
 
 # ================================================================ text tools
 
-# Tokenizer + yajl-style generator: strings are decoded and re-encoded
-# (so a "\u00e9" escape comes out as the character it names, and "\/" as
-# "/"), numbers are copied verbatim, and the beautifier follows yajl_gen
-# exactly (newline after every opener, ",\n" between items, ": " after
-# keys, final newline).
-#' @noRd
-.rmbl_json_reformat <- function(txt, pretty, indent_string = "    ") {
-  s <- paste(txt, collapse = "\n")
-  s <- .rmbl_strip_bom(s)
-  ch <- strsplit(s, "", fixed = TRUE)[[1]]
-  n <- length(ch)
-  i <- 1L
-  out <- character(0)
-  depth <- 0L
-  state <- "start"        # start | array_start | in_array | map_start | map_key | map_val | complete
-  stack <- character(0)
-  bad <- function(msg) stop(sprintf("%s at character %d", msg, i), call. = FALSE)
-  emit <- function(t) out <<- c(out, t)
-  need_sep <- FALSE
-  sep <- function() {
-    if (state == "map_key" || state == "in_array") {
-      if (need_sep) bad("expected ',' between values")
-      emit(",")
-      if (pretty) emit("\n")
-    } else if (state == "map_val") {
-      emit(":")
-      if (pretty) emit(" ")
-    }
-  }
-  wsp <- function() if (pretty && state != "map_val" && depth > 0L) emit(strrep(indent_string, depth))
-  atom_done <- function() {
-    state <<- switch(state, start = "complete", map_start = "map_val", map_key = "map_val",
-                     array_start = "in_array", map_val = "map_key", state)
-    need_sep <<- state %in% c("in_array", "map_key")
-  }
-  skip_ws <- function() while (i <= n && (ch[i] == " " || ch[i] == "\t" || ch[i] == "\n" || ch[i] == "\r")) i <<- i + 1L
-  read_string <- function() {
-    j <- i + 1L
-    parts <- character(0)
-    st <- j
-    repeat {
-      if (j > n) bad("unterminated string")
-      c0 <- ch[j]
-      if (c0 == "\"") break
-      if (c0 == "\\") {
-        if (j > st) parts <- c(parts, paste(ch[st:(j - 1L)], collapse = ""))
-        j <- j + 1L
-        e <- ch[j]
-        if (e == "u") {
-          cp <- strtoi(paste(ch[(j + 1L):(j + 4L)], collapse = ""), 16L)
-          if (is.na(cp)) bad("invalid \\u escape")
-          j <- j + 4L
-          if (cp >= 0xD800 && cp <= 0xDBFF && j + 6L <= n && ch[j + 1L] == "\\" && ch[j + 2L] == "u") {
-            lo <- strtoi(paste(ch[(j + 3L):(j + 6L)], collapse = ""), 16L)
-            if (!is.na(lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
-              j <- j + 6L
-              cp <- 0x10000 + (cp - 0xD800) * 1024 + (lo - 0xDC00)
-            }
-          }
-          parts <- c(parts, intToUtf8(cp))
-        } else {
-          parts <- c(parts, switch(e, n = "\n", t = "\t", r = "\r", b = "\b", f = "\f", "\"" = "\"", "\\" = "\\", "/" = "/", bad("invalid escape")))
-        }
-        j <- j + 1L
-        st <- j
-        next
-      }
-      j <- j + 1L
-    }
-    if (j > st) parts <- c(parts, paste(ch[st:(j - 1L)], collapse = ""))
-    i <<- j + 1L
-    paste(parts, collapse = "")
-  }
-  encode_string <- function(v) {
-    v <- gsub("\\", "\\\\", v, fixed = TRUE)
-    v <- gsub("\"", "\\\"", v, fixed = TRUE)
-    v <- gsub("\n", "\\n", v, fixed = TRUE)
-    v <- gsub("\r", "\\r", v, fixed = TRUE)
-    v <- gsub("\t", "\\t", v, fixed = TRUE)
-    v <- gsub("\b", "\\b", v, fixed = TRUE)
-    v <- gsub("\f", "\\f", v, fixed = TRUE)
-    v <- gsub("</", "<\\/", v, fixed = TRUE)
-    for (cc in c(1:7, 11L, 14:31)) {
-      c1 <- rawToChar(as.raw(cc))
-      if (grepl(c1, v, fixed = TRUE, useBytes = TRUE)) v <- gsub(c1, sprintf("\\u%04X", cc), v, fixed = TRUE, useBytes = TRUE)
-    }
-    paste0("\"", v, "\"")
-  }
-  read_number <- function() {
-    st <- i
-    if (ch[i] == "-") i <<- i + 1L
-    if (i > n || !grepl("[0-9]", ch[i])) bad("invalid number")
-    while (i <= n && grepl("[0-9.eE+-]", ch[i])) i <<- i + 1L
-    paste(ch[st:(i - 1L)], collapse = "")
-  }
-  while (TRUE) {
-    skip_ws()
-    if (i > n) break
-    if (state == "complete") bad("trailing content")
-    c0 <- ch[i]
-    if (c0 == "{" || c0 == "[") {
-      if (state %in% c("map_key", "map_start")) bad("keys must be strings")
-      sep()
-      wsp()
-      depth <- depth + 1L
-      stack <- c(stack, state)
-      state <- if (c0 == "{") "map_start" else "array_start"
-      emit(c0)
-      if (pretty) emit("\n")
-      i <- i + 1L
-      next
-    }
-    if (c0 == "}" || c0 == "]") {
-      if ((c0 == "}" && !(state %in% c("map_start", "map_key"))) || (c0 == "]" && !(state %in% c("array_start", "in_array")))) bad("unexpected closing bracket")
-      depth <- depth - 1L
-      if (pretty) emit("\n")
-      state <- stack[length(stack)]
-      stack <- stack[-length(stack)]
-      atom_done()
-      wsp()
-      emit(c0)
-      if (pretty && state == "complete") emit("\n")
-      i <- i + 1L
-      next
-    }
-    if (c0 == ",") {
-      if (!(state %in% c("in_array", "map_key"))) bad("unexpected ','")
-      need_sep <- FALSE
-      i <- i + 1L
-      skip_ws()
-      if (i > n || ch[i] %in% c("]", "}")) bad("trailing comma")
-      next
-    }
-    if (c0 == ":") {
-      if (state != "map_val") bad("unexpected ':'")
-      i <- i + 1L
-      next
-    }
-    if (c0 == "\"") {
-      v <- read_string()
-      if (state %in% c("map_start", "map_key")) {
-        # key
-        if (state == "map_key") {
-          if (need_sep) bad("expected ',' between members")
-          emit(",")
-          if (pretty) emit("\n")
-        }
-        wsp()
-        emit(encode_string(v))
-        state <- "map_val"
-        skip_ws()
-        if (i > n || ch[i] != ":") bad("expected ':'")
-        next
-      }
-      sep()
-      wsp()
-      emit(encode_string(v))
-      atom_done()
-      if (pretty && state == "complete") emit("\n")
-      next
-    }
-    if (state %in% c("map_key", "map_start")) bad("keys must be strings")
-    if (c0 == "t" && identical(substr(s, i, i + 3L), "true")) {
-      i <- i + 4L
-      tok <- "true"
-    } else if (c0 == "f" && identical(substr(s, i, i + 4L), "false")) {
-      i <- i + 5L
-      tok <- "false"
-    } else if (c0 == "n" && identical(substr(s, i, i + 3L), "null")) {
-      i <- i + 4L
-      tok <- "null"
-    } else if (c0 == "-" || grepl("[0-9]", c0)) {
-      tok <- read_number()
-    } else {
-      bad("unexpected character")
-    }
-    sep()
-    wsp()
-    emit(tok)
-    atom_done()
-    if (pretty && state == "complete") emit("\n")
-  }
-  if (state != "complete") bad("unexpected end of input")
-  # paste() drops the encoding mark; JSON is UTF-8 by definition (RFC 8259
-  # section 8.1), so declare it. Declare, do not convert: enc2utf8() under a
-  # C locale would re-encode the bytes as Latin-1.
-  res <- paste(out, collapse = "")
-  Encoding(res) <- "UTF-8"
-  structure(res, class = "json")
-}
-
-#' Indent JSON text (jsonlite's prettify)
-#'
-#' @param txt JSON text.
-#' @param indent spaces per level (negative = tabs).
-#' @return the same JSON, indented, with a trailing newline.
-#' @noRd
-bricklayer_json_prettify <- function(txt, indent = 4) {
-  stopifnot(is.numeric(indent))
-  indent_string <- strrep(if (indent > 0) " " else "\t", as.integer(abs(indent)))
-  .rmbl_json_reformat(txt, TRUE, indent_string)
-}
-
-#' Strip whitespace from JSON text (jsonlite's minify)
-#'
-#' @param txt JSON text.
-#' @return the same JSON with no whitespace outside strings.
-#' @noRd
-bricklayer_json_minify <- function(txt) .rmbl_json_reformat(txt, FALSE)
-
-#' Expand nested data.frame columns (jsonlite's flatten)
-#'
-#' @param x a data.frame.
-#' @param recursive expand nested frames all the way down.
-#' @return a data.frame whose nested columns became outer.inner columns.
-#' @noRd
-bricklayer_json_flatten <- function(x, recursive = TRUE) {
-  stopifnot(is.data.frame(x))
-  nr <- nrow(x)
-  dfcols <- vapply(x, is.data.frame, logical(1))
-  if (!any(dfcols)) return(x)
-  x <- if (recursive) c(x[!dfcols], do.call(c, lapply(x[dfcols], bricklayer_json_flatten)))
-       else c(x[!dfcols], do.call(c, x[dfcols]))
-  class(x) <- "data.frame"
-  row.names(x) <- if (!nr) character(0) else 1:nr
-  x
-}
-
 # ================================================================ streaming
-
-#' Stream newline-delimited JSON (jsonlite's stream_in / stream_out)
-#'
-#' @param con a connection (opened in binary mode if not already
-#' open).
-#' @param handler optional function called on each
-#' simplified page.
-#' @param pagesize records per page.
-#' @param verbose print progress.
-#' @param ... passed to the simplifier / encoder.
-#' @return `stream_in`: a data.frame of all records (or nothing with a
-#' handler); `stream_out`: invisible.
-#' @noRd
-bricklayer_json_stream_in <- function(con, handler = NULL, pagesize = 500, verbose = TRUE, ...) {
-  if (!inherits(con, "connection")) stop("Argument 'con' must be a connection.", call. = FALSE)
-  count <- 0
-  pages <- list()
-  cb <- if (is.null(handler)) {
-    function(x) {
-      if (length(x)) {
-        count <<- count + length(x)
-        pages[[length(pages) + 1L]] <<- x
-      }
-    }
-  } else {
-    if (verbose) message("using a custom handler function.")
-    function(x) {
-      handler(.rmbl_json_post_process(x, ...))
-      count <<- count + length(x)
-    }
-  }
-  if (!isOpen(con, "r")) {
-    if (verbose) message("opening ", class(con)[1L], " input connection.")
-    open(con, "rb")
-    on.exit({
-      if (verbose) message("closing ", class(con)[1L], " input connection.")
-      close(con)
-    }, add = TRUE)
-  }
-  repeat {
-    page <- readLines(con, n = pagesize, encoding = "UTF-8")
-    if (length(page)) {
-      cleanpage <- Filter(nchar, page)
-      cb(lapply(cleanpage, .rmbl_json_parse))
-      if (verbose) cat("\r Found", count, "records...")
-    }
-    if (length(page) < pagesize) break
-  }
-  if (is.null(handler)) {
-    if (verbose) cat("\r Imported", count, "records. Simplifying...\n")
-    .rmbl_json_post_process(unlist(pages, FALSE, FALSE), ...)
-  } else {
-    invisible()
-  }
-}
-#' @noRd
-.rmbl_json_post_process <- function(x, simplifyVector = TRUE, simplifyDataFrame = simplifyVector,
-                                 simplifyMatrix = simplifyVector, flatten = FALSE) {
-  out <- .rmbl_json_simplify(x, simplifyVector = simplifyVector, simplifyDataFrame = simplifyDataFrame,
-                          simplifyMatrix = simplifyMatrix, flatten = flatten)
-  if (isTRUE(simplifyDataFrame)) as.data.frame(out) else out
-}
-#' @param x a data.frame to write, one record per line.
-#' @param prefix text prepended to every line (e.g.
-#' `" "` for RFC 7464).
-#' @noRd
-bricklayer_json_stream_out <- function(x, con = stdout(), pagesize = 500, verbose = TRUE, prefix = "", ...) {
-  if (!inherits(con, "connection")) stop("Argument 'con' must be a connection.", call. = FALSE)
-  stopifnot(is.data.frame(x))
-  if (!isOpen(con, "w")) {
-    if (verbose) message("opening ", class(con)[1L], " output connection.")
-    open(con, "wb")
-    on.exit({
-      if (verbose) message("closing ", class(con)[1L], " output connection.")
-      close(con)
-    }, add = TRUE)
-  }
-  nr <- nrow(x)
-  npages <- nr %/% pagesize
-  lastpage <- nr %% pagesize
-  write_page <- function(page) {
-    str <- .rmbl_json_page_lines(page, ...)
-    if (is.character(prefix) && length(prefix) && nchar(prefix)) str <- paste0(prefix[1L], str)
-    writeLines(enc2utf8(str), con = con, useBytes = TRUE)
-  }
-  for (i in seq_len(npages)) {
-    write_page(x[(pagesize * (i - 1) + 1):(pagesize * i), , drop = FALSE])
-    if (verbose) cat("\rProcessed", i * pagesize, "rows...")
-  }
-  if (lastpage) write_page(x[(nr - lastpage + 1):nr, , drop = FALSE])
-  if (verbose) cat("\rComplete! Processed total of", nr, "rows.\n")
-  invisible()
-}
-#' @noRd
-.rmbl_json_page_lines <- function(page, ...) {
-  dots <- list(...)
-  dots$pretty <- NULL
-  # each row encodes as "[{...}]"; the record is what sits inside the brackets
-  rows <- vapply(seq_len(nrow(page)), function(i) {
-    as.character(do.call(bricklayer_json_to_json, c(list(page[i, , drop = FALSE]), dots)))
-  }, character(1))
-  substr(rows, 2L, nchar(rows) - 1L)
-}
-
-#' Row-bind a list of data.frames with differing columns (jsonlite's
-#' rbind_pages)
-#'
-#' @param pages a list of data.frames (NULL entries are
-#' dropped).
-#' @return one data.frame; missing columns are filled with NA.
-#' @noRd
-bricklayer_json_rbind_pages <- function(pages) {
-  stopifnot(is.list(pages))
-  pages <- Filter(Negate(is.null), pages)
-  stopifnot(all(vapply(pages, is.data.frame, logical(1))))
-  if (!length(pages)) return(data.frame())
-  cols <- unique(unlist(lapply(pages, names)))
-  filled <- lapply(pages, function(p) {
-    for (nm in setdiff(cols, names(p))) p[[nm]] <- rep(NA, nrow(p))
-    p[cols]
-  })
-  out <- do.call(rbind, c(filled, list(make.row.names = FALSE, stringsAsFactors = FALSE)))
-  row.names(out) <- NULL
-  out
-}
 
 # ================================================================ serialize
 
+#' Turns an R object into the list `jsser()` writes: its type, attributes and value.
+#' @param obj The object.
+#' @return A list with `type`, `attributes` and `value`.
 #' @noRd
 .rmbl_json_pack <- function(obj) {
   mode <- typeof(obj)
@@ -1616,7 +1758,7 @@ bricklayer_json_rbind_pages <- function(pages) {
     environment = NULL, externalptr = NULL,
     namespace = lapply(as.list(getNamespaceInfo(obj, "spec")), bricklayer_json_unbox),
     S4 = list(class = bricklayer_json_unbox(class(obj)), package = bricklayer_json_unbox(attr(class(obj), "package"))),
-    raw = bricklayer_json_unbox(bricklayer_json_base64_enc(unclass(obj))),
+    raw = bricklayer_json_unbox(jsb64enc(unclass(obj))),
     logical = as.vector(unclass(obj), mode = "logical"),
     integer = as.vector(unclass(obj), mode = "integer"),
     numeric = , double = as.vector(unclass(obj), mode = "double"),
@@ -1625,7 +1767,7 @@ bricklayer_json_rbind_pages <- function(pages) {
     list = unname(lapply(unclass(obj), .rmbl_json_pack)),
     pairlist = unname(lapply(as.vector(obj, mode = "list"), .rmbl_json_pack)),
     closure = unname(lapply(obj, .rmbl_json_pack)),
-    builtin = , special = bricklayer_json_unbox(bricklayer_json_base64_enc(serialize(unclass(obj), NULL))),
+    builtin = , special = bricklayer_json_unbox(jsb64enc(serialize(unclass(obj), NULL))),
     language = , name = , symbol = deparse(unclass(obj)),
     expression = deparse(obj[[1L]]),
     {
@@ -1636,12 +1778,28 @@ bricklayer_json_rbind_pages <- function(pages) {
        attributes = structure(lapply(attrib, .rmbl_json_pack), names = as.character(names(attrib))),
        value = value)
 }
+#' Rebuilds an R object from the list `jsser()` wrote.
+#' @param obj The list, as parsed.
+#' @param trusted Whether code-bearing types (functions, calls, namespaces, S4 objects) may be rebuilt.
+#' @return The object.
 #' @noRd
-.rmbl_json_unpack <- function(obj) {
+.rmbl_json_unpack <- function(obj, trusted = FALSE) {
   mode <- obj$type
   if (identical(mode, "NULL")) return(NULL)
+  # unserialize() on supplied bytes, parse() on supplied text,
+  # getNamespace() (which runs a package's .onLoad) and an S4 initialize
+  # method all execute code the JSON's author chose: untrusted JSON gets
+  # data types only
+  if (!isTRUE(trusted) && mode %in% c("S4", "namespace", "closure", "special",
+                                      "builtin", "language", "expression")) {
+    stop(sprintf(paste0("jsunser() refuses to rebuild a '%s' ",
+                        "from JSON it did not write: that would run code chosen ",
+                        "by the file's author. Pass trusted = TRUE only for JSON ",
+                        "produced by jsser() in your own session."),
+                 mode), call. = FALSE)
+  }
   if (identical(mode, "S4")) {
-    data <- lapply(obj$attributes, .rmbl_json_unpack)
+    data <- lapply(obj$attributes, .rmbl_json_unpack, trusted = trusted)
     return(do.call(methods::new, c(Class = obj$value$class, data)))
   }
   vals <- obj$value
@@ -1649,21 +1807,21 @@ bricklayer_json_rbind_pages <- function(pages) {
     environment = new.env(parent = emptyenv()),
     namespace = getNamespace(obj$value$name),
     externalptr = NULL,
-    raw = bricklayer_json_base64_dec(vals),
+    raw = jsb64dec(vals),
     logical = as.logical(.rmbl_json_list_to_vec(vals)),
     integer = as.integer(.rmbl_json_list_to_vec(vals)),
     numeric = , double = as.double(.rmbl_json_list_to_vec(vals)),
     character = as.character(.rmbl_json_list_to_vec(vals)),
     complex = as.complex(.rmbl_json_list_to_vec(vals)),
-    list = , pairlist = , closure = lapply(vals, .rmbl_json_unpack),
+    list = , pairlist = , closure = lapply(vals, .rmbl_json_unpack, trusted = trusted),
     symbol = , name = if (identical(unlist(vals), "")) quote(expr = ) else as.name(unlist(vals)),
     expression = parse(text = unlist(vals)),
     language = as.call(parse(text = unlist(vals)))[[1L]],
-    special = , builtin = unserialize(bricklayer_json_base64_dec(vals)),
+    special = , builtin = unserialize(jsb64dec(vals)),
     stop("Switch falling through for encode.mode: ", mode, call. = FALSE)))
   # a missing formal comes back as the empty symbol; it must not be evaluated
   if (identical(newdata[[1L]], substitute())) return(substitute())
-  attrs <- lapply(obj$attributes, .rmbl_json_unpack)
+  attrs <- lapply(obj$attributes, .rmbl_json_unpack, trusted = trusted)
   output <- do.call("structure", c(newdata, attrs), quote = TRUE)
   if (mode == "closure") {
     f <- as.function(output)
@@ -1674,7 +1832,7 @@ bricklayer_json_rbind_pages <- function(pages) {
   output
 }
 
-#' Lossless JSON serialisation of an R object
+#' JSON serialisation of an R object, type and attributes included
 #'
 #' Writes an R object to JSON with its type and attributes alongside the
 #' value, so the round trip returns THE SAME OBJECT rather than something
@@ -1683,52 +1841,109 @@ bricklayer_json_rbind_pages <- function(pages) {
 #' package's own codec with no jsonlite dependency.
 #'
 #' Use this, not
-#' [bricklayer_json_to_json()],
+#' [tojs()],
 #' whenever the JSON has to reconstruct the object faithfully.
-#' `bricklayer_json_to_json()` writes the DATA -- which is what an API
+#' `tojs()` writes the DATA -- which is what an API
 #' or a human wants, and which loses factor levels, matrix dimensions,
 #' classes and every other attribute. These two keep them, at the cost of
 #' JSON no other tool will understand.
 #'
 #' @param x Object to serialise.
 #' @param digits Decimal digits retained for doubles (default
-#' 8, the jsonlite default). Raise it where full precision matters.
-#' @param pretty Indent the output.
-#' @param txt JSON produced by
-#' `bricklayer_json_serialize()`.
-#' @return `bricklayer_json_serialize()` returns a length-1 character
-#' vector of class `json`; `bricklayer_json_unserialize()`
+#' 8, the jsonlite default, so `1/3` is written as `0.33333333`).
+#' `digits = I(17)` writes every double exactly (17 significant digits),
+#' which makes the round trip `identical()` for doubles too; `NA`
+#' means 15 significant digits, as in jsonlite, and is not exact.
+#' A complex value with only one `NA` part comes back as `NA`, as it
+#' does in jsonlite.
+#' @param pretty Logical scalar, default \code{FALSE}: indent the output.
+#' @param txt Character scalar: JSON produced by
+#' `jsser()`.
+#' @param trusted `FALSE` (default) rebuilds data types only (vectors,
+#' lists, factors, matrices, data frames, environments, symbols) and
+#' refuses functions, calls, expressions, namespaces and S4 objects:
+#' rebuilding those runs code the JSON's author chose, through
+#' `unserialize()`, `parse()`, `getNamespace()` or an `initialize`
+#' method. Set `TRUE` only for JSON your own session produced.
+#' @return `jsser()` returns a length-1 character
+#' vector of class `json`; `jsunser()`
 #' returns the original object.
 #' @seealso
-#' [bricklayer_json_to_json()] for
-#' plain data JSON, [core_sha256()] for
+#' [tojs()] for
+#' plain data JSON, [csha256()] for
 #' fingerprinting the result.
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # A factor survives the round trip with its levels intact.
 #' f <- factor(c("b", "a", "b"), levels = c("a", "b", "c"))
-#' back <- bricklayer_json_unserialize(bricklayer_json_serialize(f))
+#' back <- jsunser(jsser(f))
 #' identical(back, f)
 #'
 #' # So does a matrix, with its dimensions.
 #' m <- matrix(1:6, nrow = 2)
-#' identical(bricklayer_json_unserialize(bricklayer_json_serialize(m)), m)
+#' identical(jsunser(jsser(m)), m)
 #'
 #' # Plain data JSON does not keep either, which is the trade-off.
-#' bricklayer_json_to_json(f)
+#' tojs(f)
 #'
 #' # Nested lists, names and NULLs round trip too.
 #' x <- list(a = 1:3, b = list(c = "x", d = NULL), e = TRUE)
-#' identical(bricklayer_json_unserialize(bricklayer_json_serialize(x)), x)
+#' identical(jsunser(jsser(x)), x)
+#'
+#' # Doubles are rounded to `digits`; I(17) keeps them exact.
+#' jsser(1/3)
+#' exact <- jsser(1/3, digits = I(17))
+#' identical(jsunser(exact), 1/3)
 #'
 #' # The serialised form is JSON, so it can be pinned like any other text.
-#' nchar(core_sha256(bricklayer_json_serialize(m)))
-#' @name rmbl_json_serialize
+#' nchar(csha256(jsser(m)))
+#'
+#' # A function is refused unless the JSON is trusted.
+#' try(jsunser(jsser(function(x) x + 1)))
+#' @name jsserdoc
 #' @export
-bricklayer_json_serialize <- function(x, digits = 8, pretty = FALSE) {
-  bricklayer_json_to_json(.rmbl_json_pack(x), digits = digits, pretty = pretty)
+jsser <- function(x, digits = 8, pretty = FALSE) {
+  tojs(.rmbl_json_pack(x), digits = digits, pretty = pretty)
 }
 
-#' @rdname rmbl_json_serialize
+#' @rdname jsserdoc
 #' @export
-bricklayer_json_unserialize <- function(txt) .rmbl_json_unpack(.rmbl_json_parse(txt))
+jsunser <- function(txt, trusted = FALSE) {
+  if (!is.character(txt) || length(txt) != 1L || is.na(txt)) {
+    stop("`txt` must be one string of JSON from jsser()", call. = FALSE)
+  }
+  obj <- .rmbl_json_parse(txt)
+  if (!is.list(obj) || is.null(names(obj))) {
+    stop("`txt` is not JSON written by jsser() (an object with a type)", call. = FALSE)
+  }
+  .rmbl_json_unpack(obj, trusted = isTRUE(trusted))
+}
 
+
+
+#' Writes the integer a decimal literal stands for.
+#'
+#' The integer a decimal literal writes, as a digit string with no leading
+#' zeros; NULL when the literal has a non-zero fractional part.
+#' @param t0 The literal, as text.
+#' @return A digit string, or NULL.
+#' @noRd
+.rmbl_json_written_integer <- function(t0) {
+  t <- sub("^[-+]", "", t0)
+  parts <- strsplit(t, "[eE]")[[1L]]
+  mant <- parts[1L]
+  e <- if (length(parts) > 1L) suppressWarnings(as.integer(parts[2L])) else 0L
+  if (is.na(e)) return(NULL)
+  mp <- strsplit(mant, ".", fixed = TRUE)[[1L]]
+  digits <- paste0(mp, collapse = "")
+  frac <- if (length(mp) > 1L) nchar(mp[2L]) else 0L
+  scale <- e - frac
+  if (scale >= 0L) {
+    digits <- paste0(digits, strrep("0", scale))
+  } else {
+    cut <- substr(digits, nchar(digits) + scale + 1L, nchar(digits))
+    if (grepl("[1-9]", cut)) return(NULL)
+    digits <- substr(digits, 1L, nchar(digits) + scale)
+  }
+  digits <- sub("^0+", "", digits)
+  if (!nzchar(digits)) "0" else digits
+}

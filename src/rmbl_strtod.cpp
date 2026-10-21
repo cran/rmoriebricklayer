@@ -37,6 +37,9 @@
 
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
+
+#include "rmbl_bignum.h"
 
 namespace {
 
@@ -45,39 +48,16 @@ namespace {
  * Only what the conversion needs -- shift, compare, multiply by a
  * small value, and division with remainder.
  * ------------------------------------------------------------------ */
-typedef std::vector<uint32_t> Big;
-
-void trim(Big &a) {
-    while (a.size() > 1 && a.back() == 0) a.pop_back();
-}
+using rmbl_big::Big;
+using rmbl_big::trim;
+using rmbl_big::cmp;
+using rmbl_big::bit_length;
 
 bool is_zero(const Big &a) {
     for (size_t i = 0; i < a.size(); ++i) {
         if (a[i]) return false;
     }
     return true;
-}
-
-int cmp(const Big &a, const Big &b) {
-    const size_t n = (a.size() > b.size()) ? a.size() : b.size();
-    for (size_t i = n; i-- > 0;) {
-        const uint32_t x = (i < a.size()) ? a[i] : 0;
-        const uint32_t y = (i < b.size()) ? b[i] : 0;
-        if (x != y) return x < y ? -1 : 1;
-    }
-    return 0;
-}
-
-size_t bit_length(const Big &a) {
-    for (size_t i = a.size(); i-- > 0;) {
-        if (a[i]) {
-            uint32_t v = a[i];
-            size_t b = 0;
-            while (v) { ++b; v >>= 1; }
-            return i * 32 + b;
-        }
-    }
-    return 0;
 }
 
 void shl(Big &a, size_t bits) {
@@ -203,6 +183,17 @@ struct Parsed {
     size_t sig_digits;
 };
 
+/* does s[0, len) start with `word`, ignoring ASCII case */
+bool ci_prefix(const char *s, size_t len, const char *word) {
+    const size_t n = std::strlen(word);
+    if (len < n) return false;
+    for (size_t k = 0; k < n; ++k) {
+        const char c = (s[k] >= 'A' && s[k] <= 'Z') ? static_cast<char>(s[k] - 'A' + 'a') : s[k];
+        if (c != word[k]) return false;
+    }
+    return true;
+}
+
 /* Read the JSON (and R) number grammar, plus the specials R writes. */
 Parsed parse_decimal(const char *s, size_t len) {
     Parsed p;
@@ -221,16 +212,22 @@ Parsed parse_decimal(const char *s, size_t len) {
         p.negative = (s[i] == '-');
         ++i;
     }
-    if (i + 2 < len + 1 && (len - i) >= 3) {
-        if (std::strncmp(s + i, "Inf", 3) == 0 ||
-            std::strncmp(s + i, "inf", 3) == 0) {
-            p.is_inf = true;
-            p.valid = true;
-            return p;
-        }
-        if (std::strncmp(s + i, "NaN", 3) == 0 ||
-            std::strncmp(s + i, "nan", 3) == 0) {
-            p.is_nan = true;
+    /* the specials, spelled as R reads them (any case, "Inf" or
+     * "Infinity", "NaN"), and nothing after them but white space: "Info"
+     * and "nanny" read as Inf and NaN while as.numeric() gives NA */
+    {
+        size_t k = 0;
+        bool inf = false, nan = false;
+        if (ci_prefix(s + i, len - i, "infinity")) { inf = true; k = 8; }
+        else if (ci_prefix(s + i, len - i, "inf")) { inf = true; k = 3; }
+        else if (ci_prefix(s + i, len - i, "nan")) { nan = true; k = 3; }
+        if (inf || nan) {
+            size_t j = i + k;
+            while (j < len && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' ||
+                               s[j] == '\r')) ++j;
+            if (j != len) return p;
+            p.is_inf = inf;
+            p.is_nan = nan;
             p.valid = true;
             return p;
         }
@@ -238,6 +235,7 @@ Parsed parse_decimal(const char *s, size_t len) {
 
     bool any_digit = false;
     bool seen_nonzero = false;
+    bool sticky = false;      /* a nonzero digit past the 768 kept */
     int frac_digits = 0;
     /* integer part */
     while (i < len && s[i] >= '0' && s[i] <= '9') {
@@ -256,6 +254,7 @@ Parsed parse_decimal(const char *s, size_t len) {
                 add_small(p.mantissa, d);
                 ++p.sig_digits;
             } else {
+                if (d != 0) sticky = true;
                 ++p.exponent;
             }
         }
@@ -274,6 +273,8 @@ Parsed parse_decimal(const char *s, size_t len) {
                     add_small(p.mantissa, d);
                     ++p.sig_digits;
                     ++frac_digits;
+                } else if (d != 0) {
+                    sticky = true;
                 }
             } else {
                 /* leading zeros after the point still shift the scale */
@@ -284,6 +285,18 @@ Parsed parse_decimal(const char *s, size_t len) {
     }
     if (!any_digit) return p;
     p.exponent -= frac_digits;
+    /* Dropped digits that were not all zero put the value strictly above
+     * the kept mantissa m, and that matters when m is exactly a halfway
+     * point (ties to even would round it down). Appending one digit 1,
+     * m * 10 + 1 at one lower power of ten, is strictly between m and
+     * m + 1 at the old scale; no rounding boundary of a double (at most
+     * 767 significant digits) lies in that open interval, so the result
+     * is the one the full digit string rounds to. */
+    if (sticky) {
+        mul_small(p.mantissa, 10u);
+        add_small(p.mantissa, 1u);
+        p.exponent -= 1;
+    }
     /* exponent */
     if (i < len && (s[i] == 'e' || s[i] == 'E')) {
         ++i;
@@ -345,14 +358,10 @@ double exact_to_double(Big m, int e) {
     }
     Big q, r;
     divmod(num, den, q, r);
+    /* the shift above leaves num/den in [2^52, 2^54): one halving at most */
     while (bit_length(q) > 53) {
         shl(den, 1);
         be += 1;
-        divmod(num, den, q, r);
-    }
-    while (bit_length(q) < 53) {
-        shl(num, 1);
-        be -= 1;
         divmod(num, den, q, r);
     }
 
@@ -565,12 +574,20 @@ std::string format_g(bool neg, const char *d, int x) {
 
 extern "C" {
 
+/* one decimal number of `len` bytes, for the JSON parser's native path (rmbl_json.cpp) */
+double rmbl_strtod_bytes(const char *s, size_t len, int *ok) {
+    bool b = false;
+    const double v = convert(s, len, &b);
+    *ok = b ? 1 : 0;
+    return v;
+}
+
 /* Convert decimal strings to doubles, correctly rounded, without
  * asking the platform. NA_character_ and unparseable input give
  * NA_real_ rather than an error: this sits in a JSON parser, which
  * reports a bad document its own way. */
-SEXP C_rmbl_strtod(SEXP x) {
-    if (TYPEOF(x) != STRSXP) Rf_error("`x` must be a character vector");
+SEXP C_rmbl_strtod_impl(SEXP x) {
+    if (TYPEOF(x) != STRSXP) RMBL_ARG_ERROR("`x` must be a character vector");
     const R_xlen_t n = XLENGTH(x);
     SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
     double *o = REAL(out);
@@ -594,8 +611,8 @@ SEXP C_rmbl_strtod(SEXP x) {
  * asking the platform. Non-finite input gives NA_character_: the JSON
  * writer renders Inf, -Inf, NaN and NA its own way before it gets
  * here. */
-SEXP C_rmbl_dtoa17(SEXP x) {
-    if (TYPEOF(x) != REALSXP) Rf_error("`x` must be a double vector");
+SEXP C_rmbl_dtoa17_impl(SEXP x) {
+    if (TYPEOF(x) != REALSXP) RMBL_ARG_ERROR("`x` must be a double vector");
     const R_xlen_t n = XLENGTH(x);
     const double *v = REAL(x);
     SEXP out = PROTECT(Rf_allocVector(STRSXP, n));

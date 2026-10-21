@@ -7,16 +7,21 @@
 # looked for.
 #
 # Every method degrades to plain ASCII when the console cannot render
-# box-drawing characters, reusing the package's own to_ascii()/
-# ascii_fallback() policy rather than assuming UTF-8.
+# box-drawing characters, reusing the package's own toascii()/
+# asciifb() policy rather than assuming UTF-8.
 
-# TRUE when the connection can be trusted with non-ASCII box characters.
+#' TRUE when the connection can be trusted with non-ASCII box characters.
+#' @return TRUE or FALSE.
+#' @noRd
 .rmbl_unicode_ok <- function() {
   if (!identical(Sys.getenv("RMBL_ASCII_ONLY"), "")) return(FALSE)
   l10n <- l10n_info()
   isTRUE(l10n[["UTF-8"]])
 }
 
+#' Returns the box-drawing and status glyphs for the console, Unicode or ASCII.
+#' @return A named list of strings.
+#' @noRd
 .rmbl_glyphs <- function() {
   if (.rmbl_unicode_ok()) {
     list(h = "\u2500", tl = "\u250c", tr = "\u2510", bl = "\u2514",
@@ -28,7 +33,11 @@
   }
 }
 
-# A titled rule, e.g. "-- Drift report ----------------".
+#' A titled rule, e.g. \dQuote{-- Drift report ----------------}.
+#' @param title The title, or NULL for a plain rule.
+#' @param width The rule's width in characters.
+#' @return One string.
+#' @noRd
 .rmbl_rule <- function(title = NULL, width = 66L) {
   g <- .rmbl_glyphs()
   if (is.null(title)) return(strrep(g$h, width))
@@ -37,7 +46,11 @@
   paste0(left, strrep(g$h, pad))
 }
 
-# Fixed-width label/value lines, labels right-padded to a common width.
+#' Fixed-width label/value lines, labels right-padded to a common width.
+#' @param pairs A named list or vector of values.
+#' @param indent The number of spaces before each line.
+#' @return A character vector of lines.
+#' @noRd
 .rmbl_kv <- function(pairs, indent = 2L) {
   keys <- names(pairs)
   w <- if (length(keys)) max(nchar(keys)) else 0L
@@ -46,12 +59,21 @@
                 character(1)))
 }
 
-# One frame for every statistic that returns a classed data frame: a
-# titled rule, optional lines that qualify the table, the table without
-# row names, optional lines that follow it, a closing rule. The stock and
-# flow, rate, share, coverage and band printers all go through here, so
-# their caveats -- which are the argument each of them makes -- are laid
-# out the same way instead of rewritten per method.
+#' Prints a classed data frame inside the package's titled frame.
+#'
+#' One frame for every statistic that returns a classed data frame: a
+#' titled rule, optional lines that qualify the table, the table without
+#' row names, optional lines that follow it, a closing rule. The stock and
+#' flow, rate, share, coverage and band printers all go through here, so
+#' their caveats -- which are the argument each of them makes -- are laid
+#' out the same way instead of rewritten per method.
+#' @param title The title on the opening rule.
+#' @param df The table to print.
+#' @param notes Lines printed above the table, or NULL.
+#' @param footer Lines printed below the table, or NULL.
+#' @param ... Passed to `print.data.frame()`.
+#' @return NULL, invisibly.
+#' @noRd
 .rmbl_print_table <- function(title, df, notes = NULL, footer = NULL, ...) {
   cat(.rmbl_rule(title), "\n")
   if (length(notes)) {
@@ -69,15 +91,25 @@
   invisible(NULL)
 }
 
+#' Formats p-values for printing, \dQuote{<2e-16} for the smallest.
+#' @param p A numeric vector of p-values.
+#' @return A character vector.
+#' @noRd
 .rmbl_fmt_p <- function(p) {
   ifelse(is.na(p), "NA",
          ifelse(p < 2e-16, "<2e-16", formatC(p, format = "g", digits = 3)))
 }
 
-# A classed data frame keeps its class when columns are subset away, so
-# `result[, c("a", "b")]` still dispatches to the custom print method
-# with the columns that method needs now missing. Fall back to a plain
-# data-frame print rather than erroring on the user's subset.
+#' Prints a subset table as a plain data frame when the print method's columns are missing.
+#'
+#' A classed data frame keeps its class when columns are subset away, so
+#' `result[, c("a", "b")]` still dispatches to the custom print method
+#' with the columns that method needs now missing. Fall back to a plain
+#' data-frame print rather than erroring on the user's subset.
+#' @param x The classed data frame.
+#' @param cols The columns the print method needs.
+#' @return TRUE when the plain print was done, else FALSE.
+#' @noRd
 .rmbl_needs_cols <- function(x, cols) {
   if (all(cols %in% names(x))) return(FALSE)
   df <- x
@@ -93,7 +125,7 @@
 #' @export
 format.bricklayer_drift <- function(x, ...) {
   g <- .rmbl_glyphs()
-  verdict <- if (isTRUE(x$any_drift)) {
+  verdict <- if (isTRUE(x$anydrft)) {
     paste0(g$bad, " DRIFT DETECTED")
   } else {
     paste0(g$ok, " no drift detected")
@@ -103,8 +135,8 @@ format.bricklayer_drift <- function(x, ...) {
     paste0("  ", verdict),
     "",
     .rmbl_kv(list(
-      "reference rows" = format(x$n_reference, big.mark = ","),
-      "current rows" = format(x$n_current, big.mark = ","),
+      "reference rows" = format(x$nref, big.mark = ","),
+      "current rows" = format(x$ncur, big.mark = ","),
       "columns tested" = nrow(x$columns),
       "alpha" = x$alpha))
   )
@@ -138,7 +170,8 @@ format.bricklayer_drift <- function(x, ...) {
              paste0("  ", utils::capture.output(
                print(tbl[ord, , drop = FALSE], row.names = FALSE))))
   }
-  c(out, .rmbl_rule())
+  c(out, "", "  plot(x, what = \"columns\") draws the columns; drfthtml(x, file) writes an interactive report",
+    .rmbl_rule())
 }
 
 #' Printed reports for bricklayer objects
@@ -158,7 +191,9 @@ format.bricklayer_drift <- function(x, ...) {
 #' @param ... Ignored, present for S3 consistency.
 #' @return `format()` methods return a character vector;
 #' `print()` methods return `x` invisibly.
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#' op <- options(rmoriebricklayer.xmssidxfile = tempfile())  # keep this example's
+#' # one-time index record out of your configuration directory; leave the default in use
 #' set.seed(7)
 #' ref <- data.frame(v = stats::rnorm(200),
 #'                   g = sample(c("a", "b"), 200, TRUE))
@@ -166,35 +201,34 @@ format.bricklayer_drift <- function(x, ...) {
 #'                   g = sample(c("a", "b"), 200, TRUE))
 #'
 #' # The drift report leads with its verdict.
-#' capsule_drift(ref, cur)
+#' cpsdrft(ref, cur)
 #'
 #' # format() gives the same lines for a log file.
-#' head(format(capsule_drift(ref, cur)), 3)
+#' head(format(cpsdrft(ref, cur)), 3)
 #'
 #' # A Benford screen.
-#' benford_test(10^stats::runif(500, 0, 5))
+#' benfordtst(10^stats::runif(500, 0, 5))
 #'
 #' # Keys and signatures print without ever showing the secret seed.
-#' key <- pqc_keygen(height = 2)
+#' key <- pqckg(height = 2)
 #' key
-#' capsule_sign("a-manifest", key)
-#' @name rmbl_print_methods
+#' cpssign("a-manifest", key)
+#' options(op)
+#' @name printmeth
 #' @export
-print.bricklayer_drift <- function(x, ...) {
-  cat(format(x), sep = "\n")
-  invisible(x)
-}
+#' @method print bricklayer_drift
+print.bricklayer_drift <- .rmbl_print_via_format
 
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
 summary.bricklayer_drift <- function(object, ...) {
   cols <- object$columns
   drifted <- if (nrow(cols)) cols$column[which(isTRUE(cols$drifted) |
                                                  cols$drifted)] else
     character(0)
-  out <- list(any_drift = object$any_drift,
-              n_tested = nrow(cols),
-              n_drifted = length(drifted),
+  out <- list(anydrft = object$anydrft,
+              ntes = nrow(cols),
+              ndri = length(drifted),
               drifted = drifted,
               added = object$added,
               removed = object$removed)
@@ -205,9 +239,9 @@ summary.bricklayer_drift <- function(object, ...) {
 #' @export
 print.bricklayer_drift_summary <- function(x, ...) {
   g <- .rmbl_glyphs()
-  cat(if (isTRUE(x$any_drift)) paste0(g$bad, " drift detected") else
+  cat(if (isTRUE(x$anydrft)) paste0(g$bad, " drift detected") else
         paste0(g$ok, " no drift detected"), "\n")
-  cat(sprintf("  %d of %d columns drifted\n", x$n_drifted, x$n_tested))
+  cat(sprintf("  %d of %d columns drifted\n", x$ndri, x$ntes))
   if (length(x$drifted)) {
     cat("  drifted: ", paste(x$drifted, collapse = ", "), "\n", sep = "")
   }
@@ -252,12 +286,10 @@ format.bricklayer_benford <- function(x, ...) {
     .rmbl_rule())
 }
 
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
-print.bricklayer_benford <- function(x, ...) {
-  cat(format(x), sep = "\n")
-  invisible(x)
-}
+#' @method print bricklayer_benford
+print.bricklayer_benford <- .rmbl_print_via_format
 
 #' @export
 format.bricklayer_signing_key <- function(x, ...) {
@@ -274,12 +306,10 @@ format.bricklayer_signing_key <- function(x, ...) {
     .rmbl_rule())
 }
 
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
-print.bricklayer_signing_key <- function(x, ...) {
-  cat(format(x), sep = "\n")
-  invisible(x)
-}
+#' @method print bricklayer_signing_key
+print.bricklayer_signing_key <- .rmbl_print_via_format
 
 #' @export
 format.bricklayer_public_key <- function(x, ...) {
@@ -288,16 +318,17 @@ format.bricklayer_public_key <- function(x, ...) {
     .rmbl_rule())
 }
 
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
-print.bricklayer_public_key <- function(x, ...) {
-  cat(format(x), sep = "\n")
-  invisible(x)
-}
+#' @method print bricklayer_public_key
+print.bricklayer_public_key <- .rmbl_print_via_format
 
 #' @export
 format.bricklayer_signature <- function(x, ...) {
   pairs <- list(scheme = x$scheme)
+  if (!is.null(x$key_state)) {
+    pairs$WARNING <- "carries the signer's private key (key_state, 0.5.9 to 7703a04): the key is compromised"
+  }
   if (identical(x$scheme, "hmac")) {
     pairs$tag <- x$signature
   } else if (is.null(x$auth)) {
@@ -317,15 +348,13 @@ format.bricklayer_signature <- function(x, ...) {
   c(.rmbl_rule("Capsule signature"), .rmbl_kv(pairs), .rmbl_rule())
 }
 
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
-print.bricklayer_signature <- function(x, ...) {
-  cat(format(x), sep = "\n")
-  invisible(x)
-}
+#' @method print bricklayer_signature
+print.bricklayer_signature <- .rmbl_print_via_format
 
 #' @param object The object to summarise.
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
 summary.bricklayer_benford <- function(object, ...) {
   c(n = object$n, statistic = object$statistic, df = object$df,
@@ -344,20 +373,48 @@ summary.bricklayer_benford <- function(object, ...) {
 #' mean is not describing it. That is visible in one glance here and in no
 #' single number.
 #'
+#' How the numbers are computed. A column is numeric when `is.numeric()` is
+#' `TRUE`; every other column (character, factor, logical, `Date`, ...) is
+#' treated as categorical, and `top` is its most frequent non-missing value as
+#' text (ties broken by the order of `sort(table())`). For a numeric column,
+#' over its non-missing values: `sd` is the sample standard deviation
+#' (\eqn{n - 1}), `mad` the median absolute deviation scaled by 1.4826,
+#' `skewness` the population moment ratio \eqn{m_3 / m_2^{3/2}},
+#' `n_outliers` the count outside the Tukey fences (1.5 interquartile ranges
+#' beyond the quartiles), and the quantiles are type 7. Infinite values are
+#' counted in `ninf` (and in `nneg`, `n_distinct`) and left
+#' out
+#' of every other numeric statistic, which are taken over the finite values
+#' only: a column with an infinite value keeps a finite mean and range, and
+#' a column with no finite value has `NA` statistics. A progress bar is shown for
+#' wide tables when
+#' `options(morie.progress)` allows it. Errors when `data` is not a data
+#' frame, has no columns, or has duplicate or empty column names.
+#'
 #' @param data A data frame.
-#' @param quantiles Quantile probabilities to include for
-#' numeric columns (default the quartiles).
+#' @param qnts Numeric vector of quantile probabilities to include for
+#' numeric columns, one column each named `q` and the percentage (`q25`,
+#' `q50`, ...); default the quartiles. `NULL` or an empty vector adds none.
 #' @return A data frame of class `bricklayer_profile`, one row per
 #' column: the type, the missing count and share, the number of distinct
 #' values, and for a numeric column the counts of zero, negative and
 #' infinite values, the classical and robust centre and spread, the range,
 #' the skewness, the count outside the Tukey fences, and an
-#' [inline_hist()] sketch of its distribution. A
+#' [inlhist()] sketch of its distribution. A
 #' categorical column reports its most common value in `top` instead.
+#' The columns are `column`, `type` (the first class), `n`,
+#' `n_missing`,
+#' `pct_missing`, `n_distinct`, `nzero`, `nneg`,
+#' `ninf`,
+#' `mean`, `sd`, `median`, `mad`, `min`, `max`,
+#' `skewness`, `n_outliers`,
+#' `hist`, `top` and one per quantile; a statistic that does not apply to the
+#' column's type is `NA`. The print method formats the numbers to four
+#' significant digits and shows the histogram last.
 #' @seealso
-#' [capsule_drift()] to compare two of these,
-#' [core_moments()] for the underlying kernel.
-#' @examples
+#' [cpsdrft()] to compare two of these,
+#' [cmom()] for the underlying kernel.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' set.seed(9)
 #' df <- data.frame(
 #'   clean = stats::rnorm(100),
@@ -366,11 +423,11 @@ summary.bricklayer_benford <- function(object, ...) {
 #'   gappy = c(rep(NA, 10), stats::runif(90))
 #' )
 #'
-#' profile_columns(df)
+#' profcols(df)
 #'
 #' # The mean and the median agree on `clean` and disagree sharply on
 #' # `skewed`, which is the outlier announcing itself.
-#' p <- profile_columns(df)
+#' p <- profcols(df)
 #' p[p$column %in% c("clean", "skewed"), c("column", "mean", "median")]
 #'
 #' # The histogram column shows shape no summary number carries.
@@ -379,14 +436,31 @@ summary.bricklayer_benford <- function(object, ...) {
 #' # Zeros, negatives and infinities are counted separately, because
 #' # each breaks a different downstream computation (a log, a square
 #' # root, an average).
-#' p[, c("column", "n_zero", "n_negative", "n_infinite")]
+#' p[, c("column", "nzero", "nneg", "ninf")]
+#'
+#' # deciles instead of quartiles
+#' names(profcols(df, qnts = c(0.1, 0.9)))
+#'
+#' # a table with no columns has nothing to profile
+#' try(profcols(df[, 0]))
 #' @export
-profile_columns <- function(data, quantiles = c(0.25, 0.5, 0.75)) {
-  if (!is.data.frame(data)) stop("`data` must be a data frame", call. = FALSE)
+#' @srrstats {EA5.2} print.bricklayer_profile formats numbers with formatC(digits = 4); other print methods use
+#'   formatC or sprintf too; test-print-methods.R.
+#' @srrstats {EA5.3} The column profile has a `type` column (the first class of each column); test-print-methods.R:137.
+profcols <- function(data, qnts = c(0.25, 0.5, 0.75)) {
+  if (!is.data.frame(data)) stop("profcols: `data` must be a data frame", call. = FALSE)
+  .rmbl_df_names(data)
   if (ncol(data) == 0L) {
     stop("`data` has no columns to profile", call. = FALSE)
   }
+  qnts <- .rmbl_num(qnts, "qnts")
+  if (anyNA(qnts) || any(qnts < 0 | qnts > 1)) {
+    stop("`qnts` must be probabilities in [0, 1]", call. = FALSE)
+  }
+  pg <- blprog("profiling columns", ncol(data))
+  on.exit(pg$done(), add = TRUE)
   rows <- lapply(names(data), function(nm) {
+    pg$tick(info = nm)
     v <- data[[nm]]
     n_missing <- sum(is.na(v))
     base <- data.frame(column = nm, type = class(v)[1L], n = length(v),
@@ -396,30 +470,36 @@ profile_columns <- function(data, quantiles = c(0.25, 0.5, 0.75)) {
     if (is.numeric(v)) {
       ok <- v[!is.na(v)]
       if (length(ok) == 0L) {
-        return(cbind(base, n_distinct = 0L, n_zero = NA_integer_,
-                     n_negative = NA_integer_, n_infinite = NA_integer_,
+        return(cbind(base, n_distinct = 0L, nzero = NA_integer_,
+                     nneg = NA_integer_, ninf = NA_integer_,
                      mean = NA_real_, sd = NA_real_,
                      median = NA_real_, mad = NA_real_, min = NA_real_,
                      max = NA_real_, skewness = NA_real_,
                      n_outliers = NA_integer_, hist = NA_character_,
                      top = NA_character_, stringsAsFactors = FALSE))
       }
-      st <- .rmbl_column_stats(ok)
+      # the statistics are over the finite values: an Inf counted in
+      # ninf made the mean and the range infinite as well
+      fin <- ok[is.finite(ok)]
+      st <- if (length(fin)) .rmbl_column_stats(fin) else
+        list(mean = NA_real_, sd = NA_real_, median = NA_real_, mad = NA_real_,
+             skewness = NA_real_, lower = NA_real_, upper = NA_real_, hist = NA_character_)
       cbind(base, n_distinct = length(unique(ok)),
-            n_zero = sum(ok == 0), n_negative = sum(ok < 0),
-            n_infinite = sum(is.infinite(v)),
+            nzero = sum(ok == 0), nneg = sum(ok < 0),
+            ninf = sum(is.infinite(v)),
             mean = st$mean, sd = st$sd,
             median = st$median, mad = st$mad,
-            min = min(ok), max = max(ok), skewness = st$skewness,
-            n_outliers = sum(ok < st$lower | ok > st$upper),
+            min = if (length(fin)) min(fin) else NA_real_,
+            max = if (length(fin)) max(fin) else NA_real_, skewness = st$skewness,
+            n_outliers = if (length(fin)) sum(fin < st$lower | fin > st$upper) else NA_integer_,
             hist = st$hist, top = NA_character_,
             stringsAsFactors = FALSE)
     } else {
       ok <- as.character(v[!is.na(v)])
       top <- if (length(ok)) names(sort(table(ok), decreasing = TRUE))[1L] else
         NA_character_
-      cbind(base, n_distinct = length(unique(ok)), n_zero = NA_integer_,
-            n_negative = NA_integer_, n_infinite = NA_integer_,
+      cbind(base, n_distinct = length(unique(ok)), nzero = NA_integer_,
+            nneg = NA_integer_, ninf = NA_integer_,
             mean = NA_real_, sd = NA_real_, median = NA_real_,
             mad = NA_real_, min = NA_real_, max = NA_real_,
             skewness = NA_real_, n_outliers = NA_integer_,
@@ -427,18 +507,18 @@ profile_columns <- function(data, quantiles = c(0.25, 0.5, 0.75)) {
     }
   })
   out <- do.call(rbind, rows)
-  if (length(quantiles)) {
+  if (length(qnts)) {
     qs <- lapply(names(data), function(nm) {
       v <- data[[nm]]
-      if (is.numeric(v) && any(!is.na(v))) {
-        as.numeric(.Call(C_rmbl_quantile, as.numeric(v[!is.na(v)]),
-                         as.numeric(quantiles)))
+      if (is.numeric(v) && any(is.finite(v))) {
+        as.numeric(.Call(C_rmbl_quantile, as.numeric(v[is.finite(v)]),
+                         as.numeric(qnts)))
       } else {
-        rep(NA_real_, length(quantiles))
+        rep(NA_real_, length(qnts))
       }
     })
     qm <- do.call(rbind, qs)
-    colnames(qm) <- paste0("q", format(100 * quantiles, trim = TRUE))
+    colnames(qm) <- paste0("q", format(100 * qnts, trim = TRUE))
     out <- cbind(out, qm)
   }
   rownames(out) <- NULL
@@ -465,22 +545,27 @@ print.bricklayer_profile <- function(x, ...) {
   invisible(x)
 }
 
-# Column statistics for the describe table. Inside the package these are
-# the compiled kernels; sourced standalone in a capsule bundle (no family
-# package installed) the same definitions come from base R: population
-# skewness m3 / m2^1.5, type-7 quartiles, Tukey fences at 1.5 IQR, MAD
-# with the 1.4826 constant.
+#' Computes the column statistics of the describe table.
+#'
+#' Column statistics for the describe table. Inside the package these are
+#' the compiled kernels; sourced standalone in a capsule bundle (no family
+#' package installed) the same definitions come from base R: population
+#' skewness m3 / m2^1.5, type-7 quartiles, Tukey fences at 1.5 IQR, MAD
+#' with the 1.4826 constant.
+#' @param ok The column's non-missing values.
+#' @param native Whether the compiled kernels are there to use.
+#' @return A named list of statistics.
 #' @noRd
 .rmbl_column_stats <- function(ok,
-                               native = exists("core_moments",
+                               native = exists("cmom",
                                                mode = "function")) {
-  # bundle-scan-guarded: core_tukey_fences core_median core_mad
+  # bundle-scan-guarded: ctkyfnc cmed cmad
   if (native) {
-    m <- core_moments(ok)
-    f <- core_tukey_fences(ok)
+    m <- cmom(ok)
+    f <- ctkyfnc(ok)
     return(list(mean = m[["mean"]], sd = sqrt(m[["variance"]]),
-                skewness = m[["skewness"]], median = core_median(ok),
-                mad = core_mad(ok), lower = f[["lower"]],
+                skewness = m[["skewness"]], median = cmed(ok),
+                mad = cmad(ok), lower = f[["lower"]],
                 upper = f[["upper"]],
                 hist = if (exists(".rmbl_sparkline", mode = "function"))
                   .rmbl_sparkline(ok) else NA_character_))

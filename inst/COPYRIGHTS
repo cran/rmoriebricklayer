@@ -1,0 +1,47 @@
+rmoriebricklayer bundles small excerpts of published statistics in inst/extdata. They are not
+covered by the package's AGPL-3 licence; their owners' terms apply.
+
+inst/extdata/tps_break_enter_d14_2024.csv
+  Toronto Police Service, Public Safety Data Portal (https://data.tps.ca/), dataset
+  "Break and Enter Open Data", retrieved 2026-10-13; the 2024 occurrences in division D14,
+  one row per occurrence (built by data-raw/tps_break_enter_d14_2024.R in the source package).
+  Contains information licensed under the Open Government Licence - Toronto Police Service.
+
+inst/extdata/ocj_flow_ontario.csv, ocj_time_to_disposition.csv, ocj_dispositions.csv,
+inst/extdata/ocj_offence_groups.csv, ocj_courts.csv
+  Ontario Court of Justice, court statistics (https://www.ontariocourts.ca/ocj/statistics/),
+  editions 2012 to 2026, retrieved 2026-10-13. Published by the Court for public information;
+  copyright the Ontario Court of Justice / King's Printer for Ontario. Figures copied unaltered.
+
+inst/extdata/carbon_intensity.csv
+  Ember (2026), Yearly Electricity Data, via Our World in Data; lifecycle gCO2e/kWh; CC BY 4.0.
+  Every row carries its source and year (see ?carbon_intensity).
+
+inst/extdata/timezone_countries.csv
+  Built by tools/build_timezones.R from the IANA time zone database (zone.tab and backward),
+  which is in the public domain.
+
+inst/extdata/otis_a01_individuals.csv
+  Ontario Ministry of the Solicitor General, inmate data tables (Offender Tracking Information
+  System), published on the Ontario Data Catalogue (https://data.ontario.ca/) under the Open
+  Government Licence - Ontario.
+
+inst/extdata/indigenous_health_indicators.csv, indigenous_mental_health.csv,
+inst/extdata/indigenous_wellbeing.csv, indigenous_suicidal_ideation.csv
+  Statistics Canada, tables 13-10-0924-01, 41-10-0067-01, 41-10-0082-01 and 41-10-0021-01,
+  retrieved 2026-10-17 (built by data-raw/indigenous_mental_health.R in the source package).
+  Reproduced and distributed on an "as is" basis with the permission of Statistics Canada,
+  under the Statistics Canada Open Licence. Values unaltered.
+
+inst/extdata/indigenous_census_population.csv, indigenous_census_households.csv
+  Statistics Canada, Indigenous Population Profile, 2021 Census of Population, catalogue
+  98-510-X2021001 and 98-510-X2021016, released June 21, 2023, retrieved 2026-10-18 (built by
+  data-raw/indigenous_census.R in the source package). Reproduced and distributed on an "as is"
+  basis with the permission of Statistics Canada, under the Statistics Canada Open Licence.
+  Columns and values unaltered.
+
+inst/extdata/indigenous_life_expectancy.csv, indigenous_infant_mortality.csv
+  Statistics Canada, tables 17-10-0160-01 and 17-10-0161-01, retrieved 2026-10-18 (built by
+  data-raw/indigenous_mental_health.R in the source package). Reproduced and distributed on an
+  "as is" basis with the permission of Statistics Canada, under the Statistics Canada Open
+  Licence. Values unaltered.

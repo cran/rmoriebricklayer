@@ -1,3 +1,4 @@
+testthat::skip_on_cran()  # battery: runs in CI and locally; CRAN runs the correctness core
 # XMSS byte-compatibility with the RFC 8391 reference implementation.
 #
 # This is the check the package previously could not make. The
@@ -116,20 +117,25 @@ test_that("the signature is byte-identical to the RFC 8391 reference", {
   # the reference's own key material: seed[i] = i over 3n bytes, which
   # it splits as SK_SEED || SK_PRF || PUB_SEED
   hx <- function(a, b) paste(sprintf("%02x", a:b), collapse = "")
-  key <- pqc_keygen(10L, sk_seed = hx(0, 31), pub_seed = hx(64, 95),
-                    sk_prf = hx(32, 63))
+  key <- pqckg(10L,
+    skseed = hx(0, 31), pubseed = hx(64, 95),
+    skprf = hx(32, 63)
+  )
 
   # the root, which is the public key
   expect_identical(
     key$root,
-    "9d898033e37af48e6a116f8b15651cc26773467007ad19375d38c23c690c3483")
+    "9d898033e37af48e6a116f8b15651cc26773467007ad19375d38c23c690c3483"
+  )
 
-  sig <- capsule_sign(as.raw(c(1, 2, 3)), key)
+  xmssfgt(key)  # the reference vector is index 0 of this published key
+  sig <- cpssign(as.raw(c(1, 2, 3)), key)
 
-  # R = PRF(SK_PRF, toByte(idx, 32))
+  # R is the PRF of SK_PRF over the 32-byte index
   expect_identical(
     sig$randomizer,
-    "11c3e8f92a6565812dad1b5e748d117a17f1f9f07336cf6c1eaa3a2b77071cb2")
+    "11c3e8f92a6565812dad1b5e748d117a17f1f9f07336cf6c1eaa3a2b77071cb2"
+  )
 
   # and the wire format: idx (4 bytes, big endian) || R || WOTS sig ||
   # auth path, which for this parameter set is 4 + 32 + 2144 + 320
@@ -142,56 +148,65 @@ test_that("the signature is byte-identical to the RFC 8391 reference", {
   # R follows it
   expect_identical(substr(sig$wire, 9L, 72L), sig$randomizer)
   # then the WOTS signature, 67 chains of 32 bytes
-  expect_identical(substr(sig$wire, 73L, 72L + 2L * 67L * 32L),
-                   sig$signature)
+  expect_identical(
+    substr(sig$wire, 73L, 72L + 2L * 67L * 32L),
+    sig$signature
+  )
   # then the authentication path, one node per tree level
-  expect_identical(substr(sig$wire, 73L + 2L * 67L * 32L, 5000L),
-                   sig$auth)
+  expect_identical(
+    substr(sig$wire, 73L + 2L * 67L * 32L, 5000L),
+    sig$auth
+  )
 })
 
 test_that("the conformant signature still verifies, and still refuses", {
   hx <- function(a, b) paste(sprintf("%02x", a:b), collapse = "")
-  key <- pqc_keygen(6L, sk_seed = hx(0, 31), pub_seed = hx(64, 95),
-                    sk_prf = hx(32, 63))
+  key <- pqckg(6L,
+    skseed = hx(0, 31), pubseed = hx(64, 95),
+    skprf = hx(32, 63)
+  )
   msg <- charToRaw("a manifest")
-  sig <- capsule_sign(msg, key)
-  pub <- signing_public_key(key)
-  expect_true(capsule_verify(msg, sig, pub))
+  xmssfgt(key)  # fixed reference seeds: other tests may have signed this key
+  sig <- cpssign(msg, key)
+  pub <- signpubkey(key)
+  expect_true(cpsvrf(msg, sig, pub))
 
   # every tampering still fails -- the conformance work must not have
   # weakened what the scheme actually guarantees
-  expect_false(capsule_verify(charToRaw("a manifest."), sig, pub))
+  expect_false(cpsvrf(charToRaw("a manifest."), sig, pub))
   bad <- sig
   bad$randomizer <- paste0("00", substr(sig$randomizer, 3L, 64L))
-  expect_false(capsule_verify(msg, bad, pub))
+  expect_false(cpsvrf(msg, bad, pub))
   bad <- sig
-  bad$signature <- paste0("00", substr(sig$signature, 3L,
-                                       nchar(sig$signature)))
-  expect_false(capsule_verify(msg, bad, pub))
+  bad$signature <- paste0("00", substr(
+    sig$signature, 3L,
+    nchar(sig$signature)
+  ))
+  expect_false(cpsvrf(msg, bad, pub))
   bad <- sig
   bad$auth <- paste0("00", substr(sig$auth, 3L, nchar(sig$auth)))
-  expect_false(capsule_verify(msg, bad, pub))
+  expect_false(cpsvrf(msg, bad, pub))
   bad <- sig
   bad$index <- 1L
-  expect_false(capsule_verify(msg, bad, pub))
+  expect_false(cpsvrf(msg, bad, pub))
   badpub <- pub
   badpub$root <- paste0("00", substr(pub$root, 3L, 64L))
-  expect_false(capsule_verify(msg, sig, badpub))
+  expect_false(cpsvrf(msg, sig, badpub))
 
-  # R is part of the signature now, so a signature without one cannot be
-  # verified rather than being verified against the wrong digest
+  # R is part of the signature now, so a signature without one is not verified (FALSE, not an
+  # error: an edited object is a verification failure like any other)
   stripped <- sig
   stripped$randomizer <- NULL
-  expect_error(capsule_verify(msg, stripped, pub), "no RFC 8391 randomiser")
+  expect_false(cpsvrf(msg, stripped, pub))
 
   # and a key without SK_PRF cannot sign
   oldkey <- key
-  oldkey$sk_prf <- NULL
-  expect_error(capsule_sign(msg, oldkey), "predates the RFC 8391 randomiser")
+  oldkey$skprf <- NULL
+  expect_error(cpssign(msg, oldkey), "predates the RFC 8391 randomiser")
 
   # the randomiser is per-index, so two signatures under one key differ
-  s0 <- capsule_sign(msg, key)
-  s1 <- capsule_sign(msg, s0$key_state)
+  s0 <- sig  # index 0 is used: the next signature must come from its key state
+  s1 <- cpssign(msg, xmssadv(key, s0))
   expect_false(identical(s0$randomizer, s1$randomizer))
-  expect_true(capsule_verify(msg, s1, pub))
+  expect_true(cpsvrf(msg, s1, pub))
 })

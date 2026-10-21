@@ -24,10 +24,16 @@
 
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
+
+/* The first element of a character argument, or an error in words: every
+ * STRING_ELT(x, 0) below went through this once a length-0 or NA input
+ * reached a .Call directly (the R wrappers guard; the entry points did not). */
 
 namespace {
 
-/* 521 bits needs 17 limbs; one spare for carries during multiply. */
+/* 521 bits needs 17 limbs; a product of two needs 34, and two spare
+ * limbs take the carries during a multiply. */
 const int kMaxLimbs = 36;
 
 struct Num {
@@ -425,7 +431,7 @@ struct CurveHex {
     int bytes;
 };
 
-const CurveHex kP256 = {
+constexpr CurveHex kP256 = {
     "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
     "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
     "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b",
@@ -434,7 +440,7 @@ const CurveHex kP256 = {
     32
 };
 
-const CurveHex kP384 = {
+constexpr CurveHex kP384 = {
     "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
     "ffffffff0000000000000000ffffffff",
     "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf"
@@ -448,7 +454,7 @@ const CurveHex kP384 = {
     48
 };
 
-const CurveHex kP521 = {
+constexpr CurveHex kP521 = {
     "01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     "ffff",
@@ -467,11 +473,27 @@ const CurveHex kP521 = {
     66
 };
 
+/* Every curve parameter is exactly one field element wide, in lowercase hex, checked when the
+ * package is compiled (a constant written short once left everything mod n wrong; see
+ * load_curve()). The run-time form of this check was an error no input could reach. */
+constexpr bool hex_of_width(const char *h, size_t want) {
+    size_t i = 0;
+    for (; h[i]; ++i) {
+        if (!((h[i] >= '0' && h[i] <= '9') || (h[i] >= 'a' && h[i] <= 'f'))) return false;
+    }
+    return i == want;
+}
+constexpr bool curve_hex_ok(const CurveHex &h) {
+    return hex_of_width(h.p, static_cast<size_t>(h.bytes) * 2u) && hex_of_width(h.n, static_cast<size_t>(h.bytes) * 2u) &&
+           hex_of_width(h.b, static_cast<size_t>(h.bytes) * 2u) && hex_of_width(h.gx, static_cast<size_t>(h.bytes) * 2u) &&
+           hex_of_width(h.gy, static_cast<size_t>(h.bytes) * 2u);
+}
+static_assert(curve_hex_ok(kP256) && curve_hex_ok(kP384) && curve_hex_ok(kP521),
+              "a curve parameter is not one field element of lowercase hex");
+
+/* a digit of the constants, lowercase hex by the static_assert above */
 int hexval(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
+    return c <= '9' ? c - '0' : c - 'a' + 10;
 }
 
 void num_from_hex(Num *a, const char *h) {
@@ -500,13 +522,8 @@ bool load_curve(Curve *c, const char *name) {
      * correct -- it uses only p and b, and the published base-point
      * multiples still matched -- while everything mod n was wrong and
      * no signature verified. A length check catches in one line what
-     * cost an afternoon to find. */
-    const size_t want = static_cast<size_t>(h->bytes) * 2u;
-    if (std::strlen(h->p) != want || std::strlen(h->n) != want ||
-        std::strlen(h->b) != want || std::strlen(h->gx) != want ||
-        std::strlen(h->gy) != want) {
-        Rf_error("curve %s has a parameter of the wrong width", name);
-    }
+     * cost an afternoon to find: the static_assert on curve_hex_ok()
+     * above, when the package is compiled. */
     num_from_hex(&c->p, h->p);
     num_from_hex(&c->n, h->n);
     num_from_hex(&c->b, h->b);
@@ -544,19 +561,29 @@ extern "C" {
  * of those is load-bearing -- s = 0 or a key off the curve are the two
  * classic ways a lax verifier accepts a forgery.
  */
-SEXP C_rmbl_ecdsa_verify(SEXP curve, SEXP qx, SEXP qy, SEXP r, SEXP s,
+SEXP C_rmbl_ecdsa_verify_impl(SEXP curve, SEXP qx, SEXP qy, SEXP r, SEXP s,
                          SEXP digest) {
     if (TYPEOF(curve) != STRSXP || XLENGTH(curve) != 1) {
-        Rf_error("`curve` must be \"P-256\", \"P-384\" or \"P-521\"");
+        RMBL_ARG_ERROR("`curve` must be \"P-256\", \"P-384\" or \"P-521\"");
     }
     Curve c;
-    if (!load_curve(&c, CHAR(STRING_ELT(curve, 0)))) {
-        Rf_error("unsupported curve: %s", CHAR(STRING_ELT(curve, 0)));
+    if (!load_curve(&c, rmbl_str0(curve, "curve"))) {
+        RMBL_ARG_ERROR("unsupported curve: %s", rmbl_str0(curve, "curve"));
     }
     if (TYPEOF(qx) != RAWSXP || TYPEOF(qy) != RAWSXP ||
         TYPEOF(r) != RAWSXP || TYPEOF(s) != RAWSXP ||
         TYPEOF(digest) != RAWSXP) {
-        Rf_error("the key, signature and digest must be raw vectors");
+        RMBL_ARG_ERROR("the key, signature and digest must be raw vectors");
+    }
+    /* from_bytes keeps only the low kMaxLimbs limbs, so a longer input
+     * would be cut back silently: r' = 2^1152 + r read as r, a second
+     * valid encoding of one signature. The key coordinates are exactly
+     * one field element wide; r and s at most that (DER drops leading
+     * zeros, so shorter is fine). Anything else is not a signature. */
+    const R_xlen_t w = static_cast<R_xlen_t>(c.bytes);
+    if (XLENGTH(qx) != w || XLENGTH(qy) != w || XLENGTH(r) > w ||
+        XLENGTH(s) > w) {
+        return Rf_ScalarLogical(FALSE);
     }
     Num nqx, nqy, nr, ns, e, one;
     from_bytes(&nqx, RAW(qx), static_cast<size_t>(XLENGTH(qx)));
@@ -631,15 +658,15 @@ SEXP C_rmbl_ecdsa_verify(SEXP curve, SEXP qx, SEXP qy, SEXP r, SEXP s,
 /* The group order, so a test can multiply the base point by it and
  * confirm the result is the point at infinity -- the one check that
  * fails if the order is wrong, whatever else looks right. */
-SEXP C_rmbl_ec_order(SEXP curve) {
+SEXP C_rmbl_ec_order_impl(SEXP curve) {
     if (TYPEOF(curve) != STRSXP || XLENGTH(curve) != 1) {
-        Rf_error("`curve` must be a single string");
+        RMBL_ARG_ERROR("`curve` must be a single string");
     }
     Curve c;
-    if (!load_curve(&c, CHAR(STRING_ELT(curve, 0)))) {
-        Rf_error("unsupported curve: %s", CHAR(STRING_ELT(curve, 0)));
+    if (!load_curve(&c, rmbl_str0(curve, "curve"))) {
+        RMBL_ARG_ERROR("unsupported curve: %s", rmbl_str0(curve, "curve"));
     }
-    SEXP out = PROTECT(Rf_allocVector(RAWSXP, c.bytes));
+    SEXP out = PROTECT(rmbl::alloc_vector(RAWSXP, c.bytes));
     to_bytes(&c.n, RAW(out), static_cast<size_t>(c.bytes));
     UNPROTECT(1);
     return out;
@@ -648,15 +675,18 @@ SEXP C_rmbl_ec_order(SEXP curve) {
 /* Exposed so the curve arithmetic can be checked against the published
  * base-point multiples rather than only through a signature. TRUE in
  * `infinity` means the scalar was a multiple of the order. */
-SEXP C_rmbl_ec_mul(SEXP curve, SEXP k) {
+SEXP C_rmbl_ec_mul_impl(SEXP curve, SEXP k) {
     if (TYPEOF(curve) != STRSXP || XLENGTH(curve) != 1) {
-        Rf_error("`curve` must be a single string");
+        RMBL_ARG_ERROR("`curve` must be a single string");
     }
     Curve c;
-    if (!load_curve(&c, CHAR(STRING_ELT(curve, 0)))) {
-        Rf_error("unsupported curve: %s", CHAR(STRING_ELT(curve, 0)));
+    if (!load_curve(&c, rmbl_str0(curve, "curve"))) {
+        RMBL_ARG_ERROR("unsupported curve: %s", rmbl_str0(curve, "curve"));
     }
-    if (TYPEOF(k) != RAWSXP) Rf_error("`k` must be a raw vector");
+    if (TYPEOF(k) != RAWSXP) RMBL_ARG_ERROR("`k` must be a raw vector");
+    if (XLENGTH(k) > 4 * kMaxLimbs) {
+        RMBL_ARG_ERROR("`k` must be at most %d bytes", 4 * kMaxLimbs);
+    }
     Num nk;
     from_bytes(&nk, RAW(k), static_cast<size_t>(XLENGTH(k)));
     Point q;
@@ -664,15 +694,15 @@ SEXP C_rmbl_ec_mul(SEXP curve, SEXP k) {
     Num x, y;
     const bool inf = is_infinity(&q);
     to_affine(&x, &y, &q, &c);
-    SEXP out = PROTECT(Rf_allocVector(VECSXP, 3));
-    SEXP sx = PROTECT(Rf_allocVector(RAWSXP, c.bytes));
-    SEXP sy = PROTECT(Rf_allocVector(RAWSXP, c.bytes));
+    SEXP out = PROTECT(rmbl::alloc_vector(VECSXP, 3));
+    SEXP sx = PROTECT(rmbl::alloc_vector(RAWSXP, c.bytes));
+    SEXP sy = PROTECT(rmbl::alloc_vector(RAWSXP, c.bytes));
     to_bytes(&x, RAW(sx), static_cast<size_t>(c.bytes));
     to_bytes(&y, RAW(sy), static_cast<size_t>(c.bytes));
     SET_VECTOR_ELT(out, 0, sx);
     SET_VECTOR_ELT(out, 1, sy);
     SET_VECTOR_ELT(out, 2, Rf_ScalarLogical(inf ? TRUE : FALSE));
-    SEXP nm = PROTECT(Rf_allocVector(STRSXP, 3));
+    SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 3));
     SET_STRING_ELT(nm, 0, Rf_mkChar("x"));
     SET_STRING_ELT(nm, 1, Rf_mkChar("y"));
     SET_STRING_ELT(nm, 2, Rf_mkChar("infinity"));

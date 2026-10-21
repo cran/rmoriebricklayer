@@ -24,13 +24,18 @@
  * allocVector, ...). R's `length` macro otherwise collides with the
  * std::locale member that <complex> (pulled in by morie_core.h) drags in.
  * We use the Rf_-prefixed names throughout, so this is a no-op otherwise. */
+#ifndef R_NO_REMAP
 #define R_NO_REMAP
+#endif
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
+#include "rmbl_ct.h"
 #include <R_ext/Rdynload.h>
 #include <cstring>
 #include <cstdint>
 #include <cstddef>
+#include <cmath>
 
 #include "morie_core.h"   /* vendored canonical morie kernels (morie::core) */
 
@@ -88,6 +93,10 @@ void sha256_transform(sha256_ctx *ctx, const uint8_t data[64]) {
 
     ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+    /* the message schedule is the block expanded: for HMAC it is k0 ^ ipad, a key in all but
+     * name, and it stayed on the dead stack (review of 1.0.0, M8). Word stores: 64 per block */
+    volatile uint32_t *vm = m;
+    for (i = 0; i < 64; i++) vm[i] = 0;
 }
 
 void sha256_init(sha256_ctx *ctx) {
@@ -154,6 +163,8 @@ void sha256_final(sha256_ctx *ctx, uint8_t hash[32]) {
         hash[i*4+2] = (uint8_t)(ctx->state[i] >> 8);
         hash[i*4+3] = (uint8_t)(ctx->state[i]);
     }
+    /* the chaining value and the last block: done with, and secret when the input was */
+    rmbl_ct::wipe(ctx, sizeof *ctx);
 }
 
 }  // namespace
@@ -204,6 +215,7 @@ void rmbl_sha256_midstate(const unsigned char block[64],
     sha256_init(&ctx);
     sha256_transform(&ctx, block);
     std::memcpy(state_out, ctx.state, sizeof ctx.state);
+    rmbl_ct::wipe(&ctx, sizeof ctx);
 }
 
 /* Finish a digest that began with `prefix_blocks` blocks already
@@ -228,6 +240,37 @@ void rmbl_sha256_raw(const unsigned char *data, size_t len,
     sha256_init(&ctx);
     sha256_update(&ctx, data, len);
     sha256_final(&ctx, (uint8_t *) out);
+}
+
+/* The same digest fed in two pieces at `split`: the buffered-partial-block
+ * path of sha256_update(), which single-shot hashing never takes. */
+void rmbl_sha256_two_part(const unsigned char *data, size_t len, size_t split,
+                          unsigned char out[32]) {
+    if (split > len) split = len;
+    sha256_ctx ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, data, split);
+    sha256_update(&ctx, data + split, len - split);
+    sha256_final(&ctx, (uint8_t *) out);
+}
+
+/* SHA-224 (FIPS 180-4 section 5.3.2): the SHA-256 compression function
+ * from its own initial state, truncated to 28 bytes. A FIPS 204/205
+ * pre-hash choice. */
+void rmbl_sha224_raw(const unsigned char *data, size_t len,
+                     unsigned char out[28]) {
+    static const uint32_t kIv[8] = {
+        0xc1059ed8u, 0x367cd507u, 0x3070dd17u, 0xf70e5939u,
+        0xffc00b31u, 0x68581511u, 0x64f98fa7u, 0xbefa4fa4u
+    };
+    sha256_ctx ctx;
+    uint8_t full[32];
+    sha256_init(&ctx);
+    std::memcpy(ctx.state, kIv, sizeof kIv);
+    sha256_update(&ctx, data, len);
+    sha256_final(&ctx, full);
+    std::memcpy(out, full, 28);
+    rmbl_ct::wipe(full, sizeof full);
 }
 
 void rmbl_sha256_hex(const unsigned char *data, size_t len, char out[65]) {
@@ -272,10 +315,27 @@ void rmbl_ipw_weights(const double *treat, const double *propensity,
                                      trim_lo, trim_hi, out);
 }
 
+/* Registered for LinkingTo callers, so it must not throw: the core's interrupt hook
+ * (rmbl_core_interrupt_hook, below) throws rmbl::Interrupt on a pending Ctrl-C, which is
+ * caught here; the replicates not yet drawn are NaN, the flag tells the entry point's
+ * barrier, and with no barrier (another package's .Call) R's interrupt is raised once no C++
+ * object is alive. */
 void rmbl_bootstrap_mean(const double *x, R_xlen_t n, R_xlen_t B,
                          unsigned long long seed, double *out) {
-    morie::core::bootstrap_mean(x, static_cast<std::size_t>(n),
-                                static_cast<std::size_t>(B), seed, out);
+    bool stopped = false;
+    rmbl::kernel_call([&] {
+        try {
+            morie::core::bootstrap_mean(x, static_cast<std::size_t>(n),
+                                        static_cast<std::size_t>(B), seed, out);
+        } catch (const rmbl::Interrupt &) {
+            stopped = true;
+        }
+    });
+    if (stopped) {
+        for (R_xlen_t b = 0; b < B; ++b) out[b] = R_NaN;
+        rmbl_kernel_interrupted = 1;
+        rmbl_interrupt_raise_unbarriered();
+    }
 }
 
 double rmbl_gamma_cdf(double shape, double x) {
@@ -286,9 +346,20 @@ double rmbl_gamma_cdf(double shape, double x) {
  * exponential (O(n) recursion), 1 = Weibull, 2 = Lomax, 3 = gamma.
  * `par` is (a0, eta, p1[, p2]); the exponential takes one kernel
  * parameter and the rest take two. An infeasible parameter set returns
- * morie's sentinel (1e12) rather than erroring. */
+ * morie's sentinel (1e12) rather than erroring.
+ *
+ * This is the published C API and keeps its own layout, which differs
+ * from the fitter's (C_rmbl_hawkes_nll_grad, chwkfit()) in two ways a
+ * caller must know: the codes (here 2 = Lomax and 3 = gamma; the fitter
+ * numbers them 3 and 2), and the Lomax shape, which here is alpha in the
+ * density (alpha - 1) c^(alpha - 1) / (u + c)^alpha, so alpha > 1, and
+ * there is the shape a = alpha - 1 of a c^a / (u + c)^(a + 1). The same
+ * kernel either way: rmbl_hawkes_nll(.., 2, (a0, eta, alpha, c)) equals
+ * chwknll(.., "lomax", c(a0, eta, alpha - 1, c)), and test-linkingto.R
+ * checks it. Changing the layout would change every caller's numbers. */
 double rmbl_hawkes_nll(const double *t, R_xlen_t n, double T, int kernel,
                        const double *par, R_xlen_t npar) {
+    return rmbl::kernel_call([&]() -> double {
     const std::size_t nn = static_cast<std::size_t>(n);
     if (kernel == 0) {
         if (npar < 3) return R_NaN;
@@ -309,134 +380,348 @@ double rmbl_hawkes_nll(const double *t, R_xlen_t n, double T, int kernel,
                                                   par[2], par[3]);
     }
     return R_NaN;
+    });
 }
 
 /* ---- .Call wrappers: bricklayer's own R-facing API ---- */
 
-SEXP C_rmbl_sd(SEXP x, SEXP ddof) {
+SEXP C_rmbl_sd_impl(SEXP x, SEXP ddof) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_sd(REAL(x), XLENGTH(x), Rf_asInteger(ddof));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_euclid(SEXP a, SEXP b) {
+SEXP C_rmbl_euclid_impl(SEXP a, SEXP b) {
     a = PROTECT(Rf_coerceVector(a, REALSXP));
     b = PROTECT(Rf_coerceVector(b, REALSXP));
     if (XLENGTH(a) != XLENGTH(b)) {
         UNPROTECT(2);
-        Rf_error("a and b must have the same length");
+        rmbl::fail("a and b must have the same length");
     }
     double r = rmbl_euclid_dist(REAL(a), REAL(b), XLENGTH(a));
     UNPROTECT(2);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_normal_logpdf(SEXP x, SEXP mu, SEXP sigma) {
+SEXP C_rmbl_normal_logpdf_impl(SEXP x, SEXP mu, SEXP sigma) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double m = Rf_asReal(mu), s = Rf_asReal(sigma);
     R_xlen_t n = XLENGTH(x);
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, n));
     double *px = REAL(x), *po = REAL(out);
     for (R_xlen_t i = 0; i < n; i++) po[i] = rmbl_normal_logpdf(px[i], m, s);
     UNPROTECT(2);
     return out;
 }
 
-SEXP C_rmbl_ipw(SEXP treat, SEXP propensity, SEXP trim_lo, SEXP trim_hi) {
+SEXP C_rmbl_ipw_impl(SEXP treat, SEXP propensity, SEXP trim_lo, SEXP trim_hi) {
     treat = PROTECT(Rf_coerceVector(treat, REALSXP));
     propensity = PROTECT(Rf_coerceVector(propensity, REALSXP));
     R_xlen_t n = XLENGTH(treat);
     if (XLENGTH(propensity) != n) {
         UNPROTECT(2);
-        Rf_error("`treat` and `propensity` must have the same length");
+        rmbl::fail("`treat` and `ps` must have the same length");
     }
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, n));
     rmbl_ipw_weights(REAL(treat), REAL(propensity), n, Rf_asReal(trim_lo),
                      Rf_asReal(trim_hi), REAL(out));
     UNPROTECT(3);
     return out;
 }
 
-SEXP C_rmbl_bootstrap_mean(SEXP x, SEXP B, SEXP seed) {
+SEXP C_rmbl_bootstrap_mean_impl(SEXP x, SEXP B, SEXP seed) {
+    /* checked before the casts: a NaN, negative or fractional double cast to an integer type
+     * is undefined behaviour (a seed of -1 or NA reached `unsigned long long` that way) */
+    const double bd = Rf_asReal(B), sd = Rf_asReal(seed);
+    if (!R_FINITE(bd) || bd < 1 || bd != std::floor(bd) || bd > 4503599627370496.0)
+        rmbl::fail("`B` must be a whole number >= 1");
+    if (!R_FINITE(sd) || sd < 0 || sd != std::floor(sd) || sd >= 9007199254740992.0)
+        rmbl::fail("`seed` must be a whole number in [0, 2^53)");
     x = PROTECT(Rf_coerceVector(x, REALSXP));
-    R_xlen_t nb = (R_xlen_t) Rf_asReal(B);
-    if (nb < 1) {
-        UNPROTECT(1);
-        Rf_error("`B` must be at least 1");
-    }
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, nb));
+    R_xlen_t nb = static_cast<R_xlen_t>(bd);
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, nb));
     rmbl_bootstrap_mean(REAL(x), XLENGTH(x), nb,
-                        (unsigned long long) Rf_asReal(seed), REAL(out));
+                        static_cast<unsigned long long>(sd), REAL(out));
     UNPROTECT(2);
     return out;
 }
 
-SEXP C_rmbl_gamma_cdf(SEXP shape, SEXP x) {
+/* n draws of morie::core::bounded_draw(), the resampling index of the bootstrap and the
+ * reservoir, from mt19937_64 seeded with `seed`, as 8 little-endian bytes each: for the tests,
+ * which need a bound s near 2^64 to reach its rejection step (an index bound below 2^40 meets it
+ * once in 2^24 draws or less). `s` is a double, an integer in [1, 2^64). */
+SEXP C_rmbl_bounded_draw_impl(SEXP seed, SEXP s, SEXP n) {
+    const double sd = Rf_asReal(seed), bd = Rf_asReal(s), nd = Rf_asReal(n);
+    if (!R_FINITE(sd) || sd < 0 || sd != std::floor(sd) || sd >= 9007199254740992.0)
+        rmbl::fail("`seed` must be a whole number in [0, 2^53)");
+    if (!R_FINITE(bd) || bd < 1 || bd != std::floor(bd) || bd >= 18446744073709551616.0)
+        rmbl::fail("`s` must be a whole number in [1, 2^64)");
+    if (!R_FINITE(nd) || nd < 0 || nd != std::floor(nd) || nd > 1e6)
+        rmbl::fail("`n` must be a whole number in [0, 1e6]");
+    std::mt19937_64 rng(static_cast<std::uint64_t>(sd));
+    const std::uint64_t bound = static_cast<std::uint64_t>(bd);
+    const R_xlen_t k = static_cast<R_xlen_t>(nd);
+    SEXP out = PROTECT(rmbl::alloc_vector(RAWSXP, 8 * k));
+    for (R_xlen_t i = 0; i < k; ++i) {
+        const std::uint64_t v = morie::core::bounded_draw(rng, bound);
+        for (int b = 0; b < 8; ++b) RAW(out)[8 * i + b] = static_cast<Rbyte>(v >> (8 * b));
+    }
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP C_rmbl_gamma_cdf_impl(SEXP shape, SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double a = Rf_asReal(shape);
     R_xlen_t n = XLENGTH(x);
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
-    for (R_xlen_t i = 0; i < n; i++) REAL(out)[i] = rmbl_gamma_cdf(a, REAL(x)[i]);
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, n));
+    /* P(a, Inf) = 1, as pgamma(): the shared core's continued fraction gives NaN there */
+    for (R_xlen_t i = 0; i < n; i++) {
+        const double xi = REAL(x)[i];
+        REAL(out)[i] = xi == R_PosInf ? 1.0 : rmbl_gamma_cdf(a, xi);
+    }
     UNPROTECT(2);
     return out;
 }
 
-SEXP C_rmbl_hawkes_nll(SEXP t, SEXP T, SEXP kernel, SEXP par) {
-    t = PROTECT(Rf_coerceVector(t, REALSXP));
-    par = PROTECT(Rf_coerceVector(par, REALSXP));
-    double r = rmbl_hawkes_nll(REAL(t), XLENGTH(t), Rf_asReal(T),
-                               Rf_asInteger(kernel), REAL(par), XLENGTH(par));
-    UNPROTECT(2);
-    return Rf_ScalarReal(r);
+
+/* ---- general Hawkes routines (any baseline, analytic gradient) ----
+ * bkind 0 constant / 1 sinusoidal; kind 0 exponential, 1 Weibull, 2 gamma,
+ * 3 Lomax (the core's codes); method 0 exact, 1 sum of exponentials, 2
+ * truncated. R vectors are allocated before the core runs, so an R error
+ * cannot long-jump over a C++ destructor. */
+static int rmbl_hk_np(int kind) { return kind == 0 ? 1 : 2; }
+
+/* The kernels poll this on their quadratic passes; it throws rmbl::Interrupt,
+ * which the entry-point barrier turns into R's own interrupt after every
+ * destructor has run. Installed once, when the shared object loads. */
+static void rmbl_core_interrupt_hook() { rmbl::check_interrupt(); }
+static const bool rmbl_core_hook_installed =
+    (morie::core::interrupt_hook() = rmbl_core_interrupt_hook, true);
+
+/* An integer argument in [lo, hi], or an R error naming it: Rf_asInteger(NULL)
+ * is NA_INTEGER, which sized a std::vector by INT_MIN and ended the session. */
+static int rmbl_hk_int(SEXP x, const char *name, int lo, int hi) {
+    const int v = Rf_asInteger(x);
+    if (v == NA_INTEGER || v < lo || v > hi) {
+        RMBL_ARG_ERROR("`%s` must be an integer in %d..%d", name, lo, hi);
+    }
+    return v;
+}
+static double rmbl_hk_real(SEXP x, const char *name) {
+    const double v = Rf_asReal(x);
+    if (ISNAN(v)) RMBL_ARG_ERROR("`%s` must be a number", name);
+    return v;
+}
+static void rmbl_hk_len(SEXP x, const char *name, R_xlen_t need) {
+    if (XLENGTH(x) < need) {
+        RMBL_ARG_ERROR("`%s` must have at least %d element(s), has %d", name,
+                 static_cast<int>(need), static_cast<int>(XLENGTH(x)));
+    }
 }
 
+/* the sinusoidal baseline is integrated on a grid of a point a day: past 2^22 days (some 11,000 years)
+ * that grid is refused rather than allocated (a horizon of 2^31 was 32 GB) */
+static void rmbl_hk_grid_ok(int bk, double T) {
+    if (bk != 0 && !(T <= 4194304.0)) {
+        rmbl::fail("a sinusoidal baseline is integrated day by day: `hor` must be at most 4194304 days");
+    }
+}
 
-SEXP C_rmbl_mean(SEXP x) {
+/* The tuning of the approximate methods, checked as the R wrappers check them (the entries are
+ * reachable with .Call directly): eps = NaN silently dropped the excitation term and eps = 0 asked
+ * the truncation for an infinite window, out of memory (review of 1.0.0). soeR and soeDelta are
+ * the sum-of-exponentials window, a positive length and a fraction of it in (0, 1]. */
+static void rmbl_hk_tuning_ok(double eps, double soeR, double soeDelta) {
+    if (!(eps > 0.0 && eps < 1.0)) rmbl::fail("`eps` must be a single number in (0, 1)");
+    if (!(soeR > 0.0) || !R_FINITE(soeR)) rmbl::fail("`soeR` must be a positive finite number");
+    if (!(soeDelta > 0.0 && soeDelta <= 1.0)) rmbl::fail("`soeDelta` must be a number in (0, 1]");
+}
+
+SEXP C_rmbl_hawkes_nll_grad_impl(SEXP t, SEXP T, SEXP bkind, SEXP a, SEXP eta, SEXP kind, SEXP psi, SEXP method,
+                            SEXP eps, SEXP soeR, SEXP soeDelta, SEXP wantGrad) {
+    rmbl_hk_tuning_ok(Rf_asReal(eps), Rf_asReal(soeR), Rf_asReal(soeDelta));
+    (void) rmbl_hk_int(bkind, "bkind", 0, 1);
+    (void) rmbl_hk_int(kind, "kind", 0, 3);
+    t = PROTECT(Rf_coerceVector(t, REALSXP));
+    a = PROTECT(Rf_coerceVector(a, REALSXP));
+    psi = PROTECT(Rf_coerceVector(psi, REALSXP));
+    const int bk = Rf_asInteger(bkind), k = Rf_asInteger(kind);
+    rmbl_hk_grid_ok(bk, Rf_asReal(T));
+    const int nb = morie::core::hawkes_baseline_n(bk), np = rmbl_hk_np(k);
+    if (XLENGTH(a) != nb || XLENGTH(psi) != np) {
+        UNPROTECT(3);
+        rmbl::fail("wrong number of baseline or kernel parameters");
+    }
+    const bool wg = Rf_asLogical(wantGrad) == TRUE;
+    SEXP out = PROTECT(rmbl::alloc_vector(VECSXP, 2));
+    SEXP grad = PROTECT(rmbl::alloc_vector(REALSXP, wg ? nb + 1 + np : 0));
+    const double nll = morie::core::hawkes_nll_grad(
+        REAL(t), static_cast<std::size_t>(XLENGTH(t)), Rf_asReal(T), bk, REAL(a), Rf_asReal(eta), k, REAL(psi),
+        Rf_asInteger(method), Rf_asReal(eps), Rf_asReal(soeR), Rf_asReal(soeDelta), wg ? REAL(grad) : nullptr);
+    SET_VECTOR_ELT(out, 0, Rf_ScalarReal(nll));
+    SET_VECTOR_ELT(out, 1, grad);
+    UNPROTECT(5);
+    return out;
+}
+
+SEXP C_rmbl_hawkes_rescaled_impl(SEXP t, SEXP T, SEXP bkind, SEXP a, SEXP eta, SEXP kind, SEXP psi) {
+    const int bk = rmbl_hk_int(bkind, "bkind", 0, 2), k = rmbl_hk_int(kind, "kind", 0, 3);
+    const double Tv = rmbl_hk_real(T, "T"), etav = rmbl_hk_real(eta, "eta");
+    rmbl_hk_grid_ok(bk, Tv);
+    t = PROTECT(Rf_coerceVector(t, REALSXP));
+    a = PROTECT(Rf_coerceVector(a, REALSXP));
+    psi = PROTECT(Rf_coerceVector(psi, REALSXP));
+    rmbl_hk_len(a, "a", morie::core::hawkes_baseline_n(bk));
+    rmbl_hk_len(psi, "psi", rmbl_hk_np(k));
+    SEXP U = PROTECT(rmbl::alloc_vector(REALSXP, XLENGTH(t)));
+    morie::core::hawkes_rescaled(REAL(t), static_cast<std::size_t>(XLENGTH(t)), Tv, bk,
+                                 REAL(a), etav, k, REAL(psi), REAL(U));
+    UNPROTECT(4);
+    return U;
+}
+
+SEXP C_rmbl_hawkes_intensity_impl(SEXP t, SEXP T, SEXP bkind, SEXP a, SEXP eta, SEXP kind, SEXP psi) {
+    const int bk = rmbl_hk_int(bkind, "bkind", 0, 2), k = rmbl_hk_int(kind, "kind", 0, 3);
+    const double Tv = rmbl_hk_real(T, "T"), etav = rmbl_hk_real(eta, "eta");
+    rmbl_hk_grid_ok(bk, Tv);
+    t = PROTECT(Rf_coerceVector(t, REALSXP));
+    a = PROTECT(Rf_coerceVector(a, REALSXP));
+    psi = PROTECT(Rf_coerceVector(psi, REALSXP));
+    rmbl_hk_len(a, "a", morie::core::hawkes_baseline_n(bk));
+    rmbl_hk_len(psi, "psi", rmbl_hk_np(k));
+    SEXP lam = PROTECT(rmbl::alloc_vector(REALSXP, XLENGTH(t)));
+    morie::core::hawkes_intensity(REAL(t), static_cast<std::size_t>(XLENGTH(t)), Tv, bk,
+                                  REAL(a), etav, k, REAL(psi), REAL(lam));
+    UNPROTECT(4);
+    return lam;
+}
+
+SEXP C_rmbl_hawkes_em_pass_impl(SEXP t, SEXP lamOld, SEXP etaOld, SEXP kind, SEXP psiOld, SEXP psiNew) {
+    const int k = rmbl_hk_int(kind, "kind", 0, 3), np = rmbl_hk_np(k);
+    const double etav = rmbl_hk_real(etaOld, "etaOld");
+    t = PROTECT(Rf_coerceVector(t, REALSXP));
+    lamOld = PROTECT(Rf_coerceVector(lamOld, REALSXP));
+    psiOld = PROTECT(Rf_coerceVector(psiOld, REALSXP));
+    psiNew = PROTECT(Rf_coerceVector(psiNew, REALSXP));
+    /* lamOld is read once per event: a shorter vector is an out-of-bounds read */
+    rmbl_hk_len(lamOld, "lamOld", XLENGTH(t));
+    rmbl_hk_len(psiOld, "psiOld", np);
+    rmbl_hk_len(psiNew, "psiNew", np);
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, 2 + np));
+    double P = 0.0, dQ[2] = {0.0, 0.0};
+    const double Q = morie::core::hawkes_em_pass(REAL(t), static_cast<std::size_t>(XLENGTH(t)), REAL(lamOld),
+                                                 etav, k, REAL(psiOld), REAL(psiNew), &P, dQ);
+    REAL(out)[0] = Q;
+    REAL(out)[1] = P;
+    for (int q = 0; q < np; ++q) REAL(out)[2 + q] = dQ[q];
+    UNPROTECT(5);
+    return out;
+}
+
+SEXP C_rmbl_hawkes_cdf_sum_impl(SEXP t, SEXP T, SEXP kind, SEXP psi) {
+    const int k = rmbl_hk_int(kind, "kind", 0, 3), np = rmbl_hk_np(k);
+    const double Tv = rmbl_hk_real(T, "T");
+    t = PROTECT(Rf_coerceVector(t, REALSXP));
+    psi = PROTECT(Rf_coerceVector(psi, REALSXP));
+    rmbl_hk_len(psi, "psi", np);
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, 1 + np));
+    double g[2] = {0.0, 0.0};
+    REAL(out)[0] = morie::core::hawkes_cdf_sum(REAL(t), static_cast<std::size_t>(XLENGTH(t)), Tv, k,
+                                               REAL(psi), g);
+    for (int q = 0; q < np; ++q) REAL(out)[1 + q] = g[q];
+    UNPROTECT(3);
+    return out;
+}
+
+SEXP C_rmbl_hawkes_fit_pbfgs_impl(SEXP t, SEXP T, SEXP bkind, SEXP kind, SEXP method, SEXP eps, SEXP soeR,
+                             SEXP soeDelta, SEXP lo, SEXP hi, SEXP x0, SEXP maxiter, SEXP gtol) {
+    rmbl_hk_tuning_ok(Rf_asReal(eps), Rf_asReal(soeR), Rf_asReal(soeDelta));
+    (void) rmbl_hk_int(bkind, "bkind", 0, 1);
+    (void) rmbl_hk_int(kind, "kind", 0, 3);
+    t = PROTECT(Rf_coerceVector(t, REALSXP));
+    lo = PROTECT(Rf_coerceVector(lo, REALSXP));
+    hi = PROTECT(Rf_coerceVector(hi, REALSXP));
+    x0 = PROTECT(Rf_coerceVector(x0, REALSXP));
+    const int bk = Rf_asInteger(bkind), k = Rf_asInteger(kind);
+    rmbl_hk_grid_ok(bk, Rf_asReal(T));
+    const R_xlen_t d = morie::core::hawkes_baseline_n(bk) + 1 + rmbl_hk_np(k);
+    if (XLENGTH(lo) != d || XLENGTH(hi) != d || XLENGTH(x0) != d) {
+        UNPROTECT(4);
+        rmbl::fail("wrong number of parameters");
+    }
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, d + 2));
+    for (R_xlen_t i = 0; i < d; ++i) REAL(out)[i] = REAL(x0)[i];
+    int it = 0;
+    const double f = morie::core::hawkes_fit_pbfgs(
+        REAL(t), static_cast<std::size_t>(XLENGTH(t)), Rf_asReal(T), bk, k, Rf_asInteger(method), Rf_asReal(eps),
+        Rf_asReal(soeR), Rf_asReal(soeDelta), REAL(lo), REAL(hi), REAL(out), Rf_asInteger(maxiter), Rf_asReal(gtol),
+        &it);
+    REAL(out)[d] = f;
+    REAL(out)[d + 1] = it;
+    UNPROTECT(5);
+    return out;
+}
+
+SEXP C_rmbl_uniforms_impl(SEXP n, SEXP seed) {
+    const double nd = Rf_asReal(n), sd = Rf_asReal(seed);
+    if (!R_FINITE(nd) || nd < 0 || nd != std::floor(nd) || nd > 4503599627370496.0)
+        rmbl::fail("`n` must be a whole number >= 0");
+    if (!R_FINITE(sd) || sd < 0 || sd != std::floor(sd) || sd >= 9007199254740992.0)
+        rmbl::fail("`seed` must be a whole number in [0, 2^53)");
+    const R_xlen_t m = static_cast<R_xlen_t>(nd);
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, m));
+    morie::core::splitmix64_uniforms(static_cast<std::uint64_t>(sd), static_cast<std::size_t>(m), REAL(out));
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP C_rmbl_mean_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_mean(REAL(x), XLENGTH(x));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_mean_running(SEXP x) {
+SEXP C_rmbl_mean_running_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_mean_running(REAL(x), XLENGTH(x));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_var(SEXP x) {
+SEXP C_rmbl_var_impl(SEXP x) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double r = rmbl_var(REAL(x), XLENGTH(x));
     UNPROTECT(1);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_cor(SEXP x, SEXP y) {
+SEXP C_rmbl_cor_impl(SEXP x, SEXP y) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     y = PROTECT(Rf_coerceVector(y, REALSXP));
     if (XLENGTH(x) != XLENGTH(y)) {
         UNPROTECT(2);
-        Rf_error("x and y must have the same length");
+        rmbl::fail("x and y must have the same length");
     }
     double r = rmbl_cor_pearson(REAL(x), REAL(y), XLENGTH(x));
     UNPROTECT(2);
     return Rf_ScalarReal(r);
 }
 
-SEXP C_rmbl_normal_pdf(SEXP x, SEXP mu, SEXP sigma) {
+SEXP C_rmbl_normal_pdf_impl(SEXP x, SEXP mu, SEXP sigma) {
     x = PROTECT(Rf_coerceVector(x, REALSXP));
     double m = Rf_asReal(mu), s = Rf_asReal(sigma);
     R_xlen_t n = XLENGTH(x);
-    SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
+    SEXP out = PROTECT(rmbl::alloc_vector(REALSXP, n));
     double *px = REAL(x), *po = REAL(out);
     for (R_xlen_t i = 0; i < n; i++) po[i] = rmbl_normal_pdf(px[i], m, s);
     UNPROTECT(2);
     return out;
 }
 
-SEXP C_rmbl_sha256(SEXP x) {
+SEXP C_rmbl_sha256_impl(SEXP x) {
     const unsigned char *data;
     size_t len;
     char out[65];
@@ -449,10 +734,49 @@ SEXP C_rmbl_sha256(SEXP x) {
         data = (const unsigned char *) CHAR(s);
         len  = std::strlen((const char *) data);
     } else {
-        Rf_error("rmbl_sha256 expects a length-1 character vector or a raw vector");
+        rmbl::fail("rmbl_sha256 expects a length-1 character vector or a raw vector");
     }
     rmbl_sha256_hex(data, len, out);
     return Rf_mkString(out);
+}
+
+/* SHA-256 over input that arrives in pieces (sha256_file() reads a file 8 MB at a time): the
+ * context travels between calls as a raw vector. `state` NULL starts a digest; `chunk` (raw, or
+ * NULL) is absorbed; with `final` TRUE the result is the lowercase hex digest, otherwise the new
+ * state. The digest of the pieces is the digest of their concatenation. */
+SEXP C_rmbl_sha256_chunk_impl(SEXP state, SEXP chunk, SEXP final) {
+    sha256_ctx ctx;
+    /* the four padding bytes after `datalen` go out with the state: zeros, not stack garbage */
+    std::memset(&ctx, 0, sizeof ctx);
+    if (Rf_isNull(state)) {
+        sha256_init(&ctx);
+    } else {
+        if (TYPEOF(state) != RAWSXP || XLENGTH(state) != (R_xlen_t) sizeof ctx) {
+            rmbl::fail("`state` must be a SHA-256 state returned by an earlier call");
+        }
+        std::memcpy(&ctx, RAW(state), sizeof ctx);
+        if (ctx.datalen >= 64) rmbl::fail("`state` must be a SHA-256 state returned by an earlier call");
+    }
+    if (!Rf_isNull(chunk)) {
+        if (TYPEOF(chunk) != RAWSXP) rmbl::fail("`chunk` must be a raw vector or NULL");
+        sha256_update(&ctx, (const uint8_t *) RAW(chunk), (size_t) XLENGTH(chunk));
+    }
+    if (Rf_asLogical(final) == TRUE) {
+        uint8_t h[32];
+        char hex[65];
+        static const char digits[] = "0123456789abcdef";
+        sha256_final(&ctx, h);
+        for (int i = 0; i < 32; ++i) {
+            hex[2 * i] = digits[h[i] >> 4];
+            hex[2 * i + 1] = digits[h[i] & 15];
+        }
+        hex[64] = '\0';
+        return Rf_mkString(hex);
+    }
+    SEXP out = PROTECT(rmbl::alloc_vector(RAWSXP, (R_xlen_t) sizeof ctx));
+    std::memcpy(RAW(out), &ctx, sizeof ctx);
+    UNPROTECT(1);
+    return out;
 }
 
 }  // extern "C"

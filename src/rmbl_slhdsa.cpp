@@ -27,6 +27,7 @@
  */
 
 #include "rmbl_slhdsa_core.h"
+#include "rmbl_entry.h"
 #include "rmbl_prehash.h"
 
 #define SLH_NS rmbl_slhdsa_shake_128s
@@ -224,50 +225,48 @@
 /* Compile-time confirmation that each parameter set produces the sizes
  * FIPS 205 tables. A wrong derived constant would otherwise surface
  * only as a signature another implementation cannot read. */
-#define RMBL_STATIC_ASSERT(cond, tag) \
-    typedef char rmbl_slh_static_assert_##tag[(cond) ? 1 : -1]
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_128s::kSigBytes == 7856, sigshake128s);
+static_assert(rmbl_slhdsa_shake_128s::kSigBytes == 7856, "sigshake128s");
 /* the stack buffer in thash must hold the widest input any caller
  * passes, at every parameter set */
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256f::kThashMax >=
-                   32 + 32 + 35 * 32, thashmax256f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256s::kThashMax >=
-                   128 + 22 + 22 * 32, thashmax256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_128s::kPkBytes == 32, pkshake128s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_128s::kSkBytes == 64, skshake128s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_128f::kSigBytes == 17088, sigshake128f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_128f::kPkBytes == 32, pkshake128f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_128f::kSkBytes == 64, skshake128f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_192s::kSigBytes == 16224, sigshake192s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_192s::kPkBytes == 48, pkshake192s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_192s::kSkBytes == 96, skshake192s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_192f::kSigBytes == 35664, sigshake192f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_192f::kPkBytes == 48, pkshake192f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_192f::kSkBytes == 96, skshake192f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256s::kSigBytes == 29792, sigshake256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256s::kPkBytes == 64, pkshake256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256s::kSkBytes == 128, skshake256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256f::kSigBytes == 49856, sigshake256f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256f::kPkBytes == 64, pkshake256f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_shake_256f::kSkBytes == 128, skshake256f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_128s::kSigBytes == 7856, sigsha2128s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_128s::kPkBytes == 32, pksha2128s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_128s::kSkBytes == 64, sksha2128s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_128f::kSigBytes == 17088, sigsha2128f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_128f::kPkBytes == 32, pksha2128f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_128f::kSkBytes == 64, sksha2128f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_192s::kSigBytes == 16224, sigsha2192s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_192s::kPkBytes == 48, pksha2192s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_192s::kSkBytes == 96, sksha2192s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_192f::kSigBytes == 35664, sigsha2192f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_192f::kPkBytes == 48, pksha2192f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_192f::kSkBytes == 96, sksha2192f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256s::kSigBytes == 29792, sigsha2256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256s::kPkBytes == 64, pksha2256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256s::kSkBytes == 128, sksha2256s);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256f::kSigBytes == 49856, sigsha2256f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256f::kPkBytes == 64, pksha2256f);
-RMBL_STATIC_ASSERT(rmbl_slhdsa_sha2_256f::kSkBytes == 128, sksha2256f);
+static_assert(rmbl_slhdsa_shake_256f::kThashMax >=
+                   32 + 32 + 35 * 32, "thashmax256f");
+static_assert(rmbl_slhdsa_sha2_256s::kThashMax >=
+                   128 + 22 + 22 * 32, "thashmax256s");
+static_assert(rmbl_slhdsa_shake_128s::kPkBytes == 32, "pkshake128s");
+static_assert(rmbl_slhdsa_shake_128s::kSkBytes == 64, "skshake128s");
+static_assert(rmbl_slhdsa_shake_128f::kSigBytes == 17088, "sigshake128f");
+static_assert(rmbl_slhdsa_shake_128f::kPkBytes == 32, "pkshake128f");
+static_assert(rmbl_slhdsa_shake_128f::kSkBytes == 64, "skshake128f");
+static_assert(rmbl_slhdsa_shake_192s::kSigBytes == 16224, "sigshake192s");
+static_assert(rmbl_slhdsa_shake_192s::kPkBytes == 48, "pkshake192s");
+static_assert(rmbl_slhdsa_shake_192s::kSkBytes == 96, "skshake192s");
+static_assert(rmbl_slhdsa_shake_192f::kSigBytes == 35664, "sigshake192f");
+static_assert(rmbl_slhdsa_shake_192f::kPkBytes == 48, "pkshake192f");
+static_assert(rmbl_slhdsa_shake_192f::kSkBytes == 96, "skshake192f");
+static_assert(rmbl_slhdsa_shake_256s::kSigBytes == 29792, "sigshake256s");
+static_assert(rmbl_slhdsa_shake_256s::kPkBytes == 64, "pkshake256s");
+static_assert(rmbl_slhdsa_shake_256s::kSkBytes == 128, "skshake256s");
+static_assert(rmbl_slhdsa_shake_256f::kSigBytes == 49856, "sigshake256f");
+static_assert(rmbl_slhdsa_shake_256f::kPkBytes == 64, "pkshake256f");
+static_assert(rmbl_slhdsa_shake_256f::kSkBytes == 128, "skshake256f");
+static_assert(rmbl_slhdsa_sha2_128s::kSigBytes == 7856, "sigsha2128s");
+static_assert(rmbl_slhdsa_sha2_128s::kPkBytes == 32, "pksha2128s");
+static_assert(rmbl_slhdsa_sha2_128s::kSkBytes == 64, "sksha2128s");
+static_assert(rmbl_slhdsa_sha2_128f::kSigBytes == 17088, "sigsha2128f");
+static_assert(rmbl_slhdsa_sha2_128f::kPkBytes == 32, "pksha2128f");
+static_assert(rmbl_slhdsa_sha2_128f::kSkBytes == 64, "sksha2128f");
+static_assert(rmbl_slhdsa_sha2_192s::kSigBytes == 16224, "sigsha2192s");
+static_assert(rmbl_slhdsa_sha2_192s::kPkBytes == 48, "pksha2192s");
+static_assert(rmbl_slhdsa_sha2_192s::kSkBytes == 96, "sksha2192s");
+static_assert(rmbl_slhdsa_sha2_192f::kSigBytes == 35664, "sigsha2192f");
+static_assert(rmbl_slhdsa_sha2_192f::kPkBytes == 48, "pksha2192f");
+static_assert(rmbl_slhdsa_sha2_192f::kSkBytes == 96, "sksha2192f");
+static_assert(rmbl_slhdsa_sha2_256s::kSigBytes == 29792, "sigsha2256s");
+static_assert(rmbl_slhdsa_sha2_256s::kPkBytes == 64, "pksha2256s");
+static_assert(rmbl_slhdsa_sha2_256s::kSkBytes == 128, "sksha2256s");
+static_assert(rmbl_slhdsa_sha2_256f::kSigBytes == 49856, "sigsha2256f");
+static_assert(rmbl_slhdsa_sha2_256f::kPkBytes == 64, "pksha2256f");
+static_assert(rmbl_slhdsa_sha2_256f::kSkBytes == 128, "sksha2256f");
 
 extern "C" {
 
@@ -310,24 +309,24 @@ extern "C" {
         if (std::strcmp(name, "SLH-DSA-SHA2-256f") == 0) {   \
             namespace S = rmbl_slhdsa_sha2_256f; expr;                       \
         }                                                 \
-        Rf_error("unknown SLH-DSA parameter set: %s", name);          \
+        RMBL_ARG_ERROR("unknown SLH-DSA parameter set: %s", name);          \
     } while (0)
 
 static const char *slhdsa_set(SEXP set) {
     if (TYPEOF(set) != STRSXP || XLENGTH(set) != 1) {
-        Rf_error("`set` must be a single parameter set name");
+        RMBL_ARG_ERROR("`set` must be a single parameter set name");
     }
-    return CHAR(STRING_ELT(set, 0));
+    return rmbl_str0(set, "set");
 }
 
-SEXP C_rmbl_slhdsa_sizes(SEXP set) {
+SEXP C_rmbl_slhdsa_sizes_impl(SEXP set) {
     RMBL_SLHDSA_DISPATCH(slhdsa_set(set), {
-        SEXP out = PROTECT(Rf_allocVector(INTSXP, 4));
+        SEXP out = PROTECT(rmbl::alloc_vector(INTSXP, 4));
         INTEGER(out)[0] = S::kPkBytes;
         INTEGER(out)[1] = S::kSkBytes;
         INTEGER(out)[2] = S::kSigBytes;
         INTEGER(out)[3] = 3 * S::kN;
-        SEXP nm = PROTECT(Rf_allocVector(STRSXP, 4));
+        SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 4));
         SET_STRING_ELT(nm, 0, Rf_mkChar("public_key"));
         SET_STRING_ELT(nm, 1, Rf_mkChar("secret_key"));
         SET_STRING_ELT(nm, 2, Rf_mkChar("signature"));
@@ -338,18 +337,18 @@ SEXP C_rmbl_slhdsa_sizes(SEXP set) {
     });
 }
 
-SEXP C_rmbl_slhdsa_keypair(SEXP set, SEXP seed) {
+SEXP C_rmbl_slhdsa_keypair_impl(SEXP set, SEXP seed) {
     RMBL_SLHDSA_DISPATCH(slhdsa_set(set), {
         if (TYPEOF(seed) != RAWSXP || XLENGTH(seed) != 3 * S::kN) {
-            Rf_error("`seed` must be a raw vector of %d bytes", 3 * S::kN);
+            rmbl::fail("`seed` must be a raw vector of %d bytes", 3 * S::kN);
         }
-        SEXP pk = PROTECT(Rf_allocVector(RAWSXP, S::kPkBytes));
-        SEXP sk = PROTECT(Rf_allocVector(RAWSXP, S::kSkBytes));
+        SEXP pk = PROTECT(rmbl::alloc_vector(RAWSXP, S::kPkBytes));
+        SEXP sk = PROTECT(rmbl::alloc_vector(RAWSXP, S::kSkBytes));
         S::seed_keypair(RAW(pk), RAW(sk), RAW(seed));
-        SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
+        SEXP out = PROTECT(rmbl::alloc_vector(VECSXP, 2));
         SET_VECTOR_ELT(out, 0, pk);
         SET_VECTOR_ELT(out, 1, sk);
-        SEXP nm = PROTECT(Rf_allocVector(STRSXP, 2));
+        SEXP nm = PROTECT(rmbl::alloc_vector(STRSXP, 2));
         SET_STRING_ELT(nm, 0, Rf_mkChar("public"));
         SET_STRING_ELT(nm, 1, Rf_mkChar("secret"));
         Rf_setAttrib(out, R_NamesSymbol, nm);
@@ -358,20 +357,20 @@ SEXP C_rmbl_slhdsa_keypair(SEXP set, SEXP seed) {
     });
 }
 
-SEXP C_rmbl_slhdsa_sign(SEXP set, SEXP sk, SEXP msg, SEXP ctx,
+SEXP C_rmbl_slhdsa_sign_impl(SEXP set, SEXP sk, SEXP msg, SEXP ctx,
                         SEXP opt_rand, SEXP prehash) {
-    if (TYPEOF(msg) != RAWSXP) Rf_error("`msg` must be a raw vector");
+    if (TYPEOF(msg) != RAWSXP) rmbl::fail("`msg` must be a raw vector");
     if (TYPEOF(ctx) != RAWSXP || XLENGTH(ctx) > 255) {
-        Rf_error("`ctx` must be a raw vector of at most 255 bytes");
+        rmbl::fail("`ctx` must be a raw vector of at most 255 bytes");
     }
     RMBL_SLHDSA_DISPATCH(slhdsa_set(set), {
         if (TYPEOF(sk) != RAWSXP || XLENGTH(sk) != S::kSkBytes) {
-            Rf_error("`sk` must be a raw vector of %d bytes", S::kSkBytes);
+            rmbl::fail("`sk` must be a raw vector of %d bytes", S::kSkBytes);
         }
         if (TYPEOF(opt_rand) != RAWSXP || XLENGTH(opt_rand) != S::kN) {
-            Rf_error("`opt_rand` must be a raw vector of %d bytes", S::kN);
+            rmbl::fail("`rnd` must be a raw vector of %d bytes", S::kN);
         }
-        SEXP sig = PROTECT(Rf_allocVector(RAWSXP, S::kSigBytes));
+        SEXP sig = PROTECT(rmbl::alloc_vector(RAWSXP, S::kSigBytes));
         rmbl_prehash::Result ph;
         rmbl_prehash::apply(rmbl_prehash::name_of(prehash), RAW(msg),
                             static_cast<size_t>(XLENGTH(msg)), &ph);
@@ -389,9 +388,44 @@ SEXP C_rmbl_slhdsa_sign(SEXP set, SEXP sk, SEXP msg, SEXP ctx,
     });
 }
 
-SEXP C_rmbl_slhdsa_verify(SEXP set, SEXP pk, SEXP msg, SEXP ctx, SEXP sig,
+/* FIPS 205 slh_sign_internal / slh_verify_internal: M is signed as given,
+ * with no domain byte, context or OID in front of it. Not exported: the
+ * public interface always binds a context; these exist so the NIST ACVP
+ * "internal" vectors can check the core the public interface wraps. */
+SEXP C_rmbl_slhdsa_sign_internal_impl(SEXP set, SEXP sk, SEXP msg, SEXP opt_rand) {
+    if (TYPEOF(msg) != RAWSXP) rmbl::fail("`msg` must be a raw vector");
+    RMBL_SLHDSA_DISPATCH(slhdsa_set(set), {
+        if (TYPEOF(sk) != RAWSXP || XLENGTH(sk) != S::kSkBytes) {
+            rmbl::fail("`sk` must be a raw vector of %d bytes", S::kSkBytes);
+        }
+        if (TYPEOF(opt_rand) != RAWSXP || XLENGTH(opt_rand) != S::kN) {
+            rmbl::fail("`rnd` must be a raw vector of %d bytes", S::kN);
+        }
+        SEXP sig = PROTECT(rmbl::alloc_vector(RAWSXP, S::kSigBytes));
+        S::sign(RAW(sig), RAW(msg), static_cast<size_t>(XLENGTH(msg)), NULL, 0,
+                RAW(opt_rand), RAW(sk), NULL, 0, true);
+        UNPROTECT(1);
+        return sig;
+    });
+}
+
+SEXP C_rmbl_slhdsa_verify_internal_impl(SEXP set, SEXP pk, SEXP msg, SEXP sig) {
+    if (TYPEOF(msg) != RAWSXP) rmbl::fail("`msg` must be a raw vector");
+    RMBL_SLHDSA_DISPATCH(slhdsa_set(set), {
+        if (TYPEOF(pk) != RAWSXP || XLENGTH(pk) != S::kPkBytes ||
+            TYPEOF(sig) != RAWSXP) {
+            return Rf_ScalarLogical(FALSE);
+        }
+        const int r = S::verify(RAW(sig), static_cast<size_t>(XLENGTH(sig)),
+                                RAW(msg), static_cast<size_t>(XLENGTH(msg)),
+                                NULL, 0, RAW(pk), NULL, 0, true);
+        return Rf_ScalarLogical(r == 0);
+    });
+}
+
+SEXP C_rmbl_slhdsa_verify_impl(SEXP set, SEXP pk, SEXP msg, SEXP ctx, SEXP sig,
                           SEXP prehash) {
-    if (TYPEOF(msg) != RAWSXP) Rf_error("`msg` must be a raw vector");
+    if (TYPEOF(msg) != RAWSXP) rmbl::fail("`msg` must be a raw vector");
     if (TYPEOF(ctx) != RAWSXP || XLENGTH(ctx) > 255) {
         return Rf_ScalarLogical(FALSE);
     }

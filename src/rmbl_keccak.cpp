@@ -26,6 +26,12 @@
 
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_entry.h"
+#include "rmbl_ct.h"
+
+/* The first element of a character argument, or an error in words: every
+ * STRING_ELT(x, 0) below went through this once a length-0 or NA input
+ * reached a .Call directly (the R wrappers guard; the entry points did not). */
 
 namespace {
 
@@ -150,28 +156,9 @@ void keccak_f1600(uint64_t a[25]) {
     }
 }
 
-inline uint64_t load64(const unsigned char *p) {
-    uint64_t v = 0;
-    for (int i = 0; i < 8; ++i) v |= static_cast<uint64_t>(p[i]) << (8 * i);
-    return v;
-}
-
-inline void store64(unsigned char *p, uint64_t v) {
-    for (int i = 0; i < 8; ++i) p[i] = static_cast<unsigned char>(v >> (8 * i));
-}
-
 }  // namespace
 
-/* The sponge state, exposed so ML-DSA can squeeze incrementally rather
- * than asking for a fixed output length up front -- its rejection
- * sampling does not know in advance how many bytes it will need. */
-struct RmblKeccak {
-    uint64_t s[25];
-    size_t rate;        /* bytes absorbed per permutation */
-    unsigned char pad;  /* domain separation byte */
-    size_t pos;         /* bytes buffered in the current block */
-    bool squeezing;
-};
+#include "rmbl_keccak.h"
 
 extern "C" {
 
@@ -246,10 +233,14 @@ void rmbl_keccak_squeeze(RmblKeccak *st, unsigned char *out, size_t len) {
 }
 
 /* One-shot forms. SHAKE uses the 0x1f domain byte and SHA-3 uses 0x06;
- * the rate is 200 - 2 * (security strength in bytes). */
+ * the rate is 200 - 2 * (security strength in bytes). The state is wiped
+ * on the way out: Keccak-f is a permutation, so a state left on the stack
+ * runs backwards to whatever was absorbed (ML-KEM's d, m' and K, an
+ * ML-DSA key seed; review of 1.0.0, M8). */
 void rmbl_shake128(unsigned char *out, size_t outlen,
                    const unsigned char *in, size_t inlen) {
     RmblKeccak st;
+    rmbl_ct::Guard wipe_st(&st, sizeof st);
     rmbl_keccak_init(&st, 168, 0x1f);
     rmbl_keccak_absorb(&st, in, inlen);
     rmbl_keccak_squeeze(&st, out, outlen);
@@ -258,6 +249,7 @@ void rmbl_shake128(unsigned char *out, size_t outlen,
 void rmbl_shake256(unsigned char *out, size_t outlen,
                    const unsigned char *in, size_t inlen) {
     RmblKeccak st;
+    rmbl_ct::Guard wipe_st(&st, sizeof st);
     rmbl_keccak_init(&st, 136, 0x1f);
     rmbl_keccak_absorb(&st, in, inlen);
     rmbl_keccak_squeeze(&st, out, outlen);
@@ -266,14 +258,34 @@ void rmbl_shake256(unsigned char *out, size_t outlen,
 void rmbl_sha3_256(unsigned char out[32], const unsigned char *in,
                    size_t inlen) {
     RmblKeccak st;
+    rmbl_ct::Guard wipe_st(&st, sizeof st);
     rmbl_keccak_init(&st, 136, 0x06);
     rmbl_keccak_absorb(&st, in, inlen);
     rmbl_keccak_squeeze(&st, out, 32);
 }
 
+void rmbl_sha3_224(unsigned char out[28], const unsigned char *in,
+                   size_t inlen) {
+    RmblKeccak st;
+    rmbl_ct::Guard wipe_st(&st, sizeof st);
+    rmbl_keccak_init(&st, 144, 0x06);
+    rmbl_keccak_absorb(&st, in, inlen);
+    rmbl_keccak_squeeze(&st, out, 28);
+}
+
+void rmbl_sha3_384(unsigned char out[48], const unsigned char *in,
+                   size_t inlen) {
+    RmblKeccak st;
+    rmbl_ct::Guard wipe_st(&st, sizeof st);
+    rmbl_keccak_init(&st, 104, 0x06);
+    rmbl_keccak_absorb(&st, in, inlen);
+    rmbl_keccak_squeeze(&st, out, 48);
+}
+
 void rmbl_sha3_512(unsigned char out[64], const unsigned char *in,
                    size_t inlen) {
     RmblKeccak st;
+    rmbl_ct::Guard wipe_st(&st, sizeof st);
     rmbl_keccak_init(&st, 72, 0x06);
     rmbl_keccak_absorb(&st, in, inlen);
     rmbl_keccak_squeeze(&st, out, 64);
@@ -281,19 +293,24 @@ void rmbl_sha3_512(unsigned char out[64], const unsigned char *in,
 
 /* R entry points, for testing the primitive directly against the
  * published vectors. */
-SEXP C_rmbl_shake(SEXP which, SEXP x, SEXP outlen) {
+SEXP C_rmbl_shake_impl(SEXP which, SEXP x, SEXP outlen) {
     const int w = Rf_asInteger(which);
-    const R_xlen_t n = Rf_asInteger(outlen);
-    if (n < 0) Rf_error("`outlen` must be non-negative");
-    std::vector<unsigned char> in;
-    if (TYPEOF(x) == RAWSXP) {
-        in.assign(RAW(x), RAW(x) + XLENGTH(x));
-    } else {
-        SEXP sx = PROTECT(Rf_coerceVector(x, STRSXP));
-        const char *s = CHAR(STRING_ELT(sx, 0));
-        in.assign(s, s + std::strlen(s));
-        UNPROTECT(1);
+    const int nl = Rf_asInteger(outlen);
+    if (nl == NA_INTEGER || nl < 0) rmbl::fail("`outlen` must be non-negative");
+    /* 16 MiB is far beyond any digest or seed expansion; a 2 GB request
+     * was one allocation away from std::terminate() */
+    if (nl > (1 << 24)) rmbl::fail("`outlen` above 16 MiB is refused");
+    const R_xlen_t n = nl;
+    /* every rmbl::fail() before the std::vectors below exist */
+    if (w != 128 && w != 256 && w != 3256 && w != 3512) {
+        rmbl::fail("unknown function selector");
     }
+    SEXP sx = PROTECT(TYPEOF(x) == RAWSXP ? x : Rf_coerceVector(x, STRSXP));
+    const char *sxs = TYPEOF(sx) == RAWSXP ? NULL : rmbl_str0(sx, "x");
+    std::vector<unsigned char> in;
+    if (TYPEOF(sx) == RAWSXP) in.assign(RAW(sx), RAW(sx) + XLENGTH(sx));
+    else in.assign(sxs, sxs + std::strlen(sxs));
+    UNPROTECT(1);
     std::vector<unsigned char> out(static_cast<size_t>(n));
     if (w == 128) {
         rmbl_shake128(out.data(), out.size(), in.data(), in.size());
@@ -302,13 +319,11 @@ SEXP C_rmbl_shake(SEXP which, SEXP x, SEXP outlen) {
     } else if (w == 3256) {
         out.resize(32);
         rmbl_sha3_256(out.data(), in.data(), in.size());
-    } else if (w == 3512) {
+    } else {
         out.resize(64);
         rmbl_sha3_512(out.data(), in.data(), in.size());
-    } else {
-        Rf_error("unknown function selector");
     }
-    SEXP res = PROTECT(Rf_allocVector(RAWSXP, static_cast<R_xlen_t>(out.size())));
+    SEXP res = PROTECT(rmbl::alloc_vector(RAWSXP, static_cast<R_xlen_t>(out.size())));
     if (!out.empty()) std::memcpy(RAW(res), out.data(), out.size());
     UNPROTECT(1);
     return res;

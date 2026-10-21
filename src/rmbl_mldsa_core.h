@@ -25,28 +25,29 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include <R.h>
 #include <Rinternals.h>
+#include "rmbl_ct.h"
+#if defined(RMBL_MLDSA_DECLASSIFY) && !defined(RMBL_MASKED_DECLASSIFY)
+#define RMBL_MASKED_DECLASSIFY(ptr, len) RMBL_MLDSA_DECLASSIFY(ptr, len)
+#endif
+#include "rmbl_masked.h"
 
-/* the FIPS 202 sponge from rmbl_keccak.cpp */
-struct RmblKeccak {
-    uint64_t s[25];
-    size_t rate;
-    unsigned char pad;
-    size_t pos;
-    bool squeezing;
-};
-extern "C" void rmbl_keccak_init(RmblKeccak *, size_t, unsigned char);
-extern "C" void rmbl_keccak_absorb(RmblKeccak *, const unsigned char *,
-                                   size_t);
-extern "C" void rmbl_keccak_finalize(RmblKeccak *);
-extern "C" void rmbl_keccak_squeeze(RmblKeccak *, unsigned char *,
-                                    size_t);
+#include "rmbl_keccak.h"
 extern "C" void rmbl_shake256(unsigned char *, size_t,
                               const unsigned char *, size_t);
 
 namespace rmbl_mldsa_core {
+
+/* sign_mu() gives up rather than loop forever: a length-correct but corrupt
+ * secret key (s1 / s2 outside +-eta, or a rejection loop that never
+ * accepts) is reported, not spun on until the user kills R. */
+const int kMaxSignAttempts = 1024;
+const char *const kSignFailed =
+    "ML-DSA signing failed: the secret key is malformed (its coefficients "
+    "are out of range or no candidate signature was accepted)";
 
 
 const int32_t kQ = 8380417;

@@ -9,20 +9,28 @@
 # missingness -- and those require EM, since the likelihood has no
 # closed form once the pattern of observation varies by row.
 
-# ML estimates of a multivariate normal mean and covariance from data
-# with missing entries, by expectation-maximisation (Dempster, Laird &
-# Rubin 1977; the MVN case is Little & Rubin 2002 ch. 11).
-#
-# E-step: for each row, the missing entries are replaced by their
-#   conditional expectation given the observed ones, and the conditional
-#   COVARIANCE of those entries is accumulated separately. Imputing the
-#   conditional mean alone and then taking a sample covariance is the
-#   classic error -- it understates the variance, because it treats an
-#   estimate as if it were an observation.
-# M-step: the completed first and second moments give the next estimates.
-#
-# Returns the estimates plus the iteration count, or NULL when the
-# problem is degenerate.
+#' Estimates a multivariate normal mean and covariance from incomplete data by EM.
+#'
+#' ML estimates of a multivariate normal mean and covariance from data
+#' with missing entries, by expectation-maximisation (Dempster, Laird &
+#' Rubin 1977; the MVN case is Little & Rubin 2002 ch. 11).
+#'
+#' E-step: for each row, the missing entries are replaced by their
+#'   conditional expectation given the observed ones, and the conditional
+#'   COVARIANCE of those entries is accumulated separately. Imputing the
+#'   conditional mean alone and then taking a sample covariance is the
+#'   classic error -- it understates the variance, because it treats an
+#'   estimate as if it were an observation.
+#' M-step: the completed first and second moments give the next estimates.
+#'
+#' Returns the estimates plus the iteration count, or NULL when the
+#' problem is degenerate.
+#' @param X A numeric matrix with missing entries as NA.
+#' @param max_iter The largest number of EM iterations.
+#' @param tol The change in the estimates that ends the iterations.
+#' @param ridge The eigenvalue floor passed to .rmbl_make_pd().
+#' @return A list with `mu`, `sigma` and `iterations`, or NULL.
+#' @noRd
 .rmbl_em_mvn <- function(X, max_iter = 500L, tol = 1e-7, ridge = 1e-8) {
   n <- nrow(X)
   p <- ncol(X)
@@ -45,8 +53,11 @@
   }
 
   iter <- 0L
+  pg <- blprog("EM (normal, missing data)", 0)
+  on.exit(pg$done(), add = TRUE)
   for (it in seq_len(max_iter)) {
     iter <- it
+    pg$update(info = sprintf("iteration %d", it))
     T1 <- numeric(p)              # accumulated first moments
     T2 <- matrix(0, p, p)         # accumulated second moments
     for (i in seq_len(n)) {
@@ -86,9 +97,15 @@
   list(mu = mu, sigma = S, iterations = iter)
 }
 
-# Nudge a symmetric matrix to positive definiteness by flooring its
-# eigenvalues. EM can land on a numerically indefinite estimate on the
-# way to convergence, and inverting that would end the run.
+#' Makes a symmetric matrix positive definite by flooring its eigenvalues.
+#'
+#' Nudge a symmetric matrix to positive definiteness by flooring its
+#' eigenvalues. EM can land on a numerically indefinite estimate on the
+#' way to convergence, and inverting that would end the run.
+#' @param S A square matrix.
+#' @param ridge The relative eigenvalue floor.
+#' @return The symmetrised matrix, with its eigenvalues floored when needed.
+#' @noRd
 .rmbl_make_pd <- function(S, ridge = 1e-8) {
   S <- (S + t(S)) / 2
   ev <- tryCatch(eigen(S, symmetric = TRUE), error = function(e) NULL)
@@ -101,6 +118,7 @@
 
 #' Little's test for data missing completely at random
 #'
+#' @description
 #' Tests the MCAR assumption: that whether a value is missing is unrelated
 #' to any value in the data, observed or not.
 #'
@@ -108,9 +126,11 @@
 #' Dropping incomplete rows is unbiased under MCAR and biased otherwise;
 #' mean imputation understates variance under MCAR and distorts the centre
 #' as well otherwise. A small p-value here says the easy options are not
-#' available.
+#' available. Run it on the numeric columns of a table before deciding
+#' how to handle its missing values.
 #'
-#' # How it works
+#' @details
+#' ## How it works
 #'
 #' Rows are grouped by their pattern of missingness. If missingness is
 #' unrelated to the values, then each pattern's observed-variable means
@@ -127,7 +147,7 @@
 #' complete-case estimates, which would already embed the bias the test is
 #' looking for.
 #'
-#' # What it cannot do
+#' ## What it cannot do
 #'
 #' A large p-value is NOT evidence that the data are MCAR; it is a failure
 #' to detect a departure, and the test has little power on small samples or
@@ -145,31 +165,54 @@
 #' otherwise return a statistic governed by that floor instead of by the
 #' data.
 #'
+#' ## Practicalities
+#'
+#' Columns that are entirely missing and rows with no observed value are
+#' dropped before the test. The EM loop is written in R and visits every
+#' row on every iteration, so it takes about \eqn{n \times} iterations
+#' small matrix solves: seconds for a few thousand rows and a handful of
+#' columns, longer for large tables. A progress indicator is shown in an
+#' interactive session. If EM has not converged after `maxit`
+#' iterations the last estimates are used; `iterations` then equals
+#' `maxit`.
+#'
+#' Errors: `data` neither a data frame nor a matrix; fewer than two
+#' numeric columns, or fewer than two usable rows or columns after the
+#' drops; collinear or constant columns (smallest covariance eigenvalue at
+#' most \eqn{10^{-8}} times the largest); EM estimates that cannot be
+#' inverted. Non-numeric columns are dropped with a warning.
+#'
 #' @param data A data frame or numeric matrix. Non-numeric
 #' columns are dropped with a warning, since the statistic is defined on
 #' moments.
-#' @param max_iter Maximum EM iterations (default 500).
-#' @param tol Convergence tolerance on the largest parameter
-#' change (default 1e-7).
+#' @param maxit Whole number, default 500: the maximum number of EM
+#' iterations.
+#' @param tol Number, default 1e-7: EM stops when the largest absolute
+#' change in any mean or covariance entry between iterations falls below
+#' it.
 #' @return A list of class `bricklayer_mcar`: `statistic`,
-#' `df`, `p_value`, `n_patterns`, `n_used`,
-#' `n_vars`, `iterations`, `mu`, `sigma`, and
-#' `note` (a caveat when the test is degenerate). With complete data
+#' `df`, `p_value`, `logpvalue` (the log of `p_value`, finite where
+#' `p_value` underflows to 0), `npat` (distinct missingness
+#' patterns), `nused` (rows in the patterns that entered the statistic),
+#' `nvars` (columns used), `iterations` (EM iterations), `mu` (named ML
+#' means), `sigma` (ML covariance matrix), and `note` (a caveat when the
+#' test is degenerate or a pattern was skipped, else `NA`). The print
+#' method gives the verdict in words. With complete data
 #' `df` is 0 and `p_value` is `NA` -- there is nothing to
 #' test.
 #' @references Little RJA (1988). A test of missing completely at random
 #' for multivariate data with missing values. *Journal of the American
-#' Statistical Association* 83(404), 1198--1202.
+#' Statistical Association* 83(404), 1198--1202.\cr
 #'   \doi{10.1080/01621459.1988.10478722}
 #'
 #' Dempster AP, Laird NM, Rubin DB (1977). Maximum likelihood from
 #' incomplete data via the EM algorithm. *Journal of the Royal Statistical
 #' Society B* 39(1), 1--38.
 #' @seealso
-#' [missingness_pattern()] for the
+#' [misspat()] for the
 #' patterns themselves,
-#' [missingness_summary()] for the rates.
-#' @examples
+#' [misssmry()] for the rates.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' set.seed(1)
 #' n <- 300
 #' x <- stats::rnorm(n)
@@ -179,31 +222,33 @@
 #' # should not reject.
 #' mcar <- data.frame(x = x, y = y)
 #' mcar$y[sample(n, 90)] <- NA
-#' mcar_test(mcar)
+#' mcartst(mcar)
 #'
 #' # Missing depending on the OTHER, observed variable: not MCAR, and
 #' # detectable, because the pattern's mean of x is shifted.
 #' mar <- data.frame(x = x, y = y)
 #' mar$y[x > 0.4] <- NA
-#' mcar_test(mar)
+#' mcartst(mar)
 #'
 #' # Complete data has one pattern and nothing to test.
-#' mcar_test(data.frame(a = x, b = y))$df
+#' mcartst(data.frame(a = x, b = y))$df
 #'
 #' # A duplicated column makes the likelihood degenerate, and is refused.
 #' dup <- mcar
 #' dup$x2 <- dup$x
-#' try(mcar_test(dup))
+#' try(mcartst(dup))
 #'
 #' # The EM estimates are the ML ones: with no missingness they are the
 #' # column means and the ML (1/n) covariance.
-#' fit <- mcar_test(data.frame(a = x, b = y))
+#' fit <- mcartst(data.frame(a = x, b = y))
 #' all.equal(fit$mu, c(mean(x), mean(y)), check.attributes = FALSE)
 #' @export
-mcar_test <- function(data, max_iter = 500L, tol = 1e-7) {
+mcartst <- function(data, maxit = 500L, tol = 1e-7) {
+  maxit <- .rmbl_scalar(maxit, "maxit", 1, 1e6, integer = TRUE)
+  tol <- .rmbl_scalar(tol, "tol", 1e-12, 1)   # zero never converged (final audit of 1.0.0)
   if (is.matrix(data)) data <- as.data.frame(data)
   if (!is.data.frame(data)) {
-    stop("`data` must be a data frame or a numeric matrix", call. = FALSE)
+    stop("mcartst: `data` must be a data frame or a numeric matrix", call. = FALSE)
   }
   num <- vapply(data, is.numeric, logical(1))
   if (!all(num)) {
@@ -228,6 +273,10 @@ mcar_test <- function(data, max_iter = 500L, tol = 1e-7) {
 
   n <- nrow(X)
   p <- ncol(X)
+  # an infinite value made the covariance non-finite and the refusal spoke of collinearity
+  if (any(is.infinite(X))) {
+    stop("`x` has infinite values, which Little's test cannot use; set them to NA first", call. = FALSE)
+  }
   if (p < 2L || n < 2L) {
     stop("too few complete columns or rows remain for Little's test",
          call. = FALSE)
@@ -257,11 +306,11 @@ mcar_test <- function(data, max_iter = 500L, tol = 1e-7) {
     stop("the columns are collinear (or one is constant), so the ",
          "multivariate normal likelihood Little's test is built on is ",
          "degenerate. Drop the redundant column(s) first -- ",
-         "top_correlations() and drop_constant() will find them.",
+         "topcors() and drpconst() will find them.",
          call. = FALSE)
   }
 
-  fit <- .rmbl_em_mvn(X, max_iter = max_iter, tol = tol)
+  fit <- .rmbl_em_mvn(X, max_iter = maxit, tol = tol)
   if (is.null(fit)) {
     stop("the EM estimates did not converge to a usable covariance: the ",
          "columns may be collinear, or a pattern may have too few rows",
@@ -279,8 +328,7 @@ mcar_test <- function(data, max_iter = 500L, tol = 1e-7) {
   for (code in patterns) {
     rows <- which(codes == code)
     o <- which(obs[rows[1L], ])
-    pj <- length(o)
-    if (pj == 0L) next
+    pj <- length(o)   # at least one: wholly missing rows were dropped above
     nj <- length(rows)
     # The pattern's observed-variable means, against the ML estimates.
     xbar <- colMeans(X[rows, o, drop = FALSE])
@@ -310,14 +358,19 @@ mcar_test <- function(data, max_iter = 500L, tol = 1e-7) {
   }
   out <- list(statistic = d2,
               df = df,
-              p_value = if (df > 0) {
-                1 - core_gamma_cdf(df / 2, d2 / 2)
+              logpvalue = if (df > 0) {
+                stats::pchisq(d2, df, lower.tail = FALSE, log.p = TRUE)
               } else {
                 NA_real_
               },
-              n_patterns = length(patterns),
-              n_used = used,
-              n_vars = p,
+              p_value = if (df > 0) {
+                stats::pchisq(d2, df, lower.tail = FALSE)
+              } else {
+                NA_real_
+              },
+              npat = length(patterns),
+              nused = used,
+              nvars = p,
               iterations = fit$iterations,
               mu = stats::setNames(fit$mu, colnames(X)),
               sigma = fit$sigma,
@@ -343,9 +396,9 @@ format.bricklayer_mcar <- function(x, ...) {
                statistic = formatC(x$statistic, format = "f", digits = 3),
                df = x$df,
                "p-value" = .rmbl_fmt_p(x$p_value),
-               patterns = x$n_patterns,
-               variables = x$n_vars,
-               "rows used" = x$n_used,
+               patterns = x$npat,
+               variables = x$nvars,
+               "rows used" = x$nused,
                "EM iterations" = x$iterations)))
   if (!is.na(x$note)) {
     lines <- c(lines, "", paste0("  ", g$warn, " ", x$note))
@@ -359,9 +412,7 @@ format.bricklayer_mcar <- function(x, ...) {
   c(lines, .rmbl_rule())
 }
 
-#' @rdname rmbl_print_methods
+#' @rdname printmeth
 #' @export
-print.bricklayer_mcar <- function(x, ...) {
-  cat(format(x), sep = "\n")
-  invisible(x)
-}
+#' @method print bricklayer_mcar
+print.bricklayer_mcar <- .rmbl_print_via_format

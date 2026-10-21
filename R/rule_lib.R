@@ -9,41 +9,101 @@
 #' Ready-made validation rules
 #'
 #' Constructors for the checks most schemas need, each returning a
-#' [rule()] that
-#' [validate_rules()] evaluates. Use
-#' [rule()] directly for anything not covered here.
+#' [rul()] that
+#' [valrules()] evaluates. Use
+#' [rul()] directly for anything not covered here. Writing the common
+#' checks once, here, avoids the off-by-one or the forgotten \code{NA} that
+#' makes a hand-written rule pass silently, and gives every failure a
+#' readable message and the rows that failed.
+#'
+#' @details
+#' What each rule checks:
+#' \itemize{
+#'   \item \code{ruleinset()}: each value, compared as text, is one of
+#'     \code{set} (so \code{1} and \code{"1"} match). Name
+#'     \code{"<column>_in_set"}.
+#'   \item \code{rulebtw()}: each value lies in \code{[lo, hi]}, ends
+#'     included. Name \code{"<column>_between"}.
+#'   \item \code{rulenull()}: no value is \code{NA}. Name
+#'     \code{"<column>_not_null"}.
+#'   \item \code{ruleuniq()}: no value repeats an earlier one; the rows
+#'     reported are the repeats, not the first occurrence. Two \code{NA}s count
+#'     as a repeat. Name \code{"<column>_unique"}.
+#'   \item \code{rulerx()}: each value, as text, matches \code{pattern}
+#'     (an extended regular expression, \code{grepl()}). Name
+#'     \code{"<column>_regex"}.
+#'   \item \code{ruleincr()}: the column never decreases from one row to
+#'     the next (or always increases, with \code{strictly = TRUE}); missing
+#'     steps are skipped. A whole-column check: a failure names no rows. Name
+#'     \code{"<column>_increasing"}.
+#'   \item \code{rulemad()}: each value lies within \code{n}
+#'     median absolute deviations (scaled by 1.4826, so comparable to standard
+#'     deviations for normal data) of the column's median. When the MAD is zero
+#'     (more than half the values equal) any value other than the median fails.
+#'     The column must be numeric when the rule is evaluated. Name
+#'     \code{"<column>_within_mads"}.
+#'   \item \code{rulecmpl()}: no row has a missing value. Name
+#'     \code{"complete_rows"}.
+#'   \item \code{ruledstn()}: no row repeats an earlier one on
+#'     \code{columns} (columns not in the data are ignored; when none is
+#'     present the rule passes). Name \code{"distinct_rows"}.
+#'   \item \code{rulecolcnt()}: the data have exactly \code{n} columns.
+#'     Name \code{"col_count"}.
+#' }
+#' The name is the key of the rule's entry in the list
+#' [valrules()] returns, which holds only the rules
+#' that failed (with
+#' \code{sev}, \code{message}, and for row-wise rules \code{n_failed}
+#' and \code{rows}). A rule that cannot be evaluated (a missing column, text
+#' in a numeric rule) is reported as failed, with the reason in its message.
+#'
+#' Errors, at construction: \code{col} not a single non-empty string;
+#' \code{sev} other than \code{"warning"} or \code{"fatal"};
+#' \code{rulebtw()} with \code{lo > hi} or a missing bound;
+#' \code{rulemad()} with \code{n} not positive;
+#' \code{rulecolcnt()} with \code{n} not a non-negative whole number.
 #'
 #' `NA` handling is explicit and per-rule, because the right answer
-#' differs. `rule_not_null()` exists precisely to fail on `NA`.
-#' The value rules ( `rule_in_set`, `rule_between`,
-#' `rule_regex`, `rule_within_n_mads`) treat `NA` as PASSING
+#' differs. `rulenull()` exists precisely to fail on `NA`.
+#' The value rules ( `ruleinset`, `rulebtw`,
+#' `rulerx`, `rulemad`) treat `NA` as PASSING
 #' by default, so that a column's missingness is reported once by
-#' `rule_not_null()` or `max_missing_fraction` rather than again
-#' by every other rule; set `na_pass = FALSE` to make them fail on it
+#' `rulenull()` or `max_missing_fraction` rather than again
+#' by every other rule; set `napass = FALSE` to make them fail on it
 #' instead.
 #'
-#' @param column Column the rule applies to.
-#' @param set Allowed values ( `rule_in_set`) .
-#' @param lo,hi Inclusive bounds ( `rule_between`) .
-#' @param pattern Regular expression the values must match (
-#' `rule_regex`) .
-#' @param n Multiplier for `rule_within_n_mads`, or the
-#' expected count for `rule_col_count`.
-#' @param columns Columns that jointly must be unique (
-#' `rule_distinct_rows`) , or `NULL` for all of them.
-#' @param strictly Require a strict increase rather than
-#' non-decreasing ( `rule_increasing`) .
-#' @param na_pass Treat `NA` as passing (default
-#' `TRUE`; see above).
-#' @param severity `"warning"` (default) or
-#' `"fatal"`.
-#' @return A [rule()] object.
+#' @param col Character scalar, the name of the column the rule applies
+#'   to.
+#' @param set Vector of allowed values (\code{ruleinset()}); compared as
+#'   text.
+#' @param lo,hi Numeric scalars, the inclusive bounds (\code{rulebtw()});
+#'   \code{lo} must not exceed \code{hi}.
+#' @param pat Character scalar, the regular expression the values must
+#'   match (\code{rulerx()}); only the first element is used.
+#' @param n Numeric scalar: the multiplier for \code{rulemad()}
+#'   (default \code{3}), or the expected number of columns for
+#'   \code{rulecolcnt()} (a whole number, no default).
+#' @param cols Character vector of columns that jointly must be unique
+#'   (\code{ruledstn()}), or \code{NULL} (the default) for all of
+#'   them.
+#' @param strict Logical scalar, default \code{FALSE}: require a strict
+#'   increase rather than non-decreasing (\code{ruleincr()}).
+#' @param napass Logical scalar, default \code{TRUE}: treat \code{NA} as
+#'   passing (see above); \code{FALSE} makes a missing value fail.
+#' @param sev \code{"warning"} (the default) or \code{"fatal"}: how
+#'   [valrules()] and the capsule gate treat a
+#'   failure.
+#' @return A [rul()] object: a list of class
+#'   \code{c("bricklayer_rule", "list")} with
+#'   \code{name}, \code{expr} (the predicate function), \code{column}
+#'   (\code{NULL} for whole-table rules), \code{severity} and
+#'   \code{message}.
 #' @seealso
-#' [rule()] for an arbitrary predicate,
-#' [validate_rules()] to evaluate them,
-#' [infer_schema()] for the structural checks
+#' [rul()] for an arbitrary predicate,
+#' [valrules()] to evaluate them,
+#' [infsch()] for the structural checks
 #' that need no rules at all.
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' df <- data.frame(
 #'   id = c(1, 2, 2),
 #'   grade = c("a", "b", "z"),
@@ -54,248 +114,336 @@
 #' )
 #'
 #' rules <- list(
-#'   rule_unique("id", severity = "fatal"),
-#'   rule_in_set("grade", c("a", "b", "c")),
-#'   rule_between("score", 0, 100),
-#'   rule_regex("email", "^[^@]+@[^@]+\\\\.[a-z]+$"),
-#'   rule_increasing("day")
+#'   ruleuniq("id", sev = "fatal"),
+#'   ruleinset("grade", c("a", "b", "c")),
+#'   rulebtw("score", 0, 100),
+#'   rulerx("email", "^[^@]+@[^@]+\\\\.[a-z]+$"),
+#'   ruleincr("day")
 #' )
-#' names(validate_rules(df, rules))
+#' names(valrules(df, rules))
 #'
 #' # Each names the rows that failed.
-#' validate_rules(df, rules)$grade_in_set$rows
+#' valrules(df, rules)$grade_in_set$rows
 #'
 #' # Clean data passes every one of them.
-#' ok <- data.frame(id = 1:3, grade = c("a", "b", "c"),
-#'                  score = c(5, 50, 7),
-#'                  email = c("a@b.com", "c@d.org", "e@f.net"),
-#'                  day = 1:3, stringsAsFactors = FALSE)
-#' length(validate_rules(ok, rules))
+#' ok <- data.frame(
+#'   id = 1:3, grade = c("a", "b", "c"),
+#'   score = c(5, 50, 7),
+#'   email = c("a@b.com", "c@d.org", "e@f.net"),
+#'   day = 1:3, stringsAsFactors = FALSE
+#' )
+#' length(valrules(ok, rules))
 #'
 #' # A robust outlier rule: MADs from the median, not standard
 #' # deviations from the mean, so one wild value cannot hide the others.
-#' validate_rules(data.frame(v = c(1, 2, 3, 2, 1, 900)),
-#'                rule_within_n_mads("v", 5))$v_within_mads$rows
+#' valrules(
+#'   data.frame(v = c(1, 2, 3, 2, 1, 900)),
+#'   rulemad("v", 5)
+#' )$v_within_mads$rows
 #'
 #' # Whole-table rules.
-#' validate_rules(df, rule_distinct_rows())
-#' validate_rules(df, rule_col_count(5))
-#' validate_rules(df, rule_complete_rows())
-#' @name rmbl_rule_library
+#' valrules(df, ruledstn())
+#' valrules(df, rulecolcnt(5))
+#' valrules(df, rulecmpl())
+#'
+#' # NA fails only when asked to
+#' g <- data.frame(grade = c("a", NA, "b"))
+#' length(valrules(g, ruleinset("grade", c("a", "b"))))
+#' valrules(g, ruleinset("grade", c("a", "b"), napass = FALSE))$grade_in_set$rows
+#'
+#' # bounds are checked when the rule is made
+#' try(rulebtw("score", 100, 0))
+#' @name rulelib
 #' @export
-rule_in_set <- function(column, set, na_pass = TRUE,
-                        severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
+ruleinset <- function(col, set, napass = TRUE,
+                        sev = c("warning", "fatal")) {
+  if (missing(col)) stop("ruleinset: `col` must name a column", call. = FALSE)
+  .rmbl_no_fn(set = set)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
   set <- as.character(set)
-  rule(paste0(column, "_in_set"),
-       function(v) {
-         ok <- as.character(v) %in% set
-         if (isTRUE(na_pass)) ok | is.na(v) else ok & !is.na(v)
-       },
-       column = column, severity = severity,
-       message = sprintf("Column '%s' has values outside the allowed set",
-                         column))
+  rul(paste0(col, "_in_set"),
+    function(v) {
+      ok <- as.character(v) %in% set
+      if (isTRUE(napass)) ok | is.na(v) else ok & !is.na(v)
+    },
+    col = col, sev = sev,
+    msg = sprintf(
+      "Column '%s' has values outside the allowed set",
+      col
+    )
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_between <- function(column, lo, hi, na_pass = TRUE,
-                         severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
-  lo <- as.numeric(lo)[1L]
-  hi <- as.numeric(hi)[1L]
+rulebtw <- function(col, lo, hi, napass = TRUE,
+                         sev = c("warning", "fatal")) {
+  if (missing(col)) stop("rulebtw: `col` must name a column", call. = FALSE)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
+  lo <- .rmbl_num(lo, "lo")[1L]
+  hi <- .rmbl_num(hi, "hi")[1L]
   if (is.na(lo) || is.na(hi) || lo > hi) {
     stop("need `lo` <= `hi`, both non-missing", call. = FALSE)
   }
-  rule(paste0(column, "_between"),
-       function(v) {
-         ok <- v >= lo & v <= hi
-         if (isTRUE(na_pass)) ok | is.na(v) else ok & !is.na(v)
-       },
-       column = column, severity = severity,
-       message = sprintf("Column '%s' has values outside [%s, %s]",
-                         column, format(lo), format(hi)))
+  rul(paste0(col, "_between"),
+    function(v) {
+      ok <- v >= lo & v <= hi
+      if (isTRUE(napass)) ok | is.na(v) else ok & !is.na(v)
+    },
+    col = col, sev = sev,
+    msg = sprintf(
+      "Column '%s' has values outside [%s, %s]",
+      col, format(lo), format(hi)
+    )
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_not_null <- function(column, severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
-  rule(paste0(column, "_not_null"), function(v) !is.na(v),
-       column = column, severity = severity,
-       message = sprintf("Column '%s' has missing values", column))
+rulenull <- function(col, sev = c("warning", "fatal")) {
+  if (missing(col)) stop("rulenull: `col` must name a column", call. = FALSE)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
+  rul(paste0(col, "_not_null"), function(v) !is.na(v),
+    col = col, sev = sev,
+    msg = sprintf("Column '%s' has missing values", col)
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_unique <- function(column, severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
-  rule(paste0(column, "_unique"),
-       # duplicated() marks every occurrence after the first, so the
-       # reported rows are the repeats rather than all of them
-       function(v) !duplicated(v),
-       column = column, severity = severity,
-       message = sprintf("Column '%s' has duplicate values", column))
+ruleuniq <- function(col, sev = c("warning", "fatal")) {
+  if (missing(col)) stop("ruleuniq: `col` must name a column", call. = FALSE)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
+  rul(paste0(col, "_unique"),
+    # duplicated() marks every occurrence after the first, so the
+    # reported rows are the repeats rather than all of them
+    function(v) !duplicated(v),
+    col = col, sev = sev,
+    msg = sprintf("Column '%s' has duplicate values", col)
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_regex <- function(column, pattern, na_pass = TRUE,
-                       severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
-  pattern <- as.character(pattern)[1L]
-  rule(paste0(column, "_regex"),
-       function(v) {
-         ok <- grepl(pattern, as.character(v))
-         if (isTRUE(na_pass)) ok | is.na(v) else ok & !is.na(v)
-       },
-       column = column, severity = severity,
-       message = sprintf("Column '%s' has values not matching /%s/",
-                         column, pattern))
+rulerx <- function(col, pat, napass = TRUE,
+                       sev = c("warning", "fatal")) {
+  if (missing(col)) stop("rulerx: `col` must name a column", call. = FALSE)
+  .rmbl_no_fn(pattern = pat)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
+  pat <- as.character(pat)[1L]
+  rul(paste0(col, "_regex"),
+    function(v) {
+      ok <- grepl(pat, as.character(v))
+      if (isTRUE(napass)) ok | is.na(v) else ok & !is.na(v)
+    },
+    col = col, sev = sev,
+    msg = sprintf(
+      "Column '%s' has values not matching /%s/",
+      col, pat
+    )
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_increasing <- function(column, strictly = FALSE,
-                            severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
-  rule(paste0(column, "_increasing"),
-       function(v) {
-         d <- diff(as.numeric(v))
-         ok <- if (isTRUE(strictly)) all(d > 0, na.rm = TRUE) else
-           all(d >= 0, na.rm = TRUE)
-         isTRUE(ok)
-       },
-       column = column, severity = severity,
-       message = sprintf("Column '%s' is not %s", column,
-                         if (isTRUE(strictly)) "strictly increasing" else
-                           "non-decreasing"))
+ruleincr <- function(col, strict = FALSE,
+                            sev = c("warning", "fatal")) {
+  if (missing(col)) stop("ruleincr: `col` must name a column", call. = FALSE)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
+  rul(paste0(col, "_increasing"),
+    function(v) {
+      d <- diff(as.numeric(v))
+      ok <- if (isTRUE(strict)) {
+        all(d > 0, na.rm = TRUE)
+      } else {
+        all(d >= 0, na.rm = TRUE)
+      }
+      isTRUE(ok)
+    },
+    col = col, sev = sev,
+    msg = sprintf(
+      "Column '%s' is not %s", col,
+      if (isTRUE(strict)) {
+        "strictly increasing"
+      } else {
+        "non-decreasing"
+      }
+    )
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_within_n_mads <- function(column, n = 3, na_pass = TRUE,
-                               severity = c("warning", "fatal")) {
-  column <- .rmbl_string1(column, "column")
-  severity <- match.arg(severity)
-  n <- as.numeric(n)[1L]
+rulemad <- function(col, n = 3, napass = TRUE,
+                               sev = c("warning", "fatal")) {
+  if (missing(col)) stop("rulemad: `col` must name a column", call. = FALSE)
+  col <- .rmbl_string1(col, "col")
+  sev <- .rmbl_arg(sev)
+  n <- .rmbl_num(n, "n")[1L]
   if (is.na(n) || n <= 0) stop("`n` must be positive", call. = FALSE)
-  rule(paste0(column, "_within_mads"),
-       function(v) {
-         v <- as.numeric(v)
-         ok_idx <- !is.na(v)
-         if (!any(ok_idx)) return(rep(TRUE, length(v)))
-         med <- core_median(v[ok_idx])
-         mad <- core_mad(v[ok_idx])
-         # A zero MAD means over half the values are identical; any
-         # departure at all is then an outlier, and dividing by it would
-         # be an error rather than an answer.
-         ok <- if (mad > 0) abs(v - med) <= n * mad else v == med
-         if (isTRUE(na_pass)) ok | is.na(v) else ok & !is.na(v)
-       },
-       column = column, severity = severity,
-       message = sprintf("Column '%s' has values more than %s MADs from its median",
-                         column, format(n)))
+  rul(paste0(col, "_within_mads"),
+    function(v) {
+      v <- .rmbl_num(v, "v")
+      ok_idx <- !is.na(v)
+      if (!any(ok_idx)) {
+        return(rep(TRUE, length(v)))
+      }
+      med <- cmed(v[ok_idx])
+      mad <- cmad(v[ok_idx])
+      # A zero MAD means over half the values are identical; any
+      # departure at all is then an outlier, and dividing by it would
+      # be an error rather than an answer.
+      ok <- if (mad > 0) abs(v - med) <= n * mad else v == med
+      if (isTRUE(napass)) ok | is.na(v) else ok & !is.na(v)
+    },
+    col = col, sev = sev,
+    msg = sprintf(
+      "Column '%s' has values more than %s MADs from its median",
+      col, format(n)
+    )
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_complete_rows <- function(severity = c("warning", "fatal")) {
-  severity <- match.arg(severity)
-  rule("complete_rows",
-       function(d) stats::complete.cases(d),
-       severity = severity,
-       message = "Some rows have missing values")
+rulecmpl <- function(sev = c("warning", "fatal")) {
+  sev <- .rmbl_arg(sev)
+  rul("complete_rows",
+    function(d) stats::complete.cases(d),
+    sev = sev,
+    msg = "Some rows have missing values"
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_distinct_rows <- function(columns = NULL,
-                               severity = c("warning", "fatal")) {
-  severity <- match.arg(severity)
-  rule("distinct_rows",
-       function(d) {
-         sub <- if (is.null(columns)) d else {
-           have <- intersect(columns, names(d))
-           if (length(have) == 0L) return(TRUE)
-           d[, have, drop = FALSE]
-         }
-         !duplicated(sub)
-       },
-       severity = severity,
-       message = if (is.null(columns)) "Some rows are duplicated" else
-         sprintf("Some rows are duplicated on (%s)",
-                 paste(columns, collapse = ", ")))
+ruledstn <- function(cols = NULL,
+                               sev = c("warning", "fatal")) {
+  sev <- .rmbl_arg(sev)
+  .rmbl_no_fn(columns = cols)
+  rul("distinct_rows",
+    function(d) {
+      sub <- if (is.null(cols)) {
+        d
+      } else {
+        have <- intersect(cols, names(d))
+        if (length(have) == 0L) {
+          return(TRUE)
+        }
+        d[, have, drop = FALSE]
+      }
+      !duplicated(sub)
+    },
+    sev = sev,
+    msg = if (is.null(cols)) {
+      "Some rows are duplicated"
+    } else {
+      sprintf(
+        "Some rows are duplicated on (%s)",
+        paste(cols, collapse = ", ")
+      )
+    }
+  )
 }
 
-#' @rdname rmbl_rule_library
+#' @rdname rulelib
 #' @export
-rule_col_count <- function(n, severity = c("warning", "fatal")) {
-  severity <- match.arg(severity)
-  n <- as.integer(n)[1L]
+rulecolcnt <- function(n, sev = c("warning", "fatal")) {
+  sev <- .rmbl_arg(sev)
+  n <- .rmbl_num(n, "n", integer = TRUE)[1L]
   if (is.na(n) || n < 0L) {
     stop("`n` must be a non-negative integer", call. = FALSE)
   }
-  rule("col_count",
-       function(d) ncol(d) == n,
-       severity = severity,
-       message = sprintf("Expected %d columns", n))
+  rul("col_count",
+    function(d) ncol(d) == n,
+    sev = sev,
+    msg = sprintf("Expected %d columns", n)
+  )
 }
 
 #' Duplicated rows, with their groups
 #'
-#' Returns the rows that share a combination of `columns` with at
+#' Returns the rows that share a combination of `cols` with at
 #' least one other row, grouped so the duplicates sit together. The
 #' counterpart of `janitor::get_dupes()`.
 #'
-#' `rule_distinct_rows()` tells you THAT there are duplicates, which
+#' `ruledstn()` tells you THAT there are duplicates, which
 #' is what a validation gate needs. This shows you WHICH, which is what
 #' fixing them needs -- and a duplicate is usually a join that fanned out
 #' or a re-release appended rather than replaced, both of which are visible
 #' only once the offending rows are in front of you.
 #'
+#' Two rows are duplicates when their values, converted to text, are equal
+#' in every column of \code{cols}; two \code{NA}s are equal. Columns are
+#' taken by position when \code{columns = NULL}, so a table with repeated
+#' column names can still be inspected. Errors when \code{data} is not a data
+#' frame, a named column does not exist, or a named column's name is shared
+#' by two columns.
+#'
 #' @param data A data frame.
-#' @param columns Columns defining a duplicate (default: all
-#' of them).
-#' @return The duplicated rows, ordered by group, with a `dupe_count`
-#' column giving each group's size. Zero rows when there are none.
+#' @param cols Character vector of the columns defining a duplicate, or
+#' \code{NULL} (the default) for all of them.
+#' @return A data frame: the duplicated rows (every occurrence, including the
+#' first), ordered so each group sits together, with an integer
+#' \code{dupe_count} column giving each group's size and row names reset.
+#' Zero rows (with the same columns) when there are none.
 #' @seealso
-#' [rule_distinct_rows()],
-#' [rule_unique()]
-#' @examples
-#' df <- data.frame(id = c(1, 2, 2, 3, 3, 3),
-#'                  value = c("a", "b", "b", "c", "d", "c"),
-#'                  stringsAsFactors = FALSE)
+#' [ruledstn()],
+#' [ruleuniq()]
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
+#' df <- data.frame(
+#'   id = c(1, 2, 2, 3, 3, 3),
+#'   value = c("a", "b", "b", "c", "d", "c"),
+#'   stringsAsFactors = FALSE
+#' )
 #'
 #' # Duplicated on every column.
-#' duplicate_rows(df)
+#' duprows(df)
 #'
 #' # Duplicated on the identifier alone, which catches more.
-#' duplicate_rows(df, "id")
+#' duprows(df, "id")
 #'
 #' # No duplicates gives zero rows, not an error.
-#' duplicate_rows(data.frame(x = 1:3))
+#' duprows(data.frame(x = 1:3))
+#'
+#' # a column that does not exist is an error
+#' try(duprows(df, "code"))
 #' @export
-duplicate_rows <- function(data, columns = NULL) {
-  if (!is.data.frame(data)) stop("`data` must be a data frame", call. = FALSE)
+duprows <- function(data, cols = NULL) {
+  if (!is.data.frame(data)) stop("duprows: `data` must be a data frame", call. = FALSE)
+  # duplicate column names are messy data, which this exists to inspect: every column by position,
+  # a column given by name only when the name is one column's (statistics stress test of 5e1dce5)
   if (nrow(data) == 0L) {
     out <- cbind(data, dupe_count = integer(0))
     return(out)
   }
-  cols <- if (is.null(columns)) names(data) else as.character(columns)
-  missing_cols <- setdiff(cols, names(data))
-  if (length(missing_cols) > 0L) {
-    stop(sprintf("no such column(s): %s",
-                 paste(missing_cols, collapse = ", ")), call. = FALSE)
+  if (is.null(cols)) {
+    pos <- seq_along(data)
+  } else {
+    .rmbl_no_fn(columns = cols)
+    .cols <- as.character(cols)
+    missing_cols <- setdiff(.cols, names(data))
+    if (length(missing_cols) > 0L) {
+      stop(sprintf(
+        "no such column(s): %s",
+        paste(missing_cols, collapse = ", ")
+      ), call. = FALSE)
+    }
+    twice <- .cols[.cols %in% names(data)[duplicated(names(data))]]
+    if (length(twice)) {
+      stop(sprintf("`data` has two columns named %s: give the columns by position, or rename one", twice[[1L]]),
+           call. = FALSE)
+    }
+    pos <- match(.cols, names(data))
   }
-  key <- do.call(paste, c(lapply(cols, function(cn) {
-    as.character(data[[cn]])
+  key <- do.call(paste, c(lapply(pos, function(i) {
+    as.character(data[[i]])
   }), sep = "\r"))
   counts <- table(key)
   dupe_keys <- names(counts)[counts > 1L]
@@ -313,36 +461,59 @@ duplicate_rows <- function(data, columns = NULL) {
 #' Missingness in one line per question
 #'
 #' The scalar summaries of missingness: how much of the table is missing,
-#' how many rows are complete, and how many columns are wholly present.
+#' how many rows are complete, and how many columns have any or only missing
+#' values. Use it as a first look at a new extract, or to report data
+#' completeness in a methods section;
+#' [misspat()] then shows which
+#' columns are missing together.
 #'
-#' @param data A data frame.
-#' @return A named numeric vector: `n_rows`, `n_cols`,
-#' `n_missing`, `pct_missing`, `n_complete_rows`,
-#' `pct_complete_rows`, `n_cols_any_missing`,
-#' `n_cols_all_missing`.
+#' @details
+#' A cell is missing when \code{is.na()} is \code{TRUE} (so \code{NaN}
+#' counts, and an empty string does not). A row is complete when no cell in it
+#' is missing (\code{stats::complete.cases()}). Percentages are of all cells
+#' and of all rows. A table with no rows gives zeros. Columns are taken by
+#' position, so duplicate or empty column names are fine. Errors when
+#' \code{data} is not a data frame or has no columns.
+#'
+#' @param data A data frame with at least one column.
+#' @return A named numeric vector: \code{nrows}, \code{n_cols},
+#' \code{n_missing} (missing cells), \code{pct_missing} (percent of cells),
+#' \code{n_complete_rows}, \code{pct_complete_rows} (percent of rows),
+#' \code{n_cols_any_missing} (columns with at least one missing value) and
+#' \code{n_cols_all_missing} (columns with no value at all).
 #' @seealso
-#' [missingness_pattern()] for which
+#' [misspat()] for which
 #' columns are missing together,
-#' [profile_columns()] for per-column rates.
-#' @examples
+#' [profcols()] for per-column rates.
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' df <- data.frame(a = c(1, NA, 3), b = c(NA, NA, 3), c = 1:3)
-#' missingness_summary(df)
+#' misssmry(df)
 #'
 #' # A complete table is all zeros but for its dimensions.
-#' missingness_summary(data.frame(x = 1:3, y = 4:6))
+#' misssmry(data.frame(x = 1:3, y = 4:6))
+#'
+#' # a wholly empty column
+#' ms <- misssmry(data.frame(x = 1:4, note = NA))
+#' ms[c("pct_missing", "n_cols_all_missing")]
+#'
+#' # a vector is not a table
+#' try(misssmry(c(1, NA, 3)))
 #' @export
-missingness_summary <- function(data) {
-  if (!is.data.frame(data)) stop("`data` must be a data frame", call. = FALSE)
-  if (ncol(data) == 0L) stop("`data` has no columns", call. = FALSE)
+misssmry <- function(data) {
+  if (!is.data.frame(data)) stop("misssmry: `data` must be a data frame", call. = FALSE)
+  # every column by position: duplicate or empty names are the messy data this summarises
+  if (ncol(data) == 0L) stop("misssmry: `data` has no columns", call. = FALSE)
   n <- nrow(data)
   per_col <- vapply(data, function(v) sum(is.na(v)), numeric(1))
   total <- sum(per_col)
   cells <- max(1L, n * ncol(data))
   complete <- if (n == 0L) 0L else sum(stats::complete.cases(data))
-  c(n_rows = n, n_cols = ncol(data), n_missing = total,
+  c(
+    n_rows = n, n_cols = ncol(data), n_missing = total,
     pct_missing = 100 * total / cells,
     n_complete_rows = complete,
     pct_complete_rows = if (n == 0L) 0 else 100 * complete / n,
     n_cols_any_missing = sum(per_col > 0),
-    n_cols_all_missing = sum(per_col == n & n > 0))
+    n_cols_all_missing = sum(per_col == n & n > 0)
+  )
 }
