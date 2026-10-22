@@ -35,7 +35,7 @@ cryptography written from the standards) serves one of these three.
 ## Why it exists
 
 I analyze Canadian justice and health statistics from published tables. Noticed that three
-things kept going wrong in many cases, and a checksum alone catches none of them.
+things kept on going wrong in many cases, and a checksum alone catches none of them.
 
 - **Sources go down or move.** The federal open-data portal, `open.canada.ca`, was unreachable in
   October 2026 while analyses depended on it. A capsule keeps the address of an archived copy of
@@ -256,6 +256,19 @@ A capsule does this for every source of an analysis at once; `usecpstmpl()` star
   written as they land so a stopped run resumes (captures already started are
   polled, not sent again), `wbrtry()` for the failures, and a live
   animated progress bar (drawn in C, shared with `bldl()`).
+- **Your own archive copy** — `arccap()` saves files from your own
+  connection (for servers that refuse the Wayback Machine) as WARC files,
+  and with `upload = "rmorie"` keeps them at archive.rmorie.com with their
+  SHA-256 (`upload = "wayback"` asks the Wayback Machine too). `arcfind()`
+  lists the captures of an address and `arcget()` fetches the exact bytes;
+  `fetchvrf()` falls back to the archive and to your WARC files on its own,
+  and `wbsave(fallback = "rmorie")` saves what the Wayback Machine refused.
+  From a terminal: `rmbl archive save | find | get`. In CI, `cpschk(archive = TRUE)`
+  (the rmbl action's `archive: true`) takes the archived copy when a source and
+  its Wayback snapshot are down. Reading a public copy needs no key; saving needs
+  one, except in a GitHub Actions job allowed `id-token: write`, where the
+  package uses the job's short-lived OIDC token and the repository is the saver,
+  so no secret is stored.
 - **Courts and police-reported crime** — `caseflow()` (clearance rate with
   exact intervals, rolling clearance, net flow and months to clear the
   pending inventory), `lifetbl()` (actuarial life table with Greenwood
@@ -579,7 +592,7 @@ and the reproducible data capsules with signed manifests.
 
 ## Life cycle
 
-Version 1.0.0 is *maturing*: the exported function names and arguments are
+Since 1.0.0 the package is *maturing*: the exported function names and arguments are
 stable. A function or argument that is to change or go is first deprecated
 with a warning for one minor release, and the change is listed in `NEWS.md`.
 
@@ -601,7 +614,7 @@ NOT_CRAN=true RMBL_LIVE_TESTS=1 Rscript -e 'devtools::test()'
 
 Current release from r-universe (prebuilt binaries for macOS and Windows, a
 source build on Linux) or from
-CRAN (CRAN.R-project.org/package=rmoriebricklayer).
+CRAN (https://CRAN.R-project.org/package=rmoriebricklayer).
 
 With pak (pak.r-lib.org) (progress bars, parallel downloads, compiler
 output hidden unless a build fails, and the named packages always upgraded to
@@ -909,7 +922,7 @@ estimators. Any error in that translation is ours.
 
 If you use rmoriebricklayer in your research, please cite the software:
 
-> Ruhela, V. S. (2026). *rmoriebricklayer: Reproducible Data Capsules with Provenance and Fallback.* R package version 1.0.0. doi:10.32614/CRAN.package.rmoriebricklayer. CRAN.R-project.org/package=rmoriebricklayer
+> Ruhela, V. S. (2026). *rmoriebricklayer: Reproducible Data Capsules with Provenance and Fallback.* R package version 1.0.2. doi:10.32614/CRAN.package.rmoriebricklayer. https://CRAN.R-project.org/package=rmoriebricklayer
 
 BibTeX (or run `citation("rmoriebricklayer")` after installation for the entry
 stamped with the exact installed version, sourced from `inst/CITATION`):

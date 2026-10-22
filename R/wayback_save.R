@@ -298,6 +298,12 @@
 #' @param maxcap The most captures this run starts; default
 #'   1000. The rest are left for the next run (with the same
 #'   \code{output}, it carries on from them).
+#' @param fallback \code{"rmorie"} saves what the Wayback Machine refused (a server that
+#'   refuses its crawler, Statistics Canada among them) from this connection to
+#'   archive.rmorie.com, with \code{\link{arccap}}; the result is attribute \code{archive}.
+#'   \code{NULL} (default) does not.
+#' @param reason With \code{fallback = "rmorie"}: why the files are kept (20 characters or
+#'   more).
 #'
 #' @return A data frame of class \code{rmbl_wayback_save}, one
 #'   row per URL with a result: \code{url}, \code{status}
@@ -368,7 +374,8 @@
 #' @export
 wbsave <- function(urls, ak = NULL, sk = NULL, within = "30d", jobs = 4L,
                          output = NULL, poll = 10, maxwait = 600, capall = FALSE, quiet = NULL,
-                         permin = 6, maxcap = 1000) {
+                         permin = 6, maxcap = 1000, fallback = NULL, reason = NULL) {
+  if (!is.null(fallback) && !identical(fallback, "rmorie")) stop('`fallback` must be "rmorie" or NULL', call. = FALSE)
   urls <- .rmbl_text_input(urls, "urls", allow_raw = FALSE)
   urls <- unique(trimws(urls[!is.na(urls) & nzchar(trimws(urls))]))
   if (!length(urls)) stop("`urls` has no URLs", call. = FALSE)
@@ -661,6 +668,7 @@ wbsave <- function(urls, ak = NULL, sk = NULL, within = "30d", jobs = 4L,
   out <- .bl_wb_frame(w$results[intersect(urls, names(w$results))])
   attr(out, "not_sent") <- not_sent
   if (!is.null(w$stopped)) attr(out, "stopped") <- w$stopped
+  if (identical(fallback, "rmorie")) out <- .bl_wb_fallback(out, reason)
   out
 }
 
@@ -833,5 +841,22 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
   out <- .bl_wb_read(output)
   attr(out, "retry") <- data.frame(failed = nrow(failed), found_by_lookup = found, captured_again = length(todo),
                                    left_as_gone = sum(gone), left_for_tomorrow = sum(later))
+  out
+}
+
+#' Saves what the Wayback Machine refused (a server that refuses its crawler) from this connection to
+#' archive.rmorie.com instead, as attribute archive of the wbsave() result.
+#' @param out A wbsave() result.
+#' @param reason Why the files are kept.
+#' @return The result, with attribute archive (an arccap() result, or the reason it failed) when anything was refused.
+#' @noRd
+.bl_wb_fallback <- function(out, reason) {
+  refused <- out$status == "failed" &
+    grepl("cannot find|blocks access|HTTP status=40[134]|not reachable", ifelse(is.na(out$message), "", out$message))
+  if (!any(refused)) return(out)
+  attr(out, "archive") <- tryCatch(
+    arccap(out$url[refused], file.path(tempdir(), "rmbl-wayback-fallback"), tsa = NULL, upload = "rmorie",
+           reason = reason %||% ""),
+    error = function(e) .bl_unless_interrupted(e, structure(conditionMessage(e), class = "rmbl_fail")))
   out
 }

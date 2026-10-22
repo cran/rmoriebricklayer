@@ -30,10 +30,14 @@
 #' @param mirrors Further URLs that serve the same file, tried in order after the
 #'   source.
 #' @param tmout Seconds allowed for each download (default 120).
-#' @return Invisibly, a list: \code{source} (\code{"live"}, \code{"wayback"} or
-#'   \code{"mirror"}), \code{url} (the URL that served the kept copy), \code{sha256},
-#'   \code{bytes}, and \code{tried} (a data frame of every attempt: \code{url},
-#'   \code{outcome}).
+#' @param arcs Archives tried after the source, its Wayback snapshot and the mirrors:
+#'   \code{"rmorie"} (archive.rmorie.com, by \code{\link{arcget}}) and folders written by
+#'   \code{\link{arccap}} (read from their WARC files), in order. \code{character()} tries
+#'   none.
+#' @return Invisibly, a list: \code{source} (\code{"live"}, \code{"wayback"},
+#'   \code{"mirror"}, \code{"rmorie"} or \code{"local"}), \code{url} (the URL that served
+#'   the kept copy), \code{sha256}, \code{bytes}, and \code{tried} (a data frame of every
+#'   attempt: \code{url}, \code{outcome}).
 #' @seealso \code{\link{blfetch}}, \code{\link{sha256file}},
 #'   \code{\link{wbsave}}.
 #' @examplesIf interactive()
@@ -44,7 +48,7 @@
 #'                file.path(tempdir(), "41100063-eng.zip"),
 #'                mirrors = paste0(item, "/41100063-eng.zip"))
 #' @export
-fetchvrf <- function(url, dest, sha256 = NULL, mirrors = character(), tmout = 120L) {
+fetchvrf <- function(url, dest, sha256 = NULL, mirrors = character(), tmout = 120L, arcs = "rmorie") {
   url <- .rmbl_string1(url, "url")
   dest <- .rmbl_string1(dest, "dest")
   if (!is.null(sha256)) {
@@ -54,6 +58,7 @@ fetchvrf <- function(url, dest, sha256 = NULL, mirrors = character(), tmout = 12
   if (!is.character(mirrors) || anyNA(mirrors) || any(!nzchar(mirrors))) {
     stop("`mirrors` must be URLs (a character vector)", call. = FALSE)
   }
+  if (!is.character(arcs) || anyNA(arcs)) stop('`arcs` must be "rmorie" and/or folders of captures', call. = FALSE)
   tmp <- paste0(dest, ".part")
   on.exit(unlink(tmp), add = TRUE)
   acc <- new.env(parent = emptyenv())
@@ -84,7 +89,31 @@ fetchvrf <- function(url, dest, sha256 = NULL, mirrors = character(), tmout = 12
     src <- if (i > 1L) "mirror" else as.character(got)
     return(invisible(list(source = src, url = u, sha256 = h, bytes = file.size(dest), tried = acc$tried)))
   }
+  # the archives: archive.rmorie.com, then folders written by arccap() (their WARC files)
+  for (a in arcs) {
+    if (identical(a, "rmorie")) {
+      got <- tryCatch(arcget(url, tmp, sha256 = sha256, tmout = tmout),
+                      error = function(e) .bl_arc_fail(e))
+      where <- "archive.rmorie.com"
+    } else {
+      got <- tryCatch(.bl_warc_get(a, url, tmp, sha256),
+                      error = function(e) .bl_arc_fail(e))
+      where <- a
+    }
+    if (inherits(got, "rmbl_fail")) {
+      note(where, paste("failed:", got))
+      next
+    }
+    h <- sha256file(tmp)
+    if (!.bl_move(tmp, dest)) stop(sprintf("cannot write %s", dest), call. = FALSE)
+    note(where, "kept")
+    return(invisible(list(source = if (identical(a, "rmorie")) "rmorie" else "local", url = url, sha256 = h,
+                          bytes = file.size(dest), tried = acc$tried)))
+  }
   stop(sprintf("no source served the file%s:\n%s",
                if (is.null(sha256)) "" else " with the pinned SHA-256",
                paste(sprintf("  %s: %s", acc$tried$url, acc$tried$outcome), collapse = "\n")), call. = FALSE)
 }
+
+# a failed archive or WARC lookup, kept as a value so the next source is tried (interrupts still stop)
+.bl_arc_fail <- function(e) .bl_unless_interrupted(e, structure(conditionMessage(e), class = "rmbl_fail"))

@@ -311,6 +311,17 @@ falsfam(c(ate = 0.02, byyear = 0.3, byprecinct = 0.4,
 ## -----------------------------------------------------------------------------
 evlrr(2, lo = 1.4, hi = 2.9)
 
+## ----eval = FALSE-------------------------------------------------------------
+# cap <- arccap("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip", "captures",
+#               upload = c("rmorie", "wayback"), reason = "Custody table cited in chapter 3")
+# cap$archive                     # its page at archive.rmorie.com
+# arcfind("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip")
+# arcget(cap$capture_id, "table.zip", sha256 = cap$sha256)
+
+## ----eval = FALSE-------------------------------------------------------------
+# fetchvrf("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip", "table.zip",
+#          sha256 = cap$sha256, arcs = c("rmorie", "captures"))
+
 ## -----------------------------------------------------------------------------
 dir <- tempfile()
 dir.create(dir)

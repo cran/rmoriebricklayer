@@ -1,3 +1,22 @@
+# rmoriebricklayer 1.0.2
+
+## Keeping your own copy of a source: archive.rmorie.com and WARC files
+
+* `arccap()` gains `upload`, `reason`, `visibility` and `warc`. A capture made from your own connection (the way to keep files from servers that refuse the Wayback Machine, Statistics Canada among them) is written as a WARC/1.1 file with a CDXJ index, the layout pywb and warcio read, and with `upload = "rmorie"` is kept at archive.rmorie.com under your data key (`dlogin()`, `rmbl login`); `upload = "wayback"` asks the Wayback Machine to save the same addresses, and both may be given. Captures are public unless `visibility = "private"`.
+* `arcfind()` lists the captures of an address (or of every address under a prefix ending in `*`), oldest first, with their SHA-256; `arcget()` downloads one capture's exact bytes, by its id or by address (the latest, the one closest to `at`, or the one with a given SHA-256), and deletes a file whose SHA-256 does not match.
+* `fetchvrf()` gains `arcs`: after the source, its Wayback snapshot and the mirrors, it tries archive.rmorie.com and then folders written by `arccap()`, reading the payload back from their WARC files; every copy is still checked against the pinned SHA-256.
+* `wbsave()` gains `fallback = "rmorie"`: the addresses the Wayback Machine refused are saved from this connection to archive.rmorie.com instead (attribute `archive` of the result).
+* `cpschk()` gains `archive` (the rmbl action's `archive` input): in drift and refresh, a source that neither answers nor has its pinned Wayback snapshot is fetched from the copy kept on archive.rmorie.com with the pinned SHA-256 (public copies need no key), and with `wayback = TRUE` a changed source the Wayback Machine refuses is saved there instead.
+* In a GitHub Actions job allowed `id-token: write`, saving to archive.rmorie.com needs no stored key: without one, the package asks GitHub for the job's short-lived OIDC token for archive.rmorie.com, and the repository is the saver.
+* The command line gains `archive save URL... --reason TEXT [--private] [--also wayback]`, `archive find URL` and `archive get ID -o FILE`.
+* Another archive that speaks the same protocol is named in `MORIE_ARCHIVE_URL`, with its own key in `MORIE_ARCHIVE_KEY`; the stored rmorie key is sent only to archive.rmorie.com.
+
+# rmoriebricklayer 1.0.1
+
+* DESCRIPTION gives the repository and the issue tracker again (`URL`, `BugReports`). The CRAN build of 1.0.0 left them out, so its CRAN page linked to neither and r-universe could not match the CRAN release to its repository.
+* The PDF manual's Description no longer has short lines with half-line gaps: the CRAN build re-wraps the paragraph after writing its web addresses and DOIs as plain text.
+* `citation("rmoriebricklayer")`, `CITATION.cff` and the README cite the package at its CRAN address.
+
 # rmoriebricklayer 1.0.0
 
 ## Fixes after the CRAN resubmission
