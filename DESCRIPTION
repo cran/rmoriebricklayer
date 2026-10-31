@@ -1,6 +1,6 @@
 Package: rmoriebricklayer
 Title: Reproducible Data Capsules with Provenance and Fallback
-Version: 1.0.3
+Version: 1.0.4
 Authors@R: 
     person(c("Vansh", "Singh"), "Ruhela", email = "vsruhela@proton.me",
            role = c("aut", "cre"),
@@ -54,9 +54,9 @@ SystemRequirements: C++17, libcurl (deb: libcurl4-openssl-dev, rpm:
 Config/roxygen2/version: 8.1.1
 ByteCompile: yes
 NeedsCompilation: yes
-Packaged: 2026-10-31 02:49:06 UTC; rootcoder
+Packaged: 2026-10-31 09:06:13 UTC; rootcoder
 Author: Vansh Singh Ruhela [aut, cre] (ORCID:
     <https://orcid.org/0009-0004-1750-3592>)
 Maintainer: Vansh Singh Ruhela <vsruhela@proton.me>
 Repository: CRAN
-Date/Publication: 2026-10-31 04:00:02 UTC
+Date/Publication: 2026-10-31 11:10:02 UTC
