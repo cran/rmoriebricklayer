@@ -66,9 +66,14 @@
 #' # the predicate must be a function, not an expression
 #' try(rul("agenonnegative", "age >= 0", col = "age"))
 #' @export
-rul <- function(name, expr, col = NULL, sev = c("warning", "fatal"),
-                 msg = NULL) {
-  .rmbl_no_fn(name = name, column = col, message = msg)
+rul <- function(
+  name,
+  expr,
+  col = NULL,
+  sev = c("warning", "fatal"),
+  msg = NULL
+) {
+  .rmbl_no_fn(name = name, col = col, msg = msg)
   sev <- .rmbl_arg(sev)
   name <- as.character(name)[1L]
   if (is.na(name) || !nzchar(name)) {
@@ -83,13 +88,17 @@ rul <- function(name, expr, col = NULL, sev = c("warning", "fatal"),
       stop("`col` must be a non-empty string or NULL", call. = FALSE)
     }
   }
-  out <- list(name = name, expr = expr, column = col,
-              severity = sev,
-              message = if (is.null(msg)) {
-                sprintf("Rule '%s' failed", name)
-              } else {
-                as.character(msg)[1L]
-              })
+  out <- list(
+    name = name,
+    expr = expr,
+    column = col,
+    severity = sev,
+    message = if (is.null(msg)) {
+      sprintf("Rule '%s' failed", name)
+    } else {
+      as.character(msg)[1L]
+    }
+  )
   class(out) <- c("bricklayer_rule", "list")
   out
 }
@@ -113,20 +122,20 @@ rul <- function(name, expr, col = NULL, sev = c("warning", "fatal"),
 #' error, never swallowed: a rule that cannot run has not passed. On a table
 #' of no rows a row-wise rule has no row to fail and passes.
 #'
-#' How a rule's result is read: a result that is not logical, or has length
-#' 0, is a failure (\code{"rule returned <class>, not a logical"}); a single value
-#' fails unless it is \code{TRUE} (so \code{NA} fails); a longer vector is
-#' read row by row, and rows that are \code{FALSE} or \code{NA} fail (a rule
-#' that cannot decide has not been satisfied). The length of a row-wise
-#' result is not checked against the number of rows. The issue is named by
-#' the rule's \code{name}; two rules with the same name keep only the later
-#' failure. Rules run in the order given and only read the data.
+#' How a rule's result is read: a result that is not logical, or has length 0,
+#' is a failure (\code{"rule returned <class>, not a logical"}); a single value
+#' fails unless it is \code{TRUE} (so \code{NA} fails); a longer vector is read
+#' row by row, and rows that are \code{FALSE} or \code{NA} fail (a rule that
+#' cannot decide has not been satisfied). The length of a row-wise result is not
+#' checked against the number of rows. The issue is named by the rule's
+#' \code{name}; two rules with the same name keep only the later failure. Rules
+#' run in the order given and only read the data.
 #'
 #' Errors: \code{data} not a data frame (or with missing or duplicated
 #' column names); \code{rules} not a rule or a list; an element that is not
 #' a rule.
 #'
-#' @param data A data frame.
+#' @param data A data frame the rules are applied to.
 #' @param rules A list of [rul()] objects, or a single rule.
 #' @return A named list of issues, one per failed rule, each a list with
 #'   \code{severity} (character) and \code{message} (character; for a row-wise
@@ -174,9 +183,13 @@ rul <- function(name, expr, col = NULL, sev = c("warning", "fatal"),
 #' try(valrules(df, list(function(v) v >= 0)))
 #' @export
 valrules <- function(data, rules) {
-  if (!is.data.frame(data)) stop("valrules: `data` must be a data frame", call. = FALSE)
+  if (!is.data.frame(data)) {
+    stop("valrules: `data` must be a data frame", call. = FALSE)
+  }
   .rmbl_df_names(data)
-  if (inherits(rules, "bricklayer_rule")) rules <- list(rules)
+  if (inherits(rules, "bricklayer_rule")) {
+    rules <- list(rules)
+  }
   if (!is.list(rules)) {
     stop("`rules` must be a rul() or a list of them", call. = FALSE)
   }
@@ -185,56 +198,108 @@ valrules <- function(data, rules) {
     if (!inherits(r, "bricklayer_rule")) {
       stop("every element of `rules` must come from rul()", call. = FALSE)
     }
-    # A rule for a column that is not here has nothing to say.
-    if (!is.null(r$column) && !r$column %in% names(data)) next
-
-    res <- tryCatch(
-      if (is.null(r$column)) r$expr(data) else r$expr(data[[r$column]]),
-      error = function(e) e)
-
-    if (inherits(res, "error")) {
-      issues[[r$name]] <- list(
-        severity = r$severity,
-        message = sprintf("%s (rule could not be evaluated: %s)",
-                          r$message, conditionMessage(res)))
-      next
-    }
-    # a row-wise rule on a table of no rows has no row to fail (every rule failed on a 0-row frame;
-    # CRAN stress test of 0.5.14)
-    if (is.logical(res) && length(res) == 0L && nrow(data) == 0L) next
-    if (!is.logical(res) || length(res) == 0L) {
-      issues[[r$name]] <- list(
-        severity = r$severity,
-        message = sprintf("%s (rule returned %s, not a logical)",
-                          r$message, class(res)[1L]))
-      next
-    }
-
-    if (length(res) == 1L) {
-      if (!isTRUE(res)) {
-        issues[[r$name]] <- list(severity = r$severity, message = r$message)
-      }
-      next
-    }
-    # Row-wise: NA is a failure, because a rule that cannot decide has
-    # not been satisfied.
-    failed <- which(is.na(res) | !res)
-    if (length(failed) > 0L) {
-      issues[[r$name]] <- list(
-        severity = r$severity,
-        message = sprintf("%s (%d of %d rows)", r$message, length(failed),
-                          nrow(data)),
-        n_failed = length(failed),
-        rows = utils::head(failed, 10L))
+    iss <- .vr_issue(r, data)
+    if (!is.null(iss)) {
+      issues[[r$name]] <- iss
     }
   }
   issues
 }
 
 #' @export
-print.bricklayer_rule <- function(x, ...) {
-  cat(sprintf("<rule> %s [%s]%s\n", x$name, x$severity,
-              if (is.null(x$column)) " table-level" else
-                paste0(" on `", x$column, "`")))
-  invisible(x)
+format.bricklayer_rule <- function(x, ...) {
+  .rmbl_stat_block(
+    sprintf("Rule %s", x$name),
+    facts = list(
+      Severity = x$severity,
+      Applies = if (is.null(x$column)) {
+        "table-level"
+      } else {
+        paste0("on `", x$column, "`")
+      },
+      Message = if (length(x$message) && nzchar(x$message[1L])) x$message
+    ),
+    reading = paste(
+      "A check the data must pass; valrules() runs it and reports the rows",
+      "that break it."
+    )
+  )
+}
+
+#' One rule against the data: the issue it raises, or NULL.
+#' @param r The rule.
+#' @param data The data frame the rule's expression is evaluated on.
+#' @return A list (severity, message, and the failing rows of a row-wise rule),
+#'   or NULL.
+#' @noRd
+.vr_issue <- function(r, data) {
+  # A rule for a column that is not here has nothing to say.
+  if (!is.null(r$column) && !r$column %in% names(data)) {
+    return(NULL)
+  }
+
+  res <- tryCatch(
+    if (is.null(r$column)) r$expr(data) else r$expr(data[[r$column]]),
+    error = function(e) e
+  )
+
+  if (inherits(res, "error")) {
+    return(list(
+      severity = r$severity,
+      message = sprintf(
+        "%s (rule could not be evaluated: %s)",
+        r$message,
+        conditionMessage(res)
+      )
+    ))
+  }
+  .vr_logical_issue(r, res, data)
+}
+
+#' The issue a rule's evaluated result raises, or NULL.
+#' @param r The rule.
+#' @param res What the rule's expression returned.
+#' @param data The data frame, whose row count the issue's message reports.
+#' @return As for `.vr_issue()`.
+#' @noRd
+.vr_logical_issue <- function(r, res, data) {
+  # a row-wise rule on a table of no rows has no row to fail (every rule
+  # failed on a 0-row frame; CRAN stress test of 0.5.14)
+  if (is.logical(res) && length(res) == 0L && nrow(data) == 0L) {
+    return(NULL)
+  }
+  if (!is.logical(res) || length(res) == 0L) {
+    return(list(
+      severity = r$severity,
+      message = sprintf(
+        "%s (rule returned %s, not a logical)",
+        r$message,
+        class(res)[1L]
+      )
+    ))
+  }
+
+  if (length(res) == 1L) {
+    if (!isTRUE(res)) {
+      return(list(severity = r$severity, message = r$message))
+    }
+    return(NULL)
+  }
+  # Row-wise: NA is a failure, because a rule that cannot decide has
+  # not been satisfied.
+  failed <- which(is.na(res) | !res)
+  if (!length(failed)) {
+    return(NULL)
+  }
+  list(
+    severity = r$severity,
+    message = sprintf(
+      "%s (%d of %d rows)",
+      r$message,
+      length(failed),
+      nrow(data)
+    ),
+    n_failed = length(failed),
+    rows = utils::head(failed, 10L)
+  )
 }

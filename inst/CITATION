@@ -3,14 +3,26 @@ citHeader(
   "It is part of the MORIE ecosystem; see also the 'morie' and 'rmorie' packages."
 )
 
+# the address of the copy that is installed: CRAN's page for a CRAN
+# install, the r-universe page for an r-universe one, otherwise (from
+# GitHub or a source folder) the repository
+repo <- if (is.null(meta$Repository)) "" else meta$Repository
+url <- if (identical(repo, "CRAN")) {
+  "https://CRAN.R-project.org/package=rmoriebricklayer"
+} else if (grepl("r-universe.dev", repo, fixed = TRUE)) {
+  "https://CRAN.R-project.org/package=rmoriebricklayer"
+} else {
+  "https://CRAN.R-project.org/package=rmoriebricklayer"
+}
+
 bibentry(
   bibtype = "Manual",
   key     = "ruhela_rmoriebricklayer_2026",
-  title   = "rmoriebricklayer: Reproducible Data Capsules with Provenance and Fallback",
+  title   = paste0("rmoriebricklayer: ", meta$Title),
   author  = person(c("Vansh", "Singh"), "Ruhela",
                    comment = c(ORCID = "0009-0004-1750-3592")),
   year    = "2026",
   note    = paste("R package version", meta$Version),
   doi     = "10.32614/CRAN.package.rmoriebricklayer",
-  url     = "https://CRAN.R-project.org/package=rmoriebricklayer"
+  url     = url
 )

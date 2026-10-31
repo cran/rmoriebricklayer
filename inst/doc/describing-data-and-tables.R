@@ -143,15 +143,23 @@ op <- par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
 for (nm in names(messy)) {
   x <- messy[[nm]]
   if (nm == "skewed") {
-    hist(log10(x), breaks = 30, col = blpal()[2], main = "skewed (log10 scale)", xlab = "log10(value)")
+    hist(
+      log10(x),
+      breaks = 30,
+      col = blpal()[2],
+      main = "skewed (log10 scale)",
+      xlab = "log10(value)"
+    )
   } else {
     hist(x, breaks = 30, col = blpal()[2], main = nm, xlab = "value")
   }
 }
 par(op)
-plotecdf(c(reference$score, fresh$score),
-         rep(c("reference", "fresh"), c(nrow(reference), nrow(fresh))),
-         main = "Fresh scores against the reference")
+plotecdf(
+  c(reference$score, fresh$score),
+  rep(c("reference", "fresh"), c(nrow(reference), nrow(fresh))),
+  main = "Fresh scores against the reference"
+)
 
 ## ----include = FALSE----------------------------------------------------------
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
@@ -166,12 +174,16 @@ misssmry(data.frame(x = 1:3, y = 4:6))
 set.seed(1)
 big <- data.frame(id = 1:40, v = stats::rnorm(40), w = stats::rnorm(40))
 big$v[c(10:14, 30)] <- NA
-big$w[c(10:14)] <- NA
+big$w[10:14] <- NA
 misspat(big)
 missruns(big)
 
 ## ----missingness-and-outliers-dup---------------------------------------------
-d <- data.frame(id = c(1, 2, 2, 3, 3, 3), x = c("a", "b", "b", "c", "c", "d"))
+d <- data.frame(
+  id = c(1, 2, 2, 3, 3, 3),
+  x = c("a", "b", "b", "c", "c", "d"),
+  stringsAsFactors = FALSE
+)
 duprows(d)
 duprows(d, cols = "id")
 
@@ -180,7 +192,7 @@ set.seed(1)
 n <- 200
 df <- data.frame(height = stats::rnorm(n, 170, 10))
 df$weight <- df$height * 0.5 + stats::rnorm(n, 0, 5)
-df[1, ] <- list(height = 155, weight = 100)      # ordinary on each, unlikely jointly
+df[1, ] <- list(height = 155, weight = 100) # ordinary on each, unlikely jointly
 
 out <- mahaoutl(df)
 head(out, 3)
@@ -226,26 +238,45 @@ table(im$period, im$quality)
 ## ----missingness-and-outliers-outliers-plots, fig.width = 7, fig.height = 4.5----
 plot(out)
 planted <- dclassical$row %in% 2:21
-plot(dclassical$distance, drobust$distance[match(dclassical$row, drobust$row)],
-     pch = 19, col = ifelse(planted, blpal()[2], blpal()[1]),
-     xlab = "classical distance", ylab = "robust distance",
-     main = "Planted rows: classical against robust distance")
+plot(
+  dclassical$distance,
+  drobust$distance[match(dclassical$row, drobust$row)],
+  pch = 19,
+  col = ifelse(planted, blpal()[2], blpal()[1]),
+  xlab = "classical distance",
+  ylab = "robust distance",
+  main = "Planted rows: classical against robust distance"
+)
 abline(0, 1, lty = 2)
-legend("topleft", c("planted rows", "other rows"), pch = 19, col = blpal()[c(2, 1)], bty = "n")
+legend(
+  "topleft",
+  c("planted rows", "other rows"),
+  pch = 19,
+  col = blpal()[c(2, 1)],
+  bty = "n"
+)
 
 ## ----include = FALSE----------------------------------------------------------
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
 
 ## -----------------------------------------------------------------------------
-tab <- matrix(c(9000, 120, 2000, 220, 1500, 60, 4000, 1), ncol = 2, byrow = TRUE,
-              dimnames = list(c("White", "Black", "Other", "Unknown"), c("no", "yes")))
+tab <- matrix(
+  c(9000, 120, 2000, 220, 1500, 60, 4000, 1),
+  ncol = 2,
+  byrow = TRUE,
+  dimnames = list(c("White", "Black", "Other", "Unknown"), c("no", "yes"))
+)
 tab
 ref <- 120 / 9000
-orchk(tab, "White", c(Black = 220 / 2000 / ref, Other = 60 / 1500 / ref,
-                                 Unknown = 1 / 4000 / ref))$verdict
+orchk(
+  tab,
+  "White",
+  c(Black = 220 / 2000 / ref, Other = 60 / 1500 / ref, Unknown = 1 / 4000 / ref)
+)$verdict
 
 ## -----------------------------------------------------------------------------
 rotated <- tab[c("Unknown", "White", "Black", "Other"), ]
@@ -316,7 +347,11 @@ levels(chk$decoded)
 ## -----------------------------------------------------------------------------
 f <- factor(c(1, 2, 3, 4, 1))
 levels(f) <- sort(unname(code_book))
-data.frame(code = c(1, 2, 3, 4, 1), became = as.character(f))
+data.frame(
+  code = c(1, 2, 3, 4, 1),
+  became = as.character(f),
+  stringsAsFactors = FALSE
+)
 
 ## ----error = TRUE-------------------------------------------------------------
 try({
@@ -330,15 +365,29 @@ xfrvrf(as.character(f), c(White = 2, Black = 1, Other = 1, Unknown = 1))
 })
 
 ## -----------------------------------------------------------------------------
-observed <- c(White = "Black", Black = "Other", Other = "Unknown", Unknown = "White")
+observed <- c(
+  White = "Black",
+  Black = "Other",
+  Other = "Unknown",
+  Unknown = "White"
+)
 rlblfrns(code_book, observed)
 
 ## ----categorical-integrity-rotation-plot, fig.width = 7, fig.height = 4.5-----
-odds_vs_white <- function(t) (t[, "yes"] / t[, "no"]) / (t["White", "yes"] / t["White", "no"])
+odds_vs_white <- function(t) {
+  (t[, "yes"] / t[, "no"]) / (t["White", "yes"] / t["White", "no"])
+}
 r <- rbind(correct = odds_vs_white(tab), rotated = odds_vs_white(rotated))[, -1]
-barplot(r, beside = TRUE, log = "y", col = blpal()[c(2, 1)], ylab = "odds ratio vs White (log scale)",
-        legend.text = c("correct labels", "labels rotated one place"),
-        args.legend = list(x = "topleft", bty = "n"), main = "Same counts, rotated labels")
+barplot(
+  r,
+  beside = TRUE,
+  log = "y",
+  col = blpal()[c(2, 1)],
+  ylab = "odds ratio vs White (log scale)",
+  legend.text = c("correct labels", "labels rotated one place"),
+  args.legend = list(x = "topleft", bty = "n"),
+  main = "Same counts, rotated labels"
+)
 abline(h = 1, lty = 2)
 
 ## ----include = FALSE----------------------------------------------------------
@@ -346,13 +395,22 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
 
 ## ----tables-statcan-----------------------------------------------------------
-pyll <- data.frame(GEO = rep(c("Inuit Nunangat", "Rest of Canada"), each = 5),
-                   Characteristics = rep(c("Number of potential years of life lost",
-                                           "Crude rate of potential years of life lost",
-                                           "Age-standardized rate of potential years of life lost",
-                                           "Low 95% confidence interval, potential years of life lost",
-                                           "High 95% confidence interval, potential years of life lost"), 2),
-                   VALUE = c(5000, 900, 1100, 1000, 1200, 7000, 800, 950, 870, 1030), STATUS = "")
+pyll <- data.frame(
+  GEO = rep(c("Inuit Nunangat", "Rest of Canada"), each = 5),
+  Characteristics = rep(
+    c(
+      "Number of potential years of life lost",
+      "Crude rate of potential years of life lost",
+      "Age-standardized rate of potential years of life lost",
+      "Low 95% confidence interval, potential years of life lost",
+      "High 95% confidence interval, potential years of life lost"
+    ),
+    2
+  ),
+  VALUE = c(5000, 900, 1100, 1000, 1200, 7000, 800, 950, 870, 1030),
+  STATUS = "",
+  stringsAsFactors = FALSE
+)
 scests(pyll)[, c("GEO", "measure", "estimate", "lower", "upper")]
 
 ## -----------------------------------------------------------------------------
@@ -558,7 +616,13 @@ topshr(tot$FIRST_NATIONS, fracs = c(0.25, 0.5))
 
 ## ----banded-tables-and-concentration-bands-lorenz-plot, fig.width = 8, fig.height = 4----
 op <- par(mfrow = c(1, 2))
-barplot(counts, names.arg = b$label, col = blpal()[2], main = "Counts by band", ylab = "count")
+barplot(
+  counts,
+  names.arg = b$label,
+  col = blpal()[2],
+  main = "Counts by band",
+  ylab = "count"
+)
 plotlrnz(placements, main = "Concentration of placements")
 par(op)
 
@@ -570,7 +634,8 @@ library(rmoriebricklayer)
 seg <- data.frame(
   EndFiscalYear = rep(2019:2023, each = 2),
   Gender = rep(c("Female", "Male"), 5),
-  NumberOfPlacements = c(31, 402, 28, 377, 12, 190, 19, 268, 24, 331)
+  NumberOfPlacements = c(31, 402, 28, 377, 12, 190, 19, 268, 24, 331),
+  stringsAsFactors = FALSE
 )
 
 ## -----------------------------------------------------------------------------
@@ -613,7 +678,8 @@ yoysmry(y)
 stops <- data.frame(
   division = c("North", "South", "East"),
   stops = c(412, 77, 3),
-  residents = c(120000, 41000, 9500))
+  residents = c(120000, 41000, 9500),
+  stringsAsFactors = FALSE)
 
 rtcalc(stops, stops, residents, by = "division", per = "100k")
 
@@ -625,7 +691,8 @@ d <- data.frame(
   year = rep(2021:2023, each = 2),
   division = rep(c("North", "South"), 3),
   stops = c(400, 70, 430, 66, 455, 61),
-  residents = c(120000, 41000, 122000, 41500, 125000, 42000))
+  residents = c(120000, 41000, 122000, 41500, 125000, 42000),
+  stringsAsFactors = FALSE)
 
 ratechg(d, stops, residents, year, by = "division", per = "100k")
 
@@ -714,28 +781,59 @@ trcprog()
 plot(fit)
 
 ## ----plotting-results-setup, include = FALSE----------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.2,
-                      dpi = 72)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4.2,
+  dpi = 72
+)
 library(rmoriebricklayer)
 
 ## ----plotting-results-stock-flow----------------------------------------------
-sf <- stkflow(days = c(13500, 14600, 15100, 14200), people = c(300, 320, 310, 290),
-                 prd = 2020:2023)
+sf <- stkflow(
+  days = c(13500, 14600, 15100, 14200),
+  people = c(300, 320, 310, 290),
+  prd = 2020:2023
+)
 plot(sf)
 
 ## ----plotting-results-yoy-----------------------------------------------------
-y <- yoy(data.frame(year = 2018:2023, n = c(40, 44, 41, 55, 52, 61)), value = "n",
-         prd = "year")
+y <- yoy(
+  data.frame(year = 2018:2023, n = c(40, 44, 41, 55, 52, 61)),
+  value = "n",
+  prd = "year"
+)
 plot(y)
 
 ## ----plotting-results-yoy-small-----------------------------------------------
-plot(yoy(data.frame(year = 2019:2023, n = c(10, 12, 11, 15, 14)), value = "n", prd = "year"))
+plot(yoy(
+  data.frame(year = 2019:2023, n = c(10, 12, 11, 15, 14)),
+  value = "n",
+  prd = "year"
+))
 
 ## ----plotting-results-rates---------------------------------------------------
-d <- data.frame(division = rep(c("north", "east", "west"), 2), year = rep(2022:2023, each = 3),
-                stops = c(120, 90, 60, 150, 85, 70), residents = c(1e4, 8e3, 5e3, 1e4, 8e3, 5e3))
-plot(rtcalc(d[d$year == 2023, ], count = "stops", pop = "residents", by = "division"))
-plot(ratechg(d, count = "stops", pop = "residents", prd = "year", by = "division"))
+d <- data.frame(
+  division = rep(c("north", "east", "west"), 2),
+  year = rep(2022:2023, each = 3),
+  stops = c(120, 90, 60, 150, 85, 70),
+  residents = c(1e4, 8e3, 5e3, 1e4, 8e3, 5e3),
+  stringsAsFactors = FALSE
+)
+plot(rtcalc(
+  d[d$year == 2023, ],
+  count = "stops",
+  pop = "residents",
+  by = "division"
+))
+plot(ratechg(
+  d,
+  count = "stops",
+  pop = "residents",
+  prd = "year",
+  by = "division"
+))
 
 ## ----plotting-results-checks--------------------------------------------------
 set.seed(1)
@@ -767,7 +865,9 @@ plot(co2fp(for (i in 1:20) sum(sqrt(seq_len(2e5))), loc = "CA",
                        cpupwrw = 45, memgb = 8))
 
 ## ----plotting-results-courts-data---------------------------------------------
-ext <- function(f) read.csv(system.file("extdata", f, package = "rmoriebricklayer"))
+ext <- function(f) {
+  read.csv(system.file("extdata", f, package = "rmoriebricklayer"))
+}
 f <- ext("ocj_flow_ontario.csv")
 d <- ext("ocj_time_to_disposition.csv")
 x <- ext("ocj_dispositions.csv")
@@ -797,7 +897,10 @@ plot(knoxtst(b$lon, b$lat, as.Date(b$occ_date), c(100, 200, 400), c(7, 14, 28),
 ## ----plotting-results-indigenous-data-----------------------------------------
 h <- indiex("health")
 adults <- h[h$age == "Total, 18 years and over", ]
-mh <- adults[adults$period == "2019/2022" & adults$indicator == "Perceived mental health, very good or excellent", ]
+mh <- adults[
+  adults$period == "2019/2022" &
+    adults$indicator == "Perceived mental health, very good or excellent",
+]
 
 ## ----plotting-results-indigenous-gap------------------------------------------
 plot(indgap(mh, "group", "estimate", "lower", "upper", qual = "quality"))
@@ -811,21 +914,47 @@ plot(ordcmp(r, "group", "rating", "estimate", "lower", "upper",
 
 ## ----plotting-results-indigenous-wellness, fig.height = 5---------------------
 wb <- indiex("wellbeing")
-w <- welprof(wb, "group", "indicator", "estimate", "lower", "upper",
-                      well = c("Always or often has a hopeful outlook",
-                                   "Sense of meaning and purpose rating of 8, 9 or 10"),
-                      distress = c("Rarely or never has a hopeful outlook",
-                                   "Life satisfaction rating between 0 and 5"),
-                      qual = "quality")
+w <- welprof(
+  wb,
+  "group",
+  "indicator",
+  "estimate",
+  "lower",
+  "upper",
+  well = c(
+    "Always or often has a hopeful outlook",
+    "Sense of meaning and purpose rating of 8, 9 or 10"
+  ),
+  distress = c(
+    "Rarely or never has a hopeful outlook",
+    "Life satisfaction rating between 0 and 5"
+  ),
+  qual = "quality"
+)
 plot(w)
-plot(dualcont(w, "Always or often has a hopeful outlook", "Life satisfaction rating between 0 and 5"))
+plot(dualcont(
+  w,
+  "Always or often has a hopeful outlook",
+  "Life satisfaction rating between 0 and 5"
+))
 
 ## ----plotting-results-indigenous-change---------------------------------------
-hc <- healchg(adults[adults$indicator %in% c("Perceived mental health, very good or excellent",
-                                                    "Mood disorder"), ],
-                     "group", "indicator", "period", "estimate", "lower", "upper",
-                     from = "2015/2018", to = "2019/2022", qual = "quality",
-                     well = "Perceived mental health, very good or excellent")
+hc <- healchg(
+  adults[
+    adults$indicator %in%
+      c("Perceived mental health, very good or excellent", "Mood disorder"),
+  ],
+  "group",
+  "indicator",
+  "period",
+  "estimate",
+  "lower",
+  "upper",
+  from = "2015/2018",
+  to = "2019/2022",
+  qual = "quality",
+  well = "Perceived mental health, very good or excellent"
+)
 plot(hc)
 
 ## ----plotting-results-indigenous-trc------------------------------------------
@@ -836,7 +965,15 @@ p <- polex()
 
 ## ----plotting-results-policy-design, fig.height = 3.5-------------------------
 plot(cohtrnd(p, "district", "month", "crmrate", "refmonth", win = c(-10, 10)))
-es <- evstudy(p, "district", "month", "crmrate", "refmonth", leads = 4, lags = 6)
+es <- evstudy(
+  p,
+  "district",
+  "month",
+  "crmrate",
+  "refmonth",
+  leads = 4,
+  lags = 6
+)
 plot(es)
 plot(bacondcmp(p, "district", "month", "crmrate", "reformed"))
 plot(perminf(p, "district", "month", "crmrate", "refmonth", cl = "region"))
@@ -845,11 +982,28 @@ plot(perminf(p, "district", "month", "crmrate", "refmonth", cl = "region"))
 plot(loounit(p, "district", "month", "crmrate", "reformed"))
 p13 <- p[is.na(p$refmonth) | p$district == "D13", ]
 plot(synctl(p13, "district", "month", "crmrate", "D13", adopt = 13))
-plot(syndid(p13, "district", "month", "crmrate", "refmonth", reps = 50, seed = 1))
+plot(syndid(
+  p13,
+  "district",
+  "month",
+  "crmrate",
+  "refmonth",
+  reps = 50,
+  seed = 1
+))
 
 ## ----plotting-results-policy-checks, fig.height = 3.5-------------------------
-plot(plnpwr(p[p$month <= 12, ], "district", "month", "crmrate", ntrt = 10, adopt = 7:10,
-            eff = c(0, 0.5, 1, 1.5), reps = 40, seed = 1))
+plot(plnpwr(
+  p[p$month <= 12, ],
+  "district",
+  "month",
+  "crmrate",
+  ntrt = 10,
+  adopt = 7:10,
+  eff = c(0, 0.5, 1, 1.5),
+  reps = 40,
+  seed = 1
+))
 set.seed(7)
 n <- 600
 d <- data.frame(age = runif(n, 18, 70), income = rnorm(n))
@@ -860,10 +1014,19 @@ plot(fit)
 plot(fit, type = "estimate")
 e <- pmin(pmax(attr(fit, "propensity")$propensity, 0.01), 0.99)
 d$ipw <- ifelse(d$t == 1, 1 / e, 1 / (1 - e))
-plot(baltab(d, "t", c("age", "income")), after = baltab(d, "t", c("age", "income"), w = "ipw"))
+plot(
+  baltab(d, "t", c("age", "income")),
+  after = baltab(d, "t", c("age", "income"), w = "ipw")
+)
 
 ## ----plotting-results-custom--------------------------------------------------
-plot(sf, what = "alos", col = "firebrick", main = "Length of stay (days)", lwd = 3)
+plot(
+  sf,
+  what = "alos",
+  col = "firebrick",
+  main = "Length of stay (days)",
+  lwd = 3
+)
 old <- plotopt(palette = "grey", grid = FALSE)
 plot(y, what = "value")
 plotopt(palette = old$palette, grid = old$grid)

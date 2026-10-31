@@ -44,10 +44,11 @@ script_dir <- (function() {
 args <- commandArgs(trailingOnly = TRUE)
 QUICK_MODE <- any(args %in% c("-q", "--quick"))
 HELP_MODE  <- any(args %in% c("-h", "--help"))
-## --synthetic (or OTIS_MRP_SYNTHETIC=1): take the synthetic-data route
-## without a prompt, so an offline or unattended run can exercise it.
-SYNTH_ARG  <- any(args %in% "--synthetic") ||
-  nzchar(Sys.getenv("OTIS_MRP_SYNTHETIC", ""))
+## --synthetic (or BRICKLAYER_SYNTHETIC=1, or the variable config.json
+## names in synthetic_env): take the synthetic-data route without a prompt,
+## so an offline or unattended run can exercise it. Set once config.json
+## is read, below.
+SYNTH_ARG  <- any(args %in% "--synthetic")
 ## The pinned digest is the capsule's guarantee. A mismatch stops the run
 ## (exit 7) unless this flag is given, and then the override is recorded
 ## in the manifest rather than printed once and forgotten.
@@ -74,9 +75,26 @@ if (!QUICK_MODE && !isatty(stdin())) {
   AUTO_QUICK <- TRUE
 }
 DATA_ARG   <- NULL
+usage_stop <- function(...) {
+  cat("ERROR: ", ..., "\n", sep = "")
+  cat("Usage: Rscript setup_and_run.R [--quick] [--synthetic] ",
+      "[--data PATH] [--allow-digest-drift] [--help]\n", sep = "")
+  quit(status = 2)
+}
 if (any(args == "--data")) {
   i <- which(args == "--data")[1]
-  if (length(args) >= i + 1) DATA_ARG <- args[i + 1]
+  if (length(args) < i + 1 || startsWith(args[i + 1], "-")) {
+    usage_stop("--data needs a file path after it")
+  }
+  DATA_ARG <- args[i + 1]
+}
+known <- c("-q", "--quick", "-h", "--help", "--synthetic",
+           "--allow-digest-drift", "--data")
+rest <- args
+if (!is.null(DATA_ARG)) rest <- rest[-(which(args == "--data")[1] + 0:1)]
+odd <- rest[!rest %in% known]
+if (length(odd)) {
+  usage_stop("unknown argument(s): ", paste(odd, collapse = " "))
 }
 
 if (HELP_MODE) {
@@ -90,7 +108,11 @@ if (HELP_MODE) {
 LIB_DIR <- script_dir  # libs may be next to setup_and_run.R after bundle build
 for (lib in c("aaa_input_guards.R", "aaa_local_seed.R",
               "json_native.R", "sha256_native.R",
-              "lib_interactive.R", "lib_helpers.R", "lib_data_loader.R",
+              "lib_interactive.R", "lib_helpers.R",
+              # the boxed print-out every result carries: its frame, the
+              # readings and the block layout (custody.R) the boxes draw with
+              "print_methods.R", "box_readings.R", "custody.R",
+              "lib_data_loader.R",
               "lib_synthetic.R", "lib_manifest.R",
               "yoy.R", "rate.R")) {
   lib_path <- file.path(LIB_DIR, lib)
@@ -104,9 +126,25 @@ CONFIG_PATH     <- file.path(script_dir, "config.json")
 PROVENANCE_PATH <- file.path(script_dir, "data_provenance.json")
 if (!file.exists(CONFIG_PATH))
   stop("config.json not found at ", CONFIG_PATH)
-# the bundled native codec (json_native.R): no jsonlite needed
-cfg <- fromjs(CONFIG_PATH, simplifyVector = FALSE)
-prov <- loadprov(PROVENANCE_PATH)
+# the bundled native codec (json_native.R): no jsonlite needed. A file
+# that is not valid JSON (or repeats a key) stops the run in words, with
+# exit status 2, not with an R traceback
+read_or_stop <- function(what, expr) {
+  tryCatch(expr, error = function(e) {
+    cat("ERROR: ", what, " could not be read: ", conditionMessage(e), "\n",
+        sep = "")
+    cat("  Fix the file (or ask the bundle's author for a fixed copy)",
+        " and run this again.\n", sep = "")
+    quit(status = 2)
+  })
+}
+cfg <- read_or_stop("config.json",
+                    fromjs(CONFIG_PATH, simplifyVector = FALSE))
+if (!is.list(cfg)) {
+  cat("ERROR: config.json could not be read: it is not a JSON object\n")
+  quit(status = 2)
+}
+prov <- read_or_stop("data_provenance.json", loadprov(PROVENANCE_PATH))
 
 PROJECT_NAME    <- cfg$project$name         %||% "bricklayer-project"
 PROJECT_AUTHOR  <- cfg$project$author       %||% "(unknown author)"
@@ -115,13 +153,23 @@ PROJECT_LICENCE <- cfg$project$licence      %||% "AGPL-3.0-or-later"
 ANALYSIS_R      <- file.path(script_dir,
                              cfg$analysis$r_script %||% "analysis.R")
 REQ_PKGS        <- unlist(cfg$r_packages) %||% c()
+## one variable at a time: Sys.getenv() of no names returns the whole
+## environment, which would turn every run synthetic
+SYNTH_VARS <- c("BRICKLAYER_SYNTHETIC", unlist(cfg$synthetic_env))
+SYNTH_ARG <- SYNTH_ARG ||
+  any(vapply(SYNTH_VARS, function(v) nzchar(Sys.getenv(v, "")), logical(1)))
+## Packages a project needs only when an environment variable is set
+## (config.json env_packages: {"VARIABLE": ["pkg", ...]}).
+for (ev in names(cfg$env_packages)) {
+  if (nzchar(Sys.getenv(ev, "")))
+    REQ_PKGS <- unique(c(REQ_PKGS, unlist(cfg$env_packages[[ev]])))
+}
 ## Opt-in stages have their own dependencies; probe them up front when the
 ## stage is switched on, so a missing package is reported here and not
 ## thirty seconds into the run.
-dml_on <- tolower(Sys.getenv("OTIS_DML_RECOMPUTE", "")) %in%
-  c("1", "yes", "true", "y")
-if (nzchar(Sys.getenv("OTIS_REGION_MAP_SHP", "")))
-  REQ_PKGS <- unique(c(REQ_PKGS, "sf"))
+env_on <- function(ev) {
+  tolower(Sys.getenv(ev, "")) %in% c("1", "yes", "true", "y")
+}
 
 ## ---------- Banner + OS detection ----------
 OS_KIND <- detect_os()
@@ -165,7 +213,8 @@ cat("\n  Internet endpoints the script may contact:\n")
 for (url in unlist(cfg$network$endpoints %||% c())) {
   cat("    - ", url, "\n", sep = "")
 }
-cat("    - https://web.archive.org/web/...       (Wayback fallback, if needed)\n")
+if (length(prov$wayback))
+  cat("    - https://web.archive.org/web/...       (Wayback fallback, if needed)\n")
 cat("  No telemetry. No third-party services. No personal data leaves your machine.\n")
 cat("----------------------------------------------------------\n\n")
 
@@ -199,32 +248,31 @@ if (length(REQ_PKGS) > 0L) {
 } else {
   say("  (No packages declared in config$r_packages.)")
 }
-## The published DML estimates were produced with DoubleML + mlr3, so that
-## is the route the recompute reproduces; rmorie's morie_otis_irm_dml() is
-## the same estimator in ~10 s and is used only when DoubleML is absent.
-if (dml_on) {
-  fb <- c("DoubleML", "mlr3", "mlr3learners")
-  fb_missing <- fb[!vapply(fb, requireNamespace, logical(1),
-                           quietly = TRUE)]
-  if (length(fb_missing) == 0L) {
-    say("  \u2713 OTIS_DML_RECOMPUTE: DoubleML, mlr3 and mlr3learners present",
-        " (the published route; ~24 min, ~6 GB RAM).")
-  } else if (requireNamespace("rmorie", quietly = TRUE)) {
-    say("  OTIS_DML_RECOMPUTE: DoubleML route missing ",
-        paste(fb_missing, collapse = ", "),
-        "; rmorie is installed and its ~10 s implementation of the same")
-    say("  estimator will be used instead. For the published route:")
-    say("    install.packages(c(", paste0('"', fb, '"', collapse = ", "), "))")
+## Opt-in stages (config.json optional_stages): each names the variable
+## that switches it on, the packages it needs, and optionally an
+## alternative package that does the same work.
+for (st in cfg$optional_stages) {
+  if (!env_on(st$env)) next
+  need <- unlist(st$packages)
+  gone <- need[!vapply(need, requireNamespace, logical(1), quietly = TRUE)]
+  alt <- st$alternative %||% ""
+  if (length(gone) == 0L) {
+    say("  \u2713 ", st$env, ": ", paste(need, collapse = ", "), " present",
+        if (!is.null(st$note)) paste0(" (", st$note, ")"), ".")
+  } else if (nzchar(alt) && requireNamespace(alt, quietly = TRUE)) {
+    say("  ", st$env, ": missing ", paste(gone, collapse = ", "),
+        "; ", alt, " is installed and does the same work instead.")
+    say("  For the reference route:")
+    say("    install.packages(c(", paste0(', need, ', collapse = ", "), "))")
   } else {
-    say("  Missing for OTIS_DML_RECOMPUTE=1: ",
-        paste(fb_missing, collapse = ", "))
+    say("  Missing for ", st$env, "=1: ", paste(gone, collapse = ", "))
     say("  This script does not install packages itself. Install them in R,")
     say("  then re-run this script:")
-    say("    install.packages(c(", paste0('"', fb, '"', collapse = ", "), "))")
-    say("  Alternative: rmorie gives the same estimator in ~10 s (it is on r-universe, not CRAN):")
-    say("    install.packages(\"rmorie\", repos = c(\"https://rootcoder007.r-universe.dev\",",
-        " \"https://cloud.r-project.org\"))")
-    say("  Or unset OTIS_DML_RECOMPUTE: the 8 DML checks then record as INFO.")
+    say("    install.packages(c(", paste0(', need, ', collapse = ", "), "))")
+    if (!is.null(st$alternative_install))
+      say("  Alternative: ", st$alternative_install)
+    say("  Or unset ", st$env, if (!is.null(st$skip_note))
+      paste0(": ", st$skip_note) else ".")
     quit(status = 3)
   }
 }
@@ -245,6 +293,7 @@ default_candidates <- function() {
   fn   <- prov$resource$filename %||% "input.csv"
   cands <- c(
     file.path(script_dir, fn),
+    file.path(script_dir, "data", fn),
     file.path(home, "Desktop", fn),
     file.path(home, "Downloads", fn),
     file.path(home, "Documents", fn),
@@ -254,20 +303,42 @@ default_candidates <- function() {
   unlist(c(cands, cfg$data$default_candidates %||% c()))
 }
 
+## A file the reviewer supplies (--data, one found beside the bundle or in
+## its data/ folder, one named at the prompt) is checked against the pinned
+## SHA-256 like a downloaded one: the digest is the capsule's guarantee
+check_pinned <- function(path) {
+  if (nzchar(unlist(prov$resource$sha256 %||% "")[1L])) {
+    v <- vrfsha256(path, prov$resource$sha256)
+    if (v$match) say("  SHA256 matches the pinned provenance.")
+    else digest_mismatch(v)
+  }
+  invisible(path)
+}
+
 if (!is.null(DATA_ARG)) {
   if (!file.exists(DATA_ARG)) {
     say("ERROR: --data path does not exist: ", DATA_ARG)
     quit(status = 4)
   }
+  if (dir.exists(DATA_ARG)) {
+    say("ERROR: --data is a folder, not a data file: ", DATA_ARG)
+    quit(status = 4)
+  }
   input_path <- DATA_ARG
   say("  Using --data: ", input_path)
+  check_pinned(input_path)
 } else {
-  cands <- default_candidates()
+  ## --synthetic asks for generated data: a real file lying beside the
+  ## script is not picked up in its place
+  cands <- if (SYNTH_ARG) character() else default_candidates()
   hits  <- cands[file.exists(cands)]
   if (length(hits) > 0L) {
     say("  Found a candidate file at:")
     say("    ", hits[1])
-    if (ask_yn("  Use this file?", "Y", QUICK_MODE)) input_path <- hits[1]
+    if (ask_yn("  Use this file?", "Y", QUICK_MODE)) {
+      input_path <- hits[1]
+      check_pinned(input_path)
+    }
   }
 
   if (is.null(input_path)) {
@@ -306,6 +377,7 @@ if (!is.null(DATA_ARG)) {
         say("ERROR: file does not exist: ", candidate); quit(status = 4)
       }
       input_path <- normalizePath(candidate)
+      check_pinned(input_path)
     }
 
     else if (choice == 2L) {
@@ -332,7 +404,7 @@ if (!is.null(DATA_ARG)) {
         say("ERROR: file does not exist: ", candidate); quit(status = 4)
       }
       input_path <- normalizePath(candidate)
-      if (!is.null(prov$resource$sha256)) {
+      if (nzchar(prov$resource$sha256 %||% "")) {
         v <- vrfsha256(input_path, prov$resource$sha256)
         if (v$match) say("  ✓ SHA256 matches pinned provenance.")
         else digest_mismatch(v)
@@ -340,16 +412,27 @@ if (!is.null(DATA_ARG)) {
     }
 
     else if (choice == 3L) {
+      ## no download without the package's own downloader: base R cannot
+      ## pin addresses or re-check every redirect (fail closed)
+      if (is.null(.rmbl_bdl())) {
+        say("ERROR: ", .rmbl_nodl(), ".")
+        say("  Or run on synthetic data: --synthetic.")
+        quit(status = 5)
+      }
       save_dir <- ask_save_location(
         "  Where should I save the downloaded file?",
         default_key  = "bundle",
         script_dir   = script_dir,
         project_name = PROJECT_NAME,
         quick        = QUICK_MODE)
+      # an empty address is no address (a config without a source)
+      blank <- function(x) {
+        is.null(x) || length(x) == 0L || is.na(x[[1L]]) || !nzchar(x[[1L]])
+      }
       url <- rslvckan(prov)
-      if (is.null(url)) url <- rslvckns(prov)
-      if (is.null(url)) url <- prov$resource$direct_url
-      if (is.null(url)) {
+      if (blank(url)) url <- rslvckns(prov)
+      if (blank(url)) url <- prov$resource$direct_url
+      if (blank(url)) {
         say("ERROR: no download URL available — provenance missing.")
         quit(status = 5)
       }
@@ -368,7 +451,7 @@ if (!is.null(DATA_ARG)) {
         quit(status = 5)
       }
       input_path <- target
-      if (!is.null(prov$resource$sha256)) {
+      if (nzchar(prov$resource$sha256 %||% "")) {
         v <- vrfsha256(target, prov$resource$sha256)
         if (v$match) say("  ✓ SHA256 byte-for-byte match.")
         else digest_mismatch(v)
@@ -442,10 +525,18 @@ if (isTRUE(SYNTHETIC_MODE)) {
 sh_type <- if (OS_KIND == "windows") "cmd" else "sh"
 run_args <- c(shQuote(ANALYSIS_R, type = sh_type), shQuote(input_path, type = sh_type),
               shQuote(output_dir, type = sh_type))
-env_vec <- if (isTRUE(SYNTHETIC_MODE)) "BRICKLAYER_SYNTHETIC=1" else character(0)
+## The child inherits this process's environment. system2(env = ) is not
+## used: on Windows it puts NAME=value in front of the command, which cmd
+## cannot run, so analysis.R never started there.
+old_synth <- Sys.getenv("BRICKLAYER_SYNTHETIC", unset = NA)
+if (isTRUE(SYNTHETIC_MODE)) Sys.setenv(BRICKLAYER_SYNTHETIC = "1")
 exit_code <- system2(rscript_bin, run_args,
-                     stdout = log_path, stderr = log_path,
-                     env = env_vec)
+                     stdout = log_path, stderr = log_path)
+if (is.na(old_synth)) {
+  Sys.unsetenv("BRICKLAYER_SYNTHETIC")
+} else {
+  Sys.setenv(BRICKLAYER_SYNTHETIC = old_synth)
+}
 cat(readLines(log_path, warn = FALSE), sep = "\n")
 hr()
 
@@ -521,6 +612,10 @@ if (exit_code != 0L || !file.exists(manifest_path)) {
 }
 say("  Results folder: ", output_dir)
 say("  Plain-language summary: SUMMARY.txt in that folder.")
+
+## A run that wrote no manifest did not complete, whatever the analysis
+## script's own exit status: exit 8, so a harness (mkbndlchk) sees it
+if (exit_code == 0L && !file.exists(manifest_path)) exit_code <- 8L
 
 ## Never in quick mode: unattended runs have no desktop to open, and a
 ## headless xdg-open blocks forever, keeping this process alive.

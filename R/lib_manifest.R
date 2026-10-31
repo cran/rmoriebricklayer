@@ -62,6 +62,9 @@
 #'   filled by [recrd()]) and, when \code{environment = TRUE},
 #'   \code{environment} (the list from
 #'   [capenv()]).
+#'    The list has class \code{c("rmbl_manifest", "list")}, which only changes
+#'   how it prints (a box); its elements, and the JSON written from it, are
+#'   those of a plain list.
 #' @seealso [recrd()],
 #'   [wrmnfjs()],
 #'   [wrsmrytxt()],
@@ -87,16 +90,56 @@
 #' try(mkmnf("demo"))
 #' @export
 mkmnf <- function(meta, env = TRUE) {
-  if (!is.list(meta)) stop("`meta` must be a list", call. = FALSE)
+  if (!is.list(meta)) {
+    stop("`meta` must be a list", call. = FALSE)
+  }
   # the package owns the synthetic flag: set here from BRICKLAYER_SYNTHETIC
   # (the reference pipeline sets it for its analysis subprocess), so a
   # manifest written on generated data says so whatever the script did
   # the flag is written only when it is TRUE: a manifest of real data keeps
   # the digest it had before the flag existed
-  if (isTRUE(meta$synthetic) || .rmbl_synthetic_flag()) meta$synthetic <- TRUE
+  if (isTRUE(meta$synthetic) || .rmbl_synthetic_flag()) {
+    meta$synthetic <- TRUE
+  }
   m <- list(meta = meta, results = list())
-  if (isTRUE(env)) m$environment <- capenv()
-  m
+  if (.rmbl_flag1(env, "env")) {
+    m$environment <- capenv()
+  }
+  .rmbl_cls(m, "rmbl_manifest")
+}
+
+#' @export
+format.rmbl_manifest <- function(x, ...) {
+  if (!is.list(x$meta) || !is.list(x$results)) {
+    return(utils::capture.output(print(unclass(x))))
+  }
+  res <- x$results
+  env <- x$environment
+  .an_block(
+    "Run manifest",
+    facts = c(
+      .mf_meta_facts(x$meta),
+      list(
+        `Cross-checks` = .mf_tally(res),
+        Environment = if (is.list(env)) {
+          sprintf(
+            "R %s on %s, %d packages",
+            env$r_version %||% "?",
+            env$platform %||% "?",
+            length(env$packages)
+          )
+        } else {
+          "not captured"
+        }
+      )
+    ),
+    tables = list(`Cross-checks` = .mf_results(res)),
+    reading = .mf_reading(res, x$meta),
+    notes = c(
+      "wrmnfjs() writes it as JSON; mnfdgst() is the digest a signature",
+      "covers. Neither depends on how it prints."
+    )
+  )
 }
 
 #' Record a Cross-Check Result in a Manifest
@@ -179,21 +222,24 @@ mkmnf <- function(meta, env = TRUE) {
 #' # Calls chain: record() returns the mutated manifest.
 #' length(man$results) # 4
 #' @export
-recrd <- function(man, name, obs, expd,
-                   tol = 0.0001, grp = "general",
-                   syn = FALSE) {
-  .rmbl_no_fn(observed = obs, expected = expd)
-  if (!is.list(man) || is.data.frame(man)) stop("recrd: `man` must be a manifest from mkmnf()", call. = FALSE)
+recrd <- function(
+  man,
+  name,
+  obs,
+  expd,
+  tol = 0.0001,
+  grp = "general",
+  syn = FALSE
+) {
+  .rmbl_no_fn(obs = obs, expd = expd)
+  if (!is.list(man) || is.data.frame(man)) {
+    stop("recrd: `man` must be a manifest from mkmnf()", call. = FALSE)
+  }
   name <- .rmbl_string1(name, "name")
   tol <- .rmbl_scalar(tol, "tol", 0)
   # one value each: a vector made the PASS test `diff <= tol` a vector and
   # failed in R's own words ('length = 2' in coercion to 'logical(1)')
-  lens <- c(observed = length(obs), expected = length(expd))
-  if (any(lens != 1L)) {
-    bad <- which(lens != 1L)[1L]
-    arg <- c(observed = "obs", expected = "expd", tol = "tol")
-    stop(sprintf("`%s` must be a single value, got %d", arg[[names(lens)[bad]]], lens[[bad]]), call. = FALSE)
-  }
+  .rmbl_recrd_one(obs, expd)
   diff <- if (is.numeric(obs) && is.numeric(expd)) {
     abs(obs - expd)
   } else {
@@ -201,15 +247,7 @@ recrd <- function(man, name, obs, expd,
   }
   # a manifest built on synthetic data makes every comparison INFO
   syn <- isTRUE(syn) || isTRUE(man$meta$synthetic)
-  status <- if (syn) {
-    "INFO"
-  } else if (!is.na(diff) && diff <= tol) {
-    "PASS"
-  } else if (!is.na(diff)) {
-    "DIFFER"
-  } else {
-    "INFO"
-  }
+  status <- .rmbl_recrd_status(syn, diff, tol)
   man$results[[name]] <- list(
     group = grp,
     observed = obs,
@@ -276,7 +314,8 @@ recrd <- function(man, name, obs, expd,
 #'
 #' # Round-trips back through the package's own codec.
 #' back <- fromjs(path, simplifyVector = FALSE)
-#' back$results$rowcount$status # "PASS" ("INFO" after synthetic data, see mkmnf())
+#' # "PASS" ("INFO" after synthetic data, see mkmnf())
+#' back$results$rowcount$status
 #'
 #' # the canonical form: one line whose SHA-256 is the manifest digest
 #' cpath <- wrmnfjs(man, tempfile(fileext = ".json"), canon = TRUE)
@@ -286,8 +325,10 @@ recrd <- function(man, name, obs, expd,
 #' try(wrmnfjs(man, c("a.json", "b.json")))
 #' @export
 wrmnfjs <- function(man, path, canon = FALSE) {
-  path <- .rmbl_string1(path, "path")
-  if (!is.list(man)) stop("wrmnfjs: `man` must be a manifest from mkmnf()", call. = FALSE)
+  path <- .rmbl_out_file(path, "path", connection = FALSE)
+  if (!is.list(man)) {
+    stop("wrmnfjs: `man` must be a manifest from mkmnf()", call. = FALSE)
+  }
   # never written without the flag (see mkmnf())
   if (isTRUE(man$meta$synthetic) || .rmbl_synthetic_flag()) {
     man$meta$synthetic <- TRUE
@@ -296,10 +337,12 @@ wrmnfjs <- function(man, path, canon = FALSE) {
     writeLines(mnfcanon(man), path, useBytes = TRUE)
     return(invisible(path))
   }
-  writeLines(
-    tojs(man,
+  .rmbl_wlines(
+    tojs(
+      man,
       auto_unbox = TRUE,
-      pretty = TRUE, na = "null",
+      pretty = TRUE,
+      na = "null",
       null = "null",
       digits = I(17)
     ),
@@ -369,16 +412,23 @@ wrmnfjs <- function(man, path, canon = FALSE) {
 #' try(mnfdgst("not a manifest"))
 #' @export
 mnfcanon <- function(man) {
-  if (!is.list(man)) stop("`man` must be a list", call. = FALSE)
+  if (!is.list(man)) {
+    stop("`man` must be a list", call. = FALSE)
+  }
   # keep_empty_names: an empty-string key is written as "", not renamed to
   # its position, so two documents differing only there do not share a digest
   # keep_vec_names: a named atomic vector is an object too ({"a":1} is not
   # [1]); the names attribute, present or absent, is what tells an object
   # from an array at every level, so the encoding is one-to-one
-  tojs(.rmbl_sort_keys(man),
+  tojs(
+    .rmbl_sort_keys(man),
     auto_unbox = TRUE,
-    pretty = FALSE, na = "null", null = "null",
-    digits = I(17), keep_empty_names = TRUE, keep_vec_names = TRUE,
+    pretty = FALSE,
+    na = "null",
+    null = "null",
+    digits = I(17),
+    keep_empty_names = TRUE,
+    keep_vec_names = TRUE,
     quiet_vec_names = TRUE
   )
 }
@@ -387,70 +437,6 @@ mnfcanon <- function(man) {
 #' @export
 mnfdgst <- function(man) {
   .rmbl_sha256_bytes(charToRaw(mnfcanon(man)))
-}
-
-#' Hashes bytes with SHA-256, natively when the compiled core is there.
-#'
-#' Inside the package: the compiled core; sourced standalone in a capsule
-#' bundle: the pure-R implementation from sha256_native.R.
-#' @param bytes A raw vector.
-#' @param native Whether the compiled csha256() is used.
-#' @return The hex digest.
-#' @noRd
-.rmbl_sha256_bytes <- function(bytes,
-                               native = exists("csha256",
-                                 mode = "function"
-                               )) {
-  if (native) {
-    return(csha256(bytes))
-  }
-  .rmbl_sha256_hex(bytes)
-}
-
-#' Recursively order the names of every list, leaving unnamed lists (JSON
-#' arrays, where order is content) alone.
-#' @param x A parsed JSON value.
-#' @return `x` with the names of every named list in sorted order.
-#' @noRd
-.rmbl_sort_keys <- function(x) {
-  if (!is.list(x)) {
-    return(x)
-  }
-  x <- lapply(x, .rmbl_sort_keys)
-  nm <- names(x)
-  if (is.null(nm)) {
-    return(x)
-  }
-  # A list with a names attribute is a JSON object, and an empty string is
-  # a legal key that sorts first: {"":"X"} and {"1":"X"} are different
-  # documents (the encoder writes "" as "", see mnfcanon()). That
-  # holds when EVERY name is empty too: {"":"X"} is not ["X"], and 0.5.7's
-  # "all names empty is an array" rule made one attestation verify both.
-  # The parser sets the names attribute on objects and never on arrays, so
-  # its presence is the distinction, not the names' contents.
-  x[order(nm, method = "radix")]
-}
-
-#' Summarise Manifest Result Counts
-#'
-#' Tallies the status of every recorded cross-check in a manifest.
-#'
-#' @param manifest A manifest whose `results` entries
-#' each carry a `status` of `"PASS"`, `"DIFFER"`, or
-#' `"INFO"`.
-#' @return A list with integer counts `total`, `pass`,
-#' `differ`, `warn`, and `info`.
-#' @keywords internal
-#' @noRd
-summarise_counts <- function(manifest) {
-  statuses <- vapply(manifest$results, function(x) x$status, character(1))
-  list(
-    total  = length(statuses),
-    pass   = sum(statuses == "PASS"),
-    differ = sum(statuses == "DIFFER"),
-    warn   = sum(statuses == "WARN"),
-    info   = sum(statuses == "INFO")
-  )
 }
 
 ## ----- SUMMARY.txt -----
@@ -522,24 +508,162 @@ summarise_counts <- function(manifest) {
 #' # the manifest has to be a list
 #' try(wrsmrytxt("demo", out, paths = list()))
 #' @export
-wrsmrytxt <- function(man, outdir, paths,
-                              whatwasdone = NULL,
-                              contact = NULL,
-                              lic = NULL) {
-  if (!is.list(man)) stop("wrsmrytxt: `man` must be a manifest from mkmnf()", call. = FALSE)
+wrsmrytxt <- function(
+  man,
+  outdir,
+  paths,
+  whatwasdone = NULL,
+  contact = NULL,
+  lic = NULL
+) {
+  if (!is.list(man)) {
+    stop("wrsmrytxt: `man` must be a manifest from mkmnf()", call. = FALSE)
+  }
   counts <- summarise_counts(man)
   outdir <- .rmbl_string1(outdir, "outdir")
-  if (!dir.exists(outdir)) stop("`outdir` is not a directory: ", outdir, call. = FALSE)
-  for (nm in c("whatwasdone", "contact", "lic")) {
-    v <- get(nm)
+  if (!dir.exists(outdir)) {
+    stop("`outdir` is not a directory: ", outdir, call. = FALSE)
+  }
+  .rmbl_smry_check_text(whatwasdone, contact, lic)
+  files <- sort(list.files(outdir))
+  lines <- c(
+    .rmbl_smry_head(man),
+    .rmbl_smry_paths(paths),
+    .rmbl_smry_counts(counts, files),
+    .rmbl_smry_tail(man, whatwasdone, contact, lic)
+  )
+  .rmbl_wlines(lines, file.path(outdir, "SUMMARY.txt"))
+  invisible(file.path(outdir, "SUMMARY.txt"))
+}
+
+#' Hashes bytes with SHA-256, natively when the compiled core is there.
+#'
+#' Inside the package: the compiled core; sourced standalone in a capsule
+#' bundle: the pure-R implementation from sha256_native.R.
+#' @param bytes The raw bytes to hash with SHA-256.
+#' @param native Whether the compiled csha256() is used.
+#' @return The hex digest.
+#' @noRd
+.rmbl_sha256_bytes <- function(
+  bytes,
+  native = exists("csha256", mode = "function")
+) {
+  if (native) {
+    return(csha256(bytes))
+  }
+  .rmbl_sha256_hex(bytes)
+}
+
+#' Recursively order the names of every list, leaving unnamed lists (JSON
+#' arrays, where order is content) alone.
+#' @param x A parsed JSON value.
+#' @return `x` with the names of every named list in sorted order.
+#' @noRd
+.rmbl_sort_keys <- function(x) {
+  if (!is.list(x)) {
+    return(x)
+  }
+  x <- lapply(x, .rmbl_sort_keys)
+  nm <- names(x)
+  if (is.null(nm)) {
+    return(x)
+  }
+  # A list with a names attribute is a JSON object, and an empty string is
+  # a legal key that sorts first: {"":"X"} and {"1":"X"} are different
+  # documents (the encoder writes "" as "", see mnfcanon()). That
+  # holds when EVERY name is empty too: {"":"X"} is not ["X"], and 0.5.7's
+  # "all names empty is an array" rule made one attestation verify both.
+  # The parser sets the names attribute on objects and never on arrays, so
+  # its presence is the distinction, not the names' contents.
+  x[order(nm, method = "radix")]
+}
+
+#' Summarise Manifest Result Counts
+#'
+#' Tallies the status of every recorded cross-check in a manifest.
+#'
+#' @param manifest A manifest whose `results` entries
+#' each carry a `status` of `"PASS"`, `"DIFFER"`, or
+#' `"INFO"`.
+#' @return A list with integer counts `total`, `pass`,
+#' `differ`, `warn`, and `info`.
+#' @keywords internal
+#' @noRd
+summarise_counts <- function(manifest) {
+  statuses <- vapply(manifest$results, function(x) x$status, character(1))
+  list(
+    total = length(statuses),
+    pass = sum(statuses == "PASS"),
+    differ = sum(statuses == "DIFFER"),
+    warn = sum(statuses == "WARN"),
+    info = sum(statuses == "INFO")
+  )
+}
+
+#' Stops unless `obs` and `expd` are one value each.
+#' @param obs,expd As for recrd().
+#' @return Nothing useful.
+#' @noRd
+.rmbl_recrd_one <- function(obs, expd) {
+  lens <- c(observed = length(obs), expected = length(expd))
+  if (any(lens != 1L)) {
+    bad <- which(lens != 1L)[1L]
+    arg <- c(observed = "obs", expected = "expd", tol = "tol")
+    stop(
+      sprintf(
+        "`%s` must be a single value, got %d",
+        arg[[names(lens)[bad]]],
+        lens[[bad]]
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
+#' The status of one recorded comparison.
+#' @param syn Whether the data are synthetic.
+#' @param diff The absolute difference, NA when not numeric.
+#' @param tol The tolerance a recorded difference must be within.
+#' @return "PASS", "DIFFER" or "INFO".
+#' @noRd
+.rmbl_recrd_status <- function(syn, diff, tol) {
+  if (syn) {
+    "INFO"
+  } else if (!is.na(diff) && diff <= tol) {
+    "PASS"
+  } else if (!is.na(diff)) {
+    "DIFFER"
+  } else {
+    "INFO"
+  }
+}
+
+#' Stops unless each text argument of wrsmrytxt() is text or NULL.
+#' @param whatwasdone,contact,lic As for wrsmrytxt().
+#' @return Nothing useful.
+#' @noRd
+.rmbl_smry_check_text <- function(whatwasdone, contact, lic) {
+  args <- list(whatwasdone = whatwasdone, contact = contact, lic = lic)
+  for (nm in names(args)) {
+    v <- args[[nm]]
     if (!is.null(v) && (!is.character(v) || anyNA(v))) {
-      stop(sprintf("`%s` must be text (a character vector), or NULL", nm), call. = FALSE)
+      stop(
+        sprintf("`%s` must be text (a character vector), or NULL", nm),
+        call. = FALSE
+      )
     }
   }
-  files <- sort(list.files(outdir))
-  is_synth <- isTRUE(man$meta$synthetic)
+  invisible(NULL)
+}
 
-  lines <- c(
+#' The heading of SUMMARY.txt: the run's metadata.
+#' @param man The manifest whose meta block heads the summary.
+#' @return A character vector of lines.
+#' @noRd
+.rmbl_smry_head <- function(man) {
+  is_synth <- isTRUE(man$meta$synthetic)
+  c(
     "##########################################################",
     "#                                                        #",
     "#   REPRODUCIBILITY RUN -- SUMMARY                        #",
@@ -548,32 +672,59 @@ wrsmrytxt <- function(man, outdir, paths,
     "",
     paste0("Project:   ", man$meta$project %||% "(unnamed)"),
     paste0("Author:    ", man$meta$author %||% "(unknown)"),
-    paste0("When:      ", man$meta$run_at %||%
-      format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")),
+    paste0(
+      "When:      ",
+      man$meta$run_at %||%
+        format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+    ),
     paste0("OS:        ", man$meta$os %||% Sys.info()[["sysname"]]),
     paste0("R:         ", man$meta$r_version %||% R.version.string),
-    paste0("Mode:      ", if (is_synth) {
-      "SYNTHETIC (not real data -- pipeline check only)"
-    } else {
-      "real data"
-    }),
+    paste0(
+      "Mode:      ",
+      if (is_synth) {
+        "SYNTHETIC (not real data -- pipeline check only)"
+      } else {
+        "real data"
+      }
+    ),
     "",
     "----------------------------------------------------------",
     "  PATHS -- exact absolute locations used in this run",
     "----------------------------------------------------------"
   )
+}
+
+#' The paths section of SUMMARY.txt.
+#' @param paths As for wrsmrytxt().
+#' @return A character vector of lines.
+#' @noRd
+.rmbl_smry_paths <- function(paths) {
+  lines <- character()
   for (nm in names(paths)) {
-    lines <- c(lines, sprintf(
-      "%-15s %s",
-      paste0(
-        toupper(substr(nm, 1, 1)),
-        substr(nm, 2, nchar(nm)), ":"
-      ),
-      paths[[nm]]
-    ))
+    lines <- c(
+      lines,
+      sprintf(
+        "%-15s %s",
+        paste0(
+          toupper(substr(nm, 1, 1)),
+          substr(nm, 2, nchar(nm)),
+          ":"
+        ),
+        paths[[nm]]
+      )
+    )
   }
-  lines <- c(
-    lines, "",
+  lines
+}
+
+#' The counts and files sections of SUMMARY.txt.
+#' @param counts The result counts.
+#' @param files The files in the results folder.
+#' @return A character vector of lines.
+#' @noRd
+.rmbl_smry_counts <- function(counts, files) {
+  c(
+    "",
     "----------------------------------------------------------",
     "  RESULT COUNTS",
     "----------------------------------------------------------",
@@ -588,33 +739,48 @@ wrsmrytxt <- function(man, outdir, paths,
     "----------------------------------------------------------",
     paste0("  ", files)
   )
+}
+
+#' The package versions, what was done, the contact and the licence, for
+#' SUMMARY.txt.
+#' @param man The manifest whose package versions end the summary.
+#' @param whatwasdone,contact,lic As for wrsmrytxt().
+#' @return A character vector of lines.
+#' @noRd
+.rmbl_smry_tail <- function(man, whatwasdone, contact, lic) {
+  lines <- character()
   vers <- man$meta$r_package_versions
   if (!is.null(vers) && length(vers) > 0L) {
     lines <- c(
-      lines, "",
+      lines,
+      "",
       "----------------------------------------------------------",
       "  R PACKAGE VERSIONS USED IN THIS RUN",
       "  (reference numbers were produced on specific versions;",
       "   drift here explains most WARN/convergence differences)",
       "----------------------------------------------------------",
       sprintf(
-        "  %-12s %s", names(vers),
+        "  %-12s %s",
+        names(vers),
         vapply(vers, function(v) as.character(v %||% "?"), character(1))
       )
     )
   }
   if (!is.null(whatwasdone)) {
     lines <- c(
-      lines, "",
+      lines,
+      "",
       "----------------------------------------------------------",
       "  WHAT WAS DONE",
       "----------------------------------------------------------",
       whatwasdone
     )
   }
-  if (!is.null(contact)) lines <- c(lines, "", paste0("Contact: ", contact))
-  if (!is.null(lic)) lines <- c(lines, paste0("Licence: ", lic))
-
-  writeLines(lines, file.path(outdir, "SUMMARY.txt"))
-  invisible(file.path(outdir, "SUMMARY.txt"))
+  if (!is.null(contact)) {
+    lines <- c(lines, "", paste0("Contact: ", contact))
+  }
+  if (!is.null(lic)) {
+    lines <- c(lines, paste0("Licence: ", lic))
+  }
+  lines
 }

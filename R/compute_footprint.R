@@ -1,86 +1,27 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# The energy and carbon footprint of a computation: measured from the CPU's
-# RAPL energy counters when the operating system exposes them, otherwise
-# modelled from running time, measured utilisation (process or machine) and
-# memory with the Green Algorithms method (Lannelongue, Grealey and Inouye
-# 2021), and converted to CO2-equivalents with a bundled, offline,
-# per-location carbon-intensity table at each location's latest year. The constants and
-# fallbacks follow the two reference tools, codecarbon and the Green
-# Algorithms calculator, and every one is named in the result's assumptions.
-
-# Carbon intensity of electricity, gCO2e/kWh, bundled for offline use in
-# inst/extdata/carbon_intensity.csv: every country at the latest year Our
-# World in Data publishes (Ember yearly electricity data, 2024 or 2025 for
-# all but a few rows whose latest year is older, among them Ukraine (2022); each row carries its year),
-# sub-national zones (Canadian provinces, US balancing authorities,
-# Australian states, Indian and Japanese regions, ...) from Electricity Maps'
-# 2024 yearly file as redistributed by Green Algorithms data v3.1, and the
-# world average. Every row carries its year, its basis (lifecycle) and source.
-.rmbl_ci_cache <- new.env(parent = emptyenv())
-
-#' Returns the path of a file the package installs under extdata.
-#' @param name The file name.
-#' @return The full path; an error when the file is missing.
-#' @noRd
-.rmbl_extdata <- function(name) {
-  system.file("extdata", name, package = "rmoriebricklayer", mustWork = TRUE)
-}
-
-#' Reads the bundled carbon-intensity table once and keeps it in the cache.
-#' @return The table as a data frame.
-#' @noRd
-.rmbl_ci_table <- function() {
-  if (is.null(.rmbl_ci_cache$tab)) {
-    .rmbl_ci_cache$tab <- utils::read.csv(
-      .rmbl_extdata("carbon_intensity.csv"), stringsAsFactors = FALSE, na.strings = character(0),
-      colClasses = c("character", "character", "character", "numeric", "integer", "character",
-                     "character"))
-  }
-  .rmbl_ci_cache$tab
-}
-
-#' Reads the bundled time-zone to country table once and keeps it in the cache.
-#' @return The table as a data frame.
-#' @noRd
-.rmbl_tz_table <- function() {
-  if (is.null(.rmbl_ci_cache$tz)) {
-    .rmbl_ci_cache$tz <- utils::read.csv(.rmbl_extdata("timezone_countries.csv"), stringsAsFactors = FALSE,
-                                         na.strings = character(0), colClasses = "character")
-  }
-  .rmbl_ci_cache$tz
-}
-
-#' Finds the row of a location key in the carbon-intensity table.
-#'
-#' Row index of a location key in the table: by code (CA, CA-ON, US-CAL-CISO),
-#' by ISO 3166-1 alpha-3 (CAN), or by name (Canada); NA when none matches.
-#' @param key The location key: a code, an ISO 3166-1 alpha-3 code or a name.
-#' @param tab The carbon-intensity table.
-#' @return The row index, or NA.
-#' @noRd
-.rmbl_ci_match <- function(key, tab) {
-  key <- toupper(trimws(key))
-  i <- match(key, tab$location)
-  if (is.na(i)) i <- match(key, tab$iso3)
-  if (is.na(i)) i <- match(key, toupper(tab$name))
-  i
-}
+# SPDX-License-Identifier: AGPL-3.0-or-later The energy and carbon footprint of
+# a computation: measured from the CPU's RAPL energy counters when the operating
+# system exposes them, otherwise modelled from running time, measured
+# utilisation (process or machine) and memory with the Green Algorithms method
+# (Lannelongue, Grealey and Inouye 2021), and converted to CO2-equivalents with
+# a bundled, offline, per-location carbon-intensity table at each location's
+# latest year. The constants and fallbacks follow the two reference tools,
+# codecarbon and the Green Algorithms calculator, and every one is named in the
+# result's assumptions.
 
 #' Carbon intensity of electricity by location, offline, anywhere
 #'
 #' The grams of CO2-equivalent emitted per kilowatt-hour of electricity at a
 #' location, with the year and source of the figure. The table is bundled with
-#' the package, so it works offline in any country: every country at the
-#' latest year published by Our World in Data from Ember's yearly electricity
-#' data (the latest year each grid reports: 2025 or 2024 for nearly all, older
-#' for a few grids, Ukraine (2022) among them, named in \code{year}), sub-national zones
-#' from
-#' Electricity
-#' Maps' 2024 yearly data as redistributed in the Green Algorithms data release
-#' v3.1 (Canadian provinces and territories, US balancing authorities,
-#' Australian states, Indian and Japanese regions, Brazilian and Chilean
-#' systems, ...), and the world average. All figures are lifecycle intensities
-#' (generation plus upstream), the basis both sources publish.
+#' the package, so it works offline in any country: every country at the latest
+#' year published by Our World in Data from Ember's yearly electricity data (the
+#' latest year each grid reports: 2025 or 2024 for nearly all, older for a few
+#' grids, Ukraine (2022) among them, named in \code{year}), sub-national zones
+#' from Electricity Maps' 2024 yearly data as redistributed in the Green
+#' Algorithms data release v3.1 (Canadian provinces and territories, US
+#' balancing authorities, Australian states, Indian and Japanese regions,
+#' Brazilian and Chilean systems, ...), and the world average. All figures are
+#' lifecycle intensities (generation plus upstream), the basis both sources
+#' publish.
 #'
 #' A location is matched by its code (\code{"CA"}, \code{"CA-ON"},
 #' \code{"US-CAL-CISO"}), its ISO 3166-1 alpha-3 code (\code{"CAN"}) or its
@@ -121,19 +62,17 @@
 #' nrow(co2inttab())
 #' # the Canadian provinces in the table, lowest intensity first
 #' tab <- co2inttab()
-#' ca <- tab[startsWith(tab$location, "CA-"), c("location", "name", "g_per_kwh", "year")]
+#' ca <- tab[
+#'   startsWith(tab$location, "CA-"),
+#'   c("location", "name", "g_per_kwh", "year")
+#' ]
 #' head(ca[order(ca$g_per_kwh), ])
 #' # a location the table does not know is an error, not a silent world average
 #' try(co2int("Atlantis"))
 #' @export
 co2int <- function(loc = "WORLD") {
   if (is.numeric(loc)) {
-    if (length(loc) != 1L || !is.finite(loc) || loc < 0) {
-      stop("a numeric `loc` must be a single non-negative gCO2e/kWh value", call. = FALSE)
-    }
-    return(list(g_per_kwh = as.numeric(loc), location = "user", name = "user-supplied",
-                year = NA_integer_, basis = "user", source = "user-supplied carbon intensity",
-                note = character(0)))
+    return(.rmbl_cls(.rmbl_ci_user(loc), "rmbl_co2int"))
   }
   note <- character(0)
   if (is.null(loc)) {
@@ -142,26 +81,40 @@ co2int <- function(loc = "WORLD") {
     note <- c(note, sprintf("location %s via %s", det$location, det$method))
   }
   if (!is.character(loc) || length(loc) != 1L || is.na(loc)) {
-    stop("`loc` must be a single location code or name, a number in gCO2e/kWh, or NULL",
-         call. = FALSE)
+    stop(
+      "`loc` must be a single location code or name, a number in ",
+      "gCO2e/kWh, or NULL",
+      call. = FALSE
+    )
   }
   tab <- .rmbl_ci_table()
   i <- .rmbl_ci_match(loc, tab)
   if (is.na(i) && grepl("-", loc, fixed = TRUE)) {
-    country <- sub("-.*$", "", loc)
-    i <- .rmbl_ci_match(country, tab)
-    if (!is.na(i)) {
-      note <- c(note, sprintf("no row for zone %s; its country %s used", toupper(loc),
-                              tab$location[i]))
-    }
+    z <- .rmbl_ci_zone(loc, tab)
+    i <- z$i
+    note <- c(note, z$note)
   }
   if (is.na(i)) {
-    stop(sprintf(paste("Unknown location '%s'. Use a code, alpha-3 code or name from",
-                       "co2inttab(), or pass a number in gCO2e/kWh."), loc),
-         call. = FALSE)
+    stop(
+      sprintf(
+        paste(
+          "Unknown location '%s'. Use a code, alpha-3 code or name from",
+          "co2inttab(), or pass a number in gCO2e/kWh."
+        ),
+        loc
+      ),
+      call. = FALSE
+    )
   }
-  list(g_per_kwh = tab$g_per_kwh[i], location = tab$location[i], name = tab$name[i],
-       year = tab$year[i], basis = tab$basis[i], source = tab$source[i], note = note)
+  .rmbl_cls(list(
+    g_per_kwh = tab$g_per_kwh[i],
+    location = tab$location[i],
+    name = tab$name[i],
+    year = tab$year[i],
+    basis = tab$basis[i],
+    source = tab$source[i],
+    note = note
+  ), "rmbl_co2int")
 }
 
 #' @rdname co2int
@@ -170,20 +123,16 @@ co2inttab <- function() .rmbl_ci_table()
 
 #' Where is this computation running?
 #'
-#' Finds a location code for \code{\link{co2int}} without any
-#' network access, in this order:
-#' \enumerate{
-#'   \item the \code{RMBL_LOCATION} environment variable (any code or name the
-#'     table knows);
-#'   \item \code{CODECARBON_COUNTRY_ISO_CODE} (alpha-3), the codecarbon variable,
-#'     so a machine already configured for codecarbon needs nothing more;
-#'   \item the system time zone, mapped to its country through the IANA zone
-#'     tables (\code{America/Toronto} is Canada, \code{Europe/Berlin} Germany);
-#'   \item the territory in the locale (\code{en_CA.UTF-8} is Canada).
-#' }
-#' When none of these yields a location in
-#' the table the answer is \code{"WORLD"}, and the method says so, so a report
-#' never silently applies one country's grid to another's computation.
+#' Finds a location code for \code{\link{co2int}} without any network access, in
+#' this order: \enumerate{ \item the \code{RMBL_LOCATION} environment variable
+#' (any code or name the table knows); \item \code{CODECARBON_COUNTRY_ISO_CODE}
+#' (alpha-3), the codecarbon variable, so a machine already configured for
+#' codecarbon needs nothing more; \item the system time zone, mapped to its
+#' country through the IANA zone tables (\code{America/Toronto} is Canada,
+#' \code{Europe/Berlin} Germany); \item the territory in the locale
+#' (\code{en_CA.UTF-8} is Canada). } When none of these yields a location in the
+#' table the answer is \code{"WORLD"}, and the method says so, so a report never
+#' silently applies one country's grid to another's computation.
 #'
 #' The zone table (\code{inst/extdata/timezone_countries.csv}, built by
 #' \code{tools/build_timezones.R} from the IANA database) holds every zone
@@ -218,123 +167,27 @@ co2inttab <- function() .rmbl_ci_table()
 #' # nothing usable: the world average, and the method says so
 #' dtctloc(envloc = "", codloc = "", tz = "UTC", locale = "C")
 #' @export
-dtctloc <- function(envloc = Sys.getenv("RMBL_LOCATION"),
-                            codloc = Sys.getenv("CODECARBON_COUNTRY_ISO_CODE"),
-                            tz = Sys.timezone(), locale = Sys.getlocale("LC_TIME")) {
-  for (nm in c("envloc", "codloc", "tz", "locale")) {
-    v <- get(nm)
-    if (!is.null(v) && !(is.character(v) && length(v) <= 1L)) {
-      stop(sprintf("`%s` must be one string (or NULL)", nm), call. = FALSE)
-    }
-  }
+dtctloc <- function(
+  envloc = Sys.getenv("RMBL_LOCATION"),
+  codloc = Sys.getenv("CODECARBON_COUNTRY_ISO_CODE"),
+  tz = Sys.timezone(),
+  locale = Sys.getlocale("LC_TIME")
+) {
+  .rmbl_loc_args(list(
+    envloc = envloc,
+    codloc = codloc,
+    tz = tz,
+    locale = locale
+  ))
   tab <- .rmbl_ci_table()
-  known <- function(key) {
-    if (is.null(key) || length(key) != 1L || is.na(key) || !nzchar(key)) return(NA_character_)
-    i <- .rmbl_ci_match(key, tab)
-    if (is.na(i)) NA_character_ else tab$location[i]
-  }
-  loc <- known(envloc)
-  if (!is.na(loc)) return(list(location = loc, method = "RMBL_LOCATION environment variable"))
-  if (length(envloc) == 1L && !is.na(envloc) && nzchar(envloc)) {
-    warning(sprintf(paste("RMBL_LOCATION='%s' is not a location co2inttab() knows",
-                          "(code, alpha-3 or name); it is ignored"), envloc), call. = FALSE)
-  }
-  loc <- known(codloc)
-  if (!is.na(loc)) return(list(location = loc, method = "CODECARBON_COUNTRY_ISO_CODE environment variable"))
-  if (length(tz) == 1L && !is.na(tz) && nzchar(tz)) {
-    tzt <- .rmbl_tz_table()
-    # the posix/ and right/ trees repeat every zone; strip them before the lookup
-    key <- sub("^(posix|right)/", "", tz)
-    terr <- tzt$location[match(key, tzt$tz)]
-    loc <- known(terr)
-    if (!is.na(loc)) return(list(location = loc, method = sprintf("system time zone %s", tz)))
-    # the zone resolves to a territory the carbon table has no row for (Monaco, Jersey, the
-    # Antarctic stations): the territory's grid is its administering or neighbouring country's,
-    # or the world average, never the locale's country
-    if (length(terr) == 1L && !is.na(terr)) {
-      loc <- .rmbl_territory_location(terr, known)
-      return(list(location = loc,
-                  method = sprintf("system time zone %s (territory %s has no row of its own; %s)", tz, terr,
-                                   if (identical(loc, "WORLD")) "world average" else paste("grid of", loc))))
-    }
-  }
-  if (length(locale) == 1L && !is.na(locale)) {
-    m <- regmatches(locale, regexpr("^[A-Za-z]{2,3}_[A-Z]{2}", locale))
-    if (length(m) == 1L) {
-      loc <- known(sub("^.*_", "", m))
-      if (!is.na(loc)) return(list(location = loc, method = sprintf("locale %s", locale)))
-    }
-  }
-  list(location = "WORLD", method = "fallback, no location found in environment, time zone or locale")
-}
-
-# Territories the time-zone table names that the carbon-intensity table has no row for, with
-# the country whose grid they draw on (an enclave or dependency) or none (an island state and
-# Antarctica take the world average).
-.rmbl_territory_proxy <- c(
-  AD = "ES", AI = "AG", BL = "GP", BQ = "NL", CC = "AU", CX = "AU", GG = "FR", IM = "GB", IO = "GB",
-  JE = "FR", LI = "CH", MC = "FR", MF = "GP", MP = "GU", NF = "AU", PN = "GB", SJ = "NO", SM = "IT",
-  SX = "NL", UM = "US", VA = "IT", WF = "NC",
-  AQ = NA_character_, MH = NA_character_, NU = NA_character_, TF = NA_character_, TK = NA_character_,
-  TV = NA_character_
-)
-
-#' Picks the carbon-intensity location for a territory.
-#'
-#' The grid a territory draws on: its proxy country when the carbon table has that row, the world
-#' average when the territory has no proxy or the proxy itself is missing from the table.
-#' @param terr The territory's two-letter code.
-#' @param known A function that maps a country code to its location in the table, or NA.
-#' @param proxies The named vector of proxy countries.
-#' @return A location code, \code{"WORLD"} when no proxy is known.
-#' @noRd
-.rmbl_territory_location <- function(terr, known, proxies = .rmbl_territory_proxy) {
-  proxy <- proxies[terr]
-  loc <- if (is.na(proxy)) NA_character_ else known(unname(proxy))
-  if (is.na(loc)) "WORLD" else loc
-}
-
-# ---- RAPL -------------------------------------------------------------------
-
-#' Lists the package-level RAPL domains under a powercap directory.
-#'
-#' The package-level RAPL domains under a powercap directory: directories named
-#' intel-rapl:N (not the :N:M subdomains, which are parts of the package and
-#' would count the same energy twice), whose `name` starts with \code{"package"}.
-#' @param rapl_dir The powercap directory.
-#' @return The domain directories, possibly none.
-#' @noRd
-.rapl_domains <- function(rapl_dir) {
-  if (!dir.exists(rapl_dir)) return(character(0))
-  d <- list.files(rapl_dir, pattern = "^intel-rapl:[0-9]+$", full.names = TRUE)
-  keep <- vapply(d, function(p) {
-    nm <- tryCatch(readLines(file.path(p, "name"), n = 1L, warn = FALSE), error = function(e) "")
-    file.exists(file.path(p, "energy_uj")) && length(nm) == 1L && startsWith(nm, "package")
-  }, logical(1))
-  d[keep]
-}
-
-#' Reads the energy counters of the RAPL package domains.
-#'
-#' Energy counters (microjoules) of the package domains, or NULL when any is
-#' unreadable (on Linux 5.10 and later the files are root-only by default).
-#' @param domains The domain directories from `.rapl_domains()`.
-#' @return A list with `uj` (the counters) and `max` (their wrap-around ranges), or NULL.
-#' @noRd
-.rapl_read <- function(domains) {
-  if (!length(domains)) return(NULL)
-  vals <- vapply(domains, function(p) {
-    v <- tryCatch(suppressWarnings(as.numeric(readLines(file.path(p, "energy_uj"), n = 1L, warn = FALSE))),
-                  error = function(e) NA_real_)
-    if (length(v) != 1L) NA_real_ else v
-  }, numeric(1))
-  if (anyNA(vals)) return(NULL)
-  maxes <- vapply(domains, function(p) {
-    v <- tryCatch(suppressWarnings(as.numeric(readLines(file.path(p, "max_energy_range_uj"), n = 1L, warn = FALSE))),
-                  error = function(e) NA_real_)
-    if (length(v) != 1L || is.na(v)) NA_real_ else v
-  }, numeric(1))
-  list(uj = vals, max = maxes)
+  known <- function(key) .rmbl_loc_known(key, tab)
+  .rmbl_loc_from_env(envloc, codloc, known) %||%
+    .rmbl_loc_from_tz(tz, known) %||%
+    .rmbl_loc_from_locale(locale, known) %||%
+    list(
+      location = "WORLD",
+      method = "fallback, no location found in environment, time zone or locale"
+    )
 }
 
 #' Is CPU energy measurable here?
@@ -367,8 +220,8 @@ dtctloc <- function(envloc = Sys.getenv("RMBL_LOCATION"),
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' raplok()
 #'
-#' # a fake powercap tree with one readable package domain (Linux names the domain
-#' # "intel-rapl:0"; a colon is not allowed in a Windows file name)
+#' # a fake powercap tree with one readable package domain (Linux names the
+#' # domain "intel-rapl:0"; a colon is not allowed in a Windows file name)
 #' if (.Platform$OS.type != "windows") {
 #'   d <- file.path(tempfile(), "intel-rapl:0")
 #'   dir.create(d, recursive = TRUE)
@@ -388,86 +241,7 @@ raplok <- function(rapldir = "/sys/class/powercap") {
   !is.null(.rapl_read(.rapl_domains(rapldir)))
 }
 
-# ---- memory and cores ---------------------------------------------------------
-
-#' Reads the machine's total memory in gigabytes.
-#' @param meminfo The Linux meminfo file.
-#' @param sysname The operating system's name, as `Sys.info()` gives it.
-#' @param sysctl The path of the sysctl program, used on macOS.
-#' @return The memory in GB, or NA when it cannot be read.
-#' @noRd
-.rmbl_total_memory_gb <- function(meminfo = "/proc/meminfo", sysname = Sys.info()[["sysname"]],
-                                  sysctl = Sys.which("sysctl")) {
-  if (file.exists(meminfo)) {
-    l <- tryCatch(readLines(meminfo, warn = FALSE), error = function(e) character(0))
-    m <- grep("^MemTotal:", l, value = TRUE)
-    kb <- suppressWarnings(as.numeric(gsub("[^0-9]", "", m)))
-    if (length(kb) == 1L && is.finite(kb) && kb > 0) return(kb / 1024^2)
-  }
-  if (identical(sysname, "Darwin") && nzchar(sysctl)) {
-    b <- tryCatch(suppressWarnings(as.numeric(system2(sysctl, c("-n", "hw.memsize"), stdout = TRUE))),
-                  error = function(e) NA_real_)
-    if (length(b) == 1L && is.finite(b) && b > 0) return(b / 1024^3)
-  }
-  NA_real_
-}
-
-#' Counts the CPU seconds between two proc.time() readings.
-#'
-#' CPU seconds between two proc.time() readings, children included. Windows
-#' reports the child times as NA, which would have turned every figure NA.
-#' @param t0 The `proc.time()` reading at the start.
-#' @param t1 The `proc.time()` reading at the end.
-#' @return The CPU seconds used, never negative.
-#' @noRd
-.rmbl_cpu_seconds <- function(t0, t1) {
-  parts <- c("user.self", "sys.self", "user.child", "sys.child")
-  d <- unname(t1[parts]) - unname(t0[parts])
-  max(sum(d[is.finite(d)]), 0)
-}
-
-#' Counts the machine's logical cores.
-#' @return The number of cores, or NA.
-#' @noRd
-.rmbl_cores <- function() {
-  tryCatch(parallel::detectCores(logical = TRUE), error = function(e) NA_integer_)
-}
-
-# ---- utilisation ----------------------------------------------------------------
-
-#' Reads the whole machine's idle and total CPU time on Linux.
-#'
-#' Whole-machine CPU accounting from the first line of /proc/stat (Linux):
-#' idle + iowait jiffies and the total, or NULL where the file is absent.
-#' @param proc_stat The path of the stat file, normally /proc/stat.
-#' @return A named vector with `idle` and `total` jiffies, or NULL.
-#' @noRd
-.proc_stat_cpu <- function(proc_stat) {
-  l <- tryCatch(suppressWarnings(readLines(proc_stat, n = 1L, warn = FALSE)), error = function(e) character(0))
-  if (length(l) != 1L || !startsWith(l, "cpu ")) return(NULL)
-  v <- suppressWarnings(as.numeric(strsplit(trimws(l), "\\s+")[[1]][-1]))
-  if (length(v) < 4L || anyNA(v)) return(NULL)
-  c(idle = v[4] + if (length(v) >= 5L) v[5] else 0, total = sum(v))
-}
-
-#' Scales the CPU's power to a utilisation.
-#'
-#' CPU power at a utilisation u, as a fraction of the CPU's power P: Green
-#' Algorithms' linear scaling, or codecarbon's curve for the matching mode (a
-#' floor at 10% of P when tracking a process; 0.1 + 0.9 u^3 for the machine).
-#' @param p The CPU's power.
-#' @param u The utilisation, a fraction from 0 to 1.
-#' @param load_curve \code{"linear"} for Green Algorithms' scaling, anything else for
-#' codecarbon's curve.
-#' @param usage_mode \code{"machine"} or \code{"process"}.
-#' @return The power drawn, in the units of `p`.
-#' @noRd
-.cpu_load_power <- function(p, u, load_curve, usage_mode) {
-  if (load_curve == "linear") return(p * u)
-  if (usage_mode == "machine") p * (0.1 + 0.9 * u^3) else max(p * u, 0.1 * p)
-}
-
-# ---- the footprint ------------------------------------------------------------
+# ---- the footprint -----------------------------------------------------------
 
 #' Energy and carbon footprint of a computation
 #'
@@ -608,187 +382,138 @@ raplok <- function(rapldir = "/sys/class/powercap") {
 #' # wherever you are, offline: the location is detected and recorded
 #' co2fp(1 + 1, cpupwrw = 45, memgb = 8)$assumptions
 #' # the whole machine's utilisation, on codecarbon's machine curve
-#' co2fp(1 + 1, loc = "FR", usage = "machine", loadcur = "codecarbon",
-#'                   cpupwrw = 45, memgb = 8)$usagemode
-#' # a fixed utilisation and a data-centre PUE, with a carbon intensity given as a number
-#' fp2 <- co2fp(sum(sqrt(seq_len(2e5))), loc = 30, usage = 0.5,
-#'                          cpupwrw = 65, memgb = 16, pue = 1.67, meth = "model")
+#' co2fp(
+#'   1 + 1,
+#'   loc = "FR",
+#'   usage = "machine",
+#'   loadcur = "codecarbon",
+#'   cpupwrw = 45,
+#'   memgb = 8
+#' )$usagemode
+#' # a fixed utilisation and a data-centre PUE, with a carbon intensity given as
+#' # a number
+#' fp2 <- co2fp(
+#'   sum(sqrt(seq_len(2e5))),
+#'   loc = 30,
+#'   usage = 0.5,
+#'   cpupwrw = 65,
+#'   memgb = 16,
+#'   pue = 1.67,
+#'   meth = "model"
+#' )
 #' fp2$enekwh
 #' fpeqv(fp2$co2eg)
 #' # a bad argument is refused before the expression runs
 #' try(co2fp(Sys.sleep(10), pue = 0.9))
 #' @export
-co2fp <- function(expr, loc = NULL, meth = c("auto", "rapl", "model"),
-                              cpupwrw = NULL, usage = "process",
-                              loadcur = c("linear", "codecarbon"), cores = NULL,
-                              memgb = NULL, mempwrwpergb = 0.3725, pue = 1,
-                              rapldir = "/sys/class/powercap", procstat = "/proc/stat") {
+co2fp <- function(
+  expr,
+  loc = NULL,
+  meth = c("auto", "rapl", "model"),
+  cpupwrw = NULL,
+  usage = "process",
+  loadcur = c("linear", "codecarbon"),
+  cores = NULL,
+  memgb = NULL,
+  mempwrwpergb = 0.3725,
+  pue = 1,
+  rapldir = "/sys/class/powercap",
+  procstat = "/proc/stat"
+) {
   meth <- .rmbl_arg(meth)
   loadcur <- .rmbl_arg(loadcur)
   ci <- co2int(loc)
-  # every argument is checked before `expr` runs, so a bad argument never costs the computation
-  if (!is.numeric(pue) || length(pue) != 1L || !is.finite(pue) || pue < 1) {
-    stop("`pue` must be a single number >= 1", call. = FALSE)
-  }
-  num_arg <- function(x, what, positive = FALSE) {
-    if (is.null(x)) return(NULL)
-    if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < 0 || (positive && x <= 0)) {
-      stop(sprintf("`%s` must be a single %s number", what, if (positive) "positive" else "non-negative"),
-           call. = FALSE)
-    }
-    as.numeric(x)
-  }
-  cpupwrw <- num_arg(cpupwrw, "cpupwrw", positive = TRUE)
-  cores <- num_arg(cores, "cores", positive = TRUE)
-  if (!is.null(cores) && cores != round(cores)) stop("`cores` must be a whole number", call. = FALSE)
-  memgb <- num_arg(memgb, "memgb")
-  mempwrwpergb <- num_arg(mempwrwpergb, "mempwrwpergb")
-  if (!is.character(rapldir) || length(rapldir) != 1L || is.na(rapldir)) {
-    stop("`rapldir` must be a single path", call. = FALSE)
-  }
-  if (!is.character(procstat) || length(procstat) != 1L || is.na(procstat)) {
-    stop("`procstat` must be a single path", call. = FALSE)
-  }
-  if (is.null(usage)) usage <- "process"
-  if (length(usage) != 1L) {
-    stop("`usage` takes one value: \"process\", \"machine\" or a single number in [0, 1]", call. = FALSE)
-  }
-  if (is.character(usage)) {
-    usage_mode <- .rmbl_arg(usage, c("process", "machine"))
-  } else if (is.numeric(usage) && length(usage) == 1L && is.finite(usage) && usage >= 0 && usage <= 1) {
-    usage_mode <- "fixed"
-  } else {
-    stop("`usage` must be \"process\", \"machine\" or a single number in [0, 1]", call. = FALSE)
-  }
-  assumptions <- ci$note
-  cites <- c("Lannelongue, Grealey & Inouye (2021) Adv Sci 8:2100707 (energy model, 0.3725 W/GB)",
-             "codecarbon (RAPL method; process/machine tracking; 85 W x 50% unknown-CPU fallback)",
-             sprintf("carbon intensity: %s (%s, %d)", ci$source, ci$name, ci$year))
-  if (is.na(ci$year)) cites <- cites[-3L]
-
-  domains <- if (meth != "model") .rapl_domains(rapldir) else character(0)
-  before <- if (meth != "model") .rapl_read(domains) else NULL
-  if (meth == "rapl" && is.null(before)) {
-    stop("RAPL energy counters are not readable here (see raplok()); use method = \"model\"",
-         call. = FALSE)
-  }
-  used <- if (is.null(before)) "model" else "rapl"
-  stat0 <- if (usage_mode == "machine") .proc_stat_cpu(procstat) else NULL
-  if (usage_mode == "machine" && is.null(stat0)) {
-    usage_mode <- "process"
-    assumptions <- c(assumptions, "machine CPU accounting unreadable (no /proc/stat); process utilisation used")
-  }
+  # every argument is checked before `expr` runs, so a bad argument never costs
+  # the computation
+  a <- .fp_args(
+    pue,
+    cpupwrw,
+    cores,
+    memgb,
+    mempwrwpergb,
+    rapldir,
+    procstat,
+    usage
+  )
+  st <- new.env(parent = emptyenv())
+  st$assumptions <- ci$note
+  cites <- .fp_cites(ci)
+  pre <- .fp_before(meth, rapldir, procstat, a$usage_mode, st)
 
   t0 <- proc.time()
   value <- expr
   t1 <- proc.time()
-  after <- if (used == "rapl") .rapl_read(domains) else NULL
-  stat1 <- if (usage_mode == "machine") .proc_stat_cpu(procstat) else NULL
-
-  wall <- max(unname(t1[["elapsed"]] - t0[["elapsed"]]), 0)
-  cpu_t <- .rmbl_cpu_seconds(t0, t1)
-  hours <- wall / 3600
-
-  if (is.null(cores)) {
-    cores <- .rmbl_cores()
-    if (is.na(cores)) {
-      cores <- 1L
-      assumptions <- c(assumptions, "core count unknown; 1 assumed")
-    }
-  }
-  # a run faster than the elapsed clock's resolution read 0 s of wall time against a millisecond of
-  # CPU time, and its energy came out exactly 0: the work took at least its CPU time spread over
-  # the cores
-  if (is.finite(cpu_t) && cpu_t > 0) {
-    wall <- max(wall, cpu_t / max(1, cores))
-    hours <- wall / 3600
-  }
-  if (usage_mode == "machine") {
-    if (is.null(stat1)) {
-      usage_mode <- "process"
-      assumptions <- c(assumptions, "machine CPU accounting became unreadable; process utilisation used")
-    } else {
-      dt <- stat1[["total"]] - stat0[["total"]]
-      usage <- if (dt > 0) min(max(1 - (stat1[["idle"]] - stat0[["idle"]]) / dt, 0), 1) else 0
-    }
-  }
-  if (usage_mode == "process") {
-    usage <- if (wall > 0) min(max(cpu_t / (wall * cores), 0), 1) else 0
-  }
-
-  if (used == "rapl" && !is.null(after)) {
-    d <- after$uj - before$uj
-    wrapped <- d < 0
-    if (any(wrapped)) {
-      if (anyNA(before$max[wrapped])) {
-        used <- "model"
-        assumptions <- c(assumptions, "a RAPL counter wrapped and its range was unknown; modelled instead")
-      } else {
-        d[wrapped] <- d[wrapped] + before$max[wrapped]
-      }
-    }
-    if (used == "rapl") e_cpu_kwh <- sum(d) * 1e-6 / 3.6e6
-  } else if (used == "rapl") {
-    used <- "model"
-    assumptions <- c(assumptions, "RAPL counters became unreadable during the run; modelled instead")
-  }
-  if (used == "model") {
-    if (is.null(cpupwrw)) {
-      cpupwrw <- 85 * 0.5
-      assumptions <- c(assumptions, "CPU power unknown: 85 W x 50% (codecarbon fallback)")
-      e_cpu_kwh <- hours * cpupwrw / 1000
-    } else {
-      # cpupwrw was checked (single, finite, positive) before `expr` ran
-      e_cpu_kwh <- hours * .cpu_load_power(cpupwrw, usage, loadcur, usage_mode) / 1000
-      if (loadcur == "codecarbon") {
-        assumptions <- c(assumptions, sprintf("codecarbon %s load curve applied to the CPU power",
-                                              if (usage_mode == "machine") "machine" else "process"))
-      }
-    }
-  }
-
-  if (is.null(memgb)) {
-    memgb <- .rmbl_total_memory_gb()
-    if (is.na(memgb)) {
-      memgb <- 8
-      assumptions <- c(assumptions, "memory size unknown: 8 GB assumed")
-    } else {
-      assumptions <- c(assumptions, sprintf("memory charged: the machine's total %.1f GB", memgb))
-    }
-  }
-  e_mem_kwh <- hours * memgb * mempwrwpergb / 1000
-  total <- (e_cpu_kwh + e_mem_kwh) * pue
-  if (pue > 1) assumptions <- c(assumptions, sprintf("PUE %.2f applied", pue))
-
-  structure(list(
-    value = value,
-    durs = wall,
-    cputms = cpu_t,
-    usage = usage,
-    usagemode = usage_mode,
-    cores = as.integer(cores),
-    memgb = memgb,
-    enekwh = list(cpu = e_cpu_kwh * pue, memory = e_mem_kwh * pue, total = total),
-    co2eg = total * ci$g_per_kwh,
-    co2int = ci,
-    method = used,
-    assumptions = assumptions,
-    citations = cites
-  ), class = "rmbl_footprint")
+  after <- if (pre$used == "rapl") .rapl_read(pre$domains) else NULL
+  stat1 <- if (pre$usage_mode == "machine") .proc_stat_cpu(procstat) else NULL
+  en <- .fp_energy(a, pre, after, stat1, t0, t1, loadcur, pue, st)
+  structure(
+    list(
+      value = value,
+      durs = en$wall,
+      cputms = en$cpu_t,
+      usage = en$usage,
+      usagemode = en$usage_mode,
+      cores = as.integer(en$cores),
+      memgb = en$memgb,
+      enekwh = list(
+        cpu = en$e_cpu_kwh * pue,
+        memory = en$e_mem_kwh * pue,
+        total = en$total
+      ),
+      co2eg = en$total * ci$g_per_kwh,
+      co2int = ci,
+      method = en$used,
+      assumptions = st$assumptions,
+      citations = cites
+    ),
+    class = "rmbl_footprint"
+  )
 }
 
 #' @export
-print.rmbl_footprint <- function(x, ...) {
-  cat(sprintf("Computation footprint (%s): %.3f s wall, %.3f s CPU, utilisation %.2f (%s) on %d cores\n",
-              if (x$method == "rapl") "measured, RAPL" else "modelled", x$durs, x$cputms,
-              x$usage, x$usagemode, x$cores))
-  cat(sprintf("  energy: %.3g kWh (cpu %.3g, memory %.3g)\n", x$enekwh$total, x$enekwh$cpu,
-              x$enekwh$memory))
+format.rmbl_footprint <- function(x, ...) {
   ci <- x$co2int
-  cat(sprintf("  CO2e:   %.3g g at %.4g gCO2e/kWh (%s%s)\n", x$co2eg, ci$g_per_kwh, ci$name,
-              if (is.na(ci$year)) "" else sprintf(", %d", ci$year)))
-  if (length(x$assumptions)) cat("  assumed:", paste(x$assumptions, collapse = "; "), "\n")
-  invisible(x)
+  .rmbl_stat_block(
+    sprintf(
+      "Computation footprint (%s)",
+      if (identical(x$method, "rapl")) "measured, RAPL" else "modelled"
+    ),
+    facts = list(
+      Time = sprintf("%.3f s wall, %.3f s CPU", x$durs, x$cputms),
+      Utilisation = sprintf(
+        "utilisation %.2f (%s) on %d cores",
+        x$usage,
+        x$usagemode,
+        x$cores
+      ),
+      Memory = if (is.finite(x$memgb %||% NA)) sprintf("%.3g GB", x$memgb),
+      Energy = sprintf(
+        "%.3g kWh (cpu %.3g, memory %.3g)",
+        x$enekwh$total,
+        x$enekwh$cpu,
+        x$enekwh$memory
+      ),
+      CO2e = sprintf(
+        "%.3g g at %.4g gCO2e/kWh (%s%s)",
+        x$co2eg,
+        ci$g_per_kwh,
+        ci$name,
+        if (is.na(ci$year)) "" else sprintf(", %d", ci$year)
+      ),
+      Source = ci$source
+    ),
+    reading = paste(
+      "An estimate of the energy this computation used and the emissions",
+      "of making it on the local grid; fpeqv() puts the grams in everyday",
+      "terms."
+    ),
+    notes = c(
+      if (length(x$assumptions)) {
+        paste("assumed:", paste(x$assumptions, collapse = "; "))
+      },
+      ci$note
+    )
+  )
 }
 
 #' Everyday equivalents of a quantity of CO2-equivalent
@@ -830,10 +555,952 @@ print.rmbl_footprint <- function(x, ...) {
 #' try(fpeqv(c(10, 20)))
 #' @export
 fpeqv <- function(co2eg) {
-  if (!is.numeric(co2eg) || length(co2eg) != 1L || !is.finite(co2eg) || co2eg < 0) {
+  if (
+    !is.numeric(co2eg) || length(co2eg) != 1L || !is.finite(co2eg) || co2eg < 0
+  ) {
     stop("`co2eg` must be a single non-negative number", call. = FALSE)
   }
-  list(carkm = co2eg / 175, treemon = co2eg / 917,
-       sources = c(car = "175 gCO2/km, European passenger car (Green Algorithms context.csv)",
-                   tree = "917 gCO2 per tree-month (Green Algorithms context.csv)"))
+  .rmbl_cls(list(
+    carkm = co2eg / 175,
+    treemon = co2eg / 917,
+    sources = c(
+      car = paste0(
+        "175 gCO2/km, European passenger car ",
+        "(Green Algorithms context.csv)"
+      ),
+      tree = "917 gCO2 per tree-month (Green Algorithms context.csv)"
+    )
+  ), "rmbl_co2eqv")
+}
+
+#' @export
+format.rmbl_co2int <- function(x, digits = 4L, ...) {
+  .rmbl_stat_block(
+    "Carbon intensity of electricity",
+    facts = list(
+      Intensity = paste(.rmbl_fmt_num(x$g_per_kwh, digits), "gCO2e/kWh"),
+      Location = sprintf("%s (%s)", x$location, x$name),
+      Year = if (length(x$year) && !is.na(x$year)) {
+        as.character(x$year)
+      } else {
+        "not given"
+      },
+      Basis = x$basis,
+      Source = x$source
+    ),
+    reading = .rmbl_wrap(paste(
+      "The emissions of producing one kilowatt-hour of electricity on this",
+      "grid; co2fp() multiplies a computation's energy by it."
+    )),
+    notes = .rmbl_wrap(x$note),
+    digits = digits
+  )
+}
+
+#' @export
+format.rmbl_co2eqv <- function(x, digits = 4L, ...) {
+  src <- x$sources
+  .rmbl_stat_block(
+    "Footprint in everyday terms",
+    facts = list(
+      `Car travel` = paste(.rmbl_fmt_num(x$carkm, digits), "km"),
+      `Tree uptake` = paste(.rmbl_fmt_num(x$treemon, digits), "tree-months")
+    ),
+    reading = .rmbl_wrap(paste(
+      "The same emissions as driving a European passenger car this far,",
+      "or what this many trees take up in a month."
+    )),
+    notes = if (length(src)) {
+      .rmbl_wrap(paste0(names(src) %||% "", ": ", src, "."))
+    },
+    digits = digits
+  )
+}
+
+# Carbon intensity of electricity, gCO2e/kWh, bundled for offline use in
+# inst/extdata/carbon_intensity.csv: every country at the latest year Our World
+# in Data publishes (Ember yearly electricity data, 2024 or 2025 for all but a
+# few rows whose latest year is older, among them Ukraine (2022); each row
+# carries its year), sub-national zones (Canadian provinces, US balancing
+# authorities, Australian states, Indian and Japanese regions, ...) from
+# Electricity Maps' 2024 yearly file as redistributed by Green Algorithms data
+# v3.1, and the world average. Every row carries its year, its basis (lifecycle)
+# and source.
+.rmbl_ci_cache <- new.env(parent = emptyenv())
+
+#' Returns the path of a file the package installs under extdata.
+#' @param name The file name.
+#' @return The full path; an error when the file is missing.
+#' @noRd
+.rmbl_extdata <- function(name) {
+  system.file("extdata", name, package = "rmoriebricklayer", mustWork = TRUE)
+}
+
+#' Reads the bundled carbon-intensity table once and keeps it in the cache.
+#' @return The table as a data frame.
+#' @noRd
+.rmbl_ci_table <- function() {
+  if (is.null(.rmbl_ci_cache$tab)) {
+    .rmbl_ci_cache$tab <- utils::read.csv(
+      .rmbl_extdata("carbon_intensity.csv"),
+      stringsAsFactors = FALSE,
+      na.strings = character(0),
+      colClasses = c(
+        "character",
+        "character",
+        "character",
+        "numeric",
+        "integer",
+        "character",
+        "character"
+      )
+    )
+  }
+  .rmbl_ci_cache$tab
+}
+
+#' Reads the bundled time-zone to country table once and keeps it in the cache.
+#' @return The table as a data frame.
+#' @noRd
+.rmbl_tz_table <- function() {
+  if (is.null(.rmbl_ci_cache$tz)) {
+    .rmbl_ci_cache$tz <- utils::read.csv(
+      .rmbl_extdata("timezone_countries.csv"),
+      stringsAsFactors = FALSE,
+      na.strings = character(0),
+      colClasses = "character"
+    )
+  }
+  .rmbl_ci_cache$tz
+}
+
+#' Finds the row of a location key in the carbon-intensity table.
+#'
+#' Row index of a location key in the table: by code (CA, CA-ON, US-CAL-CISO),
+#' by ISO 3166-1 alpha-3 (CAN), or by name (Canada); NA when none matches.
+#' @param key The location key: a code, an ISO 3166-1 alpha-3 code or a name.
+#' @param tab The carbon-intensity table.
+#' @return The row index, or NA.
+#' @noRd
+.rmbl_ci_match <- function(key, tab) {
+  key <- toupper(trimws(key))
+  i <- match(key, tab$location)
+  if (is.na(i)) {
+    i <- match(key, tab$iso3)
+  }
+  if (is.na(i)) {
+    i <- match(key, toupper(tab$name))
+  }
+  i
+}
+
+#' The carbon table's location for a code, alpha-3 or name.
+#' @param key The text.
+#' @param tab The carbon table.
+#' @return The location, or NA.
+#' @noRd
+.rmbl_loc_known <- function(key, tab) {
+  if (is.null(key) || length(key) != 1L || is.na(key) || !nzchar(key)) {
+    return(NA_character_)
+  }
+  i <- .rmbl_ci_match(key, tab)
+  if (is.na(i)) NA_character_ else tab$location[i]
+}
+
+#' The location the system time zone names.
+#' @param tz The time zone.
+#' @param known A function from a key to a location (or NA).
+#' @return A list (location, method), or NULL.
+#' @noRd
+.rmbl_loc_from_tz <- function(tz, known) {
+  if (!(length(tz) == 1L && !is.na(tz) && nzchar(tz))) {
+    return(NULL)
+  }
+  tzt <- .rmbl_tz_table()
+  # the posix/ and right/ trees repeat every zone; strip them before the
+  # lookup
+  key <- sub("^(posix|right)/", "", tz)
+  terr <- tzt$location[match(key, tzt$tz)]
+  loc <- known(terr)
+  if (!is.na(loc)) {
+    return(list(location = loc, method = sprintf("system time zone %s", tz)))
+  }
+  # the zone resolves to a territory the carbon table has no row for (Monaco,
+  # Jersey, the Antarctic stations): the territory's grid is its administering
+  # or neighbouring country's, or the world average, never the locale's
+  # country
+  if (!(length(terr) == 1L && !is.na(terr))) {
+    return(NULL)
+  }
+  loc <- .rmbl_territory_location(terr, known)
+  list(
+    location = loc,
+    method = sprintf(
+      "system time zone %s (territory %s has no row of its own; %s)",
+      tz,
+      terr,
+      if (identical(loc, "WORLD")) {
+        "world average"
+      } else {
+        paste("grid of", loc)
+      }
+    )
+  )
+}
+
+#' The location the locale's country names.
+#' @param locale The LC_TIME locale.
+#' @param known A function from a key to a location (or NA).
+#' @return A list (location, method), or NULL.
+#' @noRd
+.rmbl_loc_from_locale <- function(locale, known) {
+  if (!(length(locale) == 1L && !is.na(locale))) {
+    return(NULL)
+  }
+  m <- regmatches(locale, regexpr("^[A-Za-z]{2,3}_[A-Z]{2}", locale))
+  if (length(m) != 1L) {
+    return(NULL)
+  }
+  loc <- known(sub("^.*_", "", m))
+  if (is.na(loc)) {
+    return(NULL)
+  }
+  list(location = loc, method = sprintf("locale %s", locale))
+}
+
+# Territories the time-zone table names that the carbon-intensity table has no
+# row for, with the country whose grid they draw on (an enclave or dependency)
+# or none (an island state and Antarctica take the world average).
+.rmbl_territory_proxy <- c(
+  AD = "ES",
+  AI = "AG",
+  BL = "GP",
+  BQ = "NL",
+  CC = "AU",
+  CX = "AU",
+  GG = "FR",
+  IM = "GB",
+  IO = "GB",
+  JE = "FR",
+  LI = "CH",
+  MC = "FR",
+  MF = "GP",
+  MP = "GU",
+  NF = "AU",
+  PN = "GB",
+  SJ = "NO",
+  SM = "IT",
+  SX = "NL",
+  UM = "US",
+  VA = "IT",
+  WF = "NC",
+  AQ = NA_character_,
+  MH = NA_character_,
+  NU = NA_character_,
+  TF = NA_character_,
+  TK = NA_character_,
+  TV = NA_character_
+)
+
+#' Picks the carbon-intensity location for a territory.
+#'
+#' The grid a territory draws on: its proxy country when the carbon table has
+#' that row, the world average when the territory has no proxy or the proxy
+#' itself is missing from the table.
+#' @param terr The territory's two-letter code.
+#' @param known A function that maps a country code to its location in the
+#'   table, or NA.
+#' @param proxies The named vector of proxy countries.
+#' @return A location code, \code{"WORLD"} when no proxy is known.
+#' @noRd
+.rmbl_territory_location <- function(
+  terr,
+  known,
+  proxies = .rmbl_territory_proxy
+) {
+  proxy <- proxies[terr]
+  loc <- if (is.na(proxy)) NA_character_ else known(unname(proxy))
+  if (is.na(loc)) "WORLD" else loc
+}
+
+# ---- RAPL -------------------------------------------------------------------
+
+#' Lists the package-level RAPL domains under a powercap directory.
+#'
+#' The package-level RAPL domains under a powercap directory: directories named
+#' intel-rapl:N (not the :N:M subdomains, which are parts of the package and
+#' would count the same energy twice), whose `name` starts with
+#' \code{"package"}.
+#' @param rapl_dir The powercap directory.
+#' @return The domain directories, possibly none.
+#' @noRd
+.rapl_domains <- function(rapl_dir) {
+  if (!dir.exists(rapl_dir)) {
+    return(character(0))
+  }
+  d <- list.files(rapl_dir, pattern = "^intel-rapl:[0-9]+$", full.names = TRUE)
+  keep <- vapply(
+    d,
+    function(p) {
+      nm <- tryCatch(
+        readLines(file.path(p, "name"), n = 1L, warn = FALSE),
+        error = function(e) ""
+      )
+      file.exists(file.path(p, "energy_uj")) &&
+        length(nm) == 1L &&
+        startsWith(nm, "package")
+    },
+    logical(1)
+  )
+  d[keep]
+}
+
+#' Reads the energy counters of the RAPL package domains.
+#'
+#' Energy counters (microjoules) of the package domains, or NULL when any is
+#' unreadable (on Linux 5.10 and later the files are root-only by default).
+#' @param domains The domain directories from `.rapl_domains()`.
+#' @return A list with `uj` (the counters) and `max` (their wrap-around ranges),
+#'   or NULL.
+#' @noRd
+.rapl_read <- function(domains) {
+  if (!length(domains)) {
+    return(NULL)
+  }
+  vals <- vapply(
+    domains,
+    function(p) {
+      v <- tryCatch(
+        suppressWarnings(as.numeric(readLines(
+          file.path(p, "energy_uj"),
+          n = 1L,
+          warn = FALSE
+        ))),
+        error = function(e) NA_real_
+      )
+      if (length(v) != 1L) NA_real_ else v
+    },
+    numeric(1)
+  )
+  if (anyNA(vals)) {
+    return(NULL)
+  }
+  maxes <- vapply(
+    domains,
+    function(p) {
+      v <- tryCatch(
+        suppressWarnings(as.numeric(readLines(
+          file.path(p, "max_energy_range_uj"),
+          n = 1L,
+          warn = FALSE
+        ))),
+        error = function(e) NA_real_
+      )
+      if (length(v) != 1L || is.na(v)) NA_real_ else v
+    },
+    numeric(1)
+  )
+  list(uj = vals, max = maxes)
+}
+
+# ---- memory and cores --------------------------------------------------------
+
+#' Reads the machine's total memory in gigabytes.
+#' @param meminfo The Linux meminfo file.
+#' @param sysname The operating system's name, as `Sys.info()` gives it.
+#' @param sysctl The path of the sysctl program, used on macOS.
+#' @return The memory in GB, or NA when it cannot be read.
+#' @noRd
+.rmbl_total_memory_gb <- function(
+  meminfo = "/proc/meminfo",
+  sysname = Sys.info()[["sysname"]],
+  sysctl = Sys.which("sysctl")
+) {
+  if (file.exists(meminfo)) {
+    l <- tryCatch(readLines(meminfo, warn = FALSE), error = function(e) {
+      character(0)
+    })
+    m <- grep("^MemTotal:", l, value = TRUE)
+    kb <- suppressWarnings(as.numeric(gsub("[^0-9]", "", m)))
+    if (length(kb) == 1L && is.finite(kb) && kb > 0) return(kb / 1024^2)
+  }
+  if (identical(sysname, "Darwin") && nzchar(sysctl)) {
+    b <- tryCatch(
+      suppressWarnings(as.numeric(system2(
+        sysctl,
+        c("-n", "hw.memsize"),
+        stdout = TRUE,
+        timeout = 10
+      ))),
+      error = function(e) NA_real_
+    )
+    if (length(b) == 1L && is.finite(b) && b > 0) return(b / 1024^3)
+  }
+  NA_real_
+}
+
+#' Counts the CPU seconds between two proc.time() readings.
+#'
+#' CPU seconds between two proc.time() readings, children included. Windows
+#' reports the child times as NA, which would have turned every figure NA.
+#' @param t0 The `proc.time()` reading at the start.
+#' @param t1 The `proc.time()` reading at the end.
+#' @return The CPU seconds used, never negative.
+#' @noRd
+.rmbl_cpu_seconds <- function(t0, t1) {
+  parts <- c("user.self", "sys.self", "user.child", "sys.child")
+  d <- unname(t1[parts]) - unname(t0[parts])
+  max(sum(d[is.finite(d)]), 0)
+}
+
+#' Counts the machine's logical cores.
+#' @return The number of cores, or NA.
+#' @noRd
+.rmbl_cores <- function() {
+  tryCatch(parallel::detectCores(logical = TRUE), error = function(e) {
+    NA_integer_
+  })
+}
+
+# ---- utilisation -------------------------------------------------------------
+
+#' Reads the whole machine's idle and total CPU time on Linux.
+#'
+#' Whole-machine CPU accounting from the first line of /proc/stat (Linux):
+#' idle + iowait jiffies and the total, or NULL where the file is absent.
+#' @param proc_stat The path of the stat file, normally /proc/stat.
+#' @return A named vector with `idle` and `total` jiffies, or NULL.
+#' @noRd
+.proc_stat_cpu <- function(proc_stat) {
+  l <- tryCatch(
+    suppressWarnings(readLines(proc_stat, n = 1L, warn = FALSE)),
+    error = function(e) character(0)
+  )
+  if (length(l) != 1L || !startsWith(l, "cpu ")) {
+    return(NULL)
+  }
+  v <- suppressWarnings(as.numeric(strsplit(trimws(l), "\\s+")[[1]][-1]))
+  if (length(v) < 4L || anyNA(v)) {
+    return(NULL)
+  }
+  c(idle = v[4] + if (length(v) >= 5L) v[5] else 0, total = sum(v))
+}
+
+#' Scales the CPU's power to a utilisation.
+#'
+#' CPU power at a utilisation u, as a fraction of the CPU's power P: Green
+#' Algorithms' linear scaling, or codecarbon's curve for the matching mode (a
+#' floor at 10% of P when tracking a process; 0.1 + 0.9 u^3 for the machine).
+#' @param p The CPU's power.
+#' @param u The utilisation, a fraction from 0 to 1.
+#' @param load_curve \code{"linear"} for Green Algorithms' scaling, anything
+#' else for codecarbon's curve.
+#' @param usage_mode \code{"machine"} or \code{"process"}.
+#' @return The power drawn, in the units of `p`.
+#' @noRd
+.cpu_load_power <- function(p, u, load_curve, usage_mode) {
+  if (load_curve == "linear") {
+    return(p * u)
+  }
+  if (usage_mode == "machine") p * (0.1 + 0.9 * u^3) else max(p * u, 0.1 * p)
+}
+
+#' co2fp()'s arguments, checked.
+#' @param pue,cpupwrw,cores,memgb,mempwrwpergb,rapldir,procstat,usage As for
+#'   co2fp().
+#' @return A list of the checked values, with usage_mode.
+#' @noRd
+.fp_args <- function(
+  pue,
+  cpupwrw,
+  cores,
+  memgb,
+  mempwrwpergb,
+  rapldir,
+  procstat,
+  usage
+) {
+  if (!is.numeric(pue) || length(pue) != 1L || !is.finite(pue) || pue < 1) {
+    stop("`pue` must be a single number >= 1", call. = FALSE)
+  }
+  cpupwrw <- .fp_num_arg(cpupwrw, "cpupwrw", positive = TRUE)
+  cores <- .fp_num_arg(cores, "cores", positive = TRUE)
+  if (!is.null(cores) && cores != round(cores)) {
+    stop("`cores` must be a whole number", call. = FALSE)
+  }
+  memgb <- .fp_num_arg(memgb, "memgb")
+  mempwrwpergb <- .fp_num_arg(mempwrwpergb, "mempwrwpergb")
+  .fp_check_paths(rapldir, procstat)
+  if (is.null(usage)) {
+    usage <- "process"
+  }
+  list(
+    cpupwrw = cpupwrw,
+    cores = cores,
+    memgb = memgb,
+    mempwrwpergb = mempwrwpergb,
+    usage = usage,
+    usage_mode = .fp_usage_mode(usage)
+  )
+}
+
+#' One number argument of co2fp(): NULL, or a single finite non-negative (or
+#' positive) number.
+#' @param x The co2fp() argument to check: NULL or one finite number.
+#' @param what Its name.
+#' @param positive Whether zero is refused.
+#' @return The number, or NULL.
+#' @noRd
+.fp_num_arg <- function(x, what, positive = FALSE) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (
+    !is.numeric(x) ||
+      length(x) != 1L ||
+      !is.finite(x) ||
+      x < 0 ||
+      x > 1e9 ||
+      (positive && x <= 0)
+  ) {
+    stop(
+      sprintf(
+        "`%s` must be a single %s number",
+        what,
+        if (positive) "positive" else "non-negative"
+      ),
+      call. = FALSE
+    )
+  }
+  as.numeric(x)
+}
+
+#' co2fp()'s two paths, checked.
+#' @param rapldir,procstat As for co2fp().
+#' @noRd
+.fp_check_paths <- function(rapldir, procstat) {
+  if (!is.character(rapldir) || length(rapldir) != 1L || is.na(rapldir)) {
+    stop("`rapldir` must be a single path", call. = FALSE)
+  }
+  if (!is.character(procstat) || length(procstat) != 1L || is.na(procstat)) {
+    stop("`procstat` must be a single path", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+#' How co2fp() measures the CPU's utilisation: "process", "machine", or
+#' "fixed" (a number given).
+#' @param usage As for co2fp().
+#' @return The mode.
+#' @noRd
+.fp_usage_mode <- function(usage) {
+  if (length(usage) != 1L) {
+    stop(
+      "`usage` takes one value: \"process\", \"machine\" or a single number ",
+      "in [0, 1]",
+      call. = FALSE
+    )
+  }
+  if (is.character(usage)) {
+    return(.rmbl_arg(usage, c("process", "machine")))
+  }
+  if (
+    is.numeric(usage) &&
+      length(usage) == 1L &&
+      is.finite(usage) &&
+      usage >= 0 &&
+      usage <= 1
+  ) {
+    return("fixed")
+  }
+  stop(
+    "`usage` must be \"process\", \"machine\" or a single number in [0, 1]",
+    call. = FALSE
+  )
+}
+
+#' The sources a footprint cites.
+#' @param ci The carbon intensity (co2int()).
+#' @return The citations.
+#' @noRd
+.fp_cites <- function(ci) {
+  cites <- c(
+    paste0(
+      "Lannelongue, Grealey & Inouye (2021) Adv Sci 8:2100707 (energy ",
+      "model, 0.3725 W/GB)"
+    ),
+    paste0(
+      "codecarbon (RAPL method; process/machine tracking; 85 W x 50% ",
+      "unknown-CPU fallback)"
+    ),
+    sprintf("carbon intensity: %s (%s, %d)", ci$source, ci$name, ci$year)
+  )
+  if (is.na(ci$year)) {
+    cites <- cites[-3L]
+  }
+  cites
+}
+
+#' The number of cores: given, or this machine's (1 when unknown).
+#' @param cores As for co2fp().
+#' @param st The footprint's state (its assumptions).
+#' @return The count.
+#' @noRd
+.fp_cores <- function(cores, st) {
+  if (!is.null(cores)) {
+    return(cores)
+  }
+  cores <- .rmbl_cores()
+  if (is.na(cores)) {
+    cores <- 1L
+    st$assumptions <- c(st$assumptions, "core count unknown; 1 assumed")
+  }
+  cores
+}
+
+#' The CPU's utilisation over the run.
+#' @param usage,usage_mode The value given and how it is measured.
+#' @param stat0,stat1 The machine's CPU accounting before and after.
+#' @param wall,cpu_t The run's wall and CPU seconds.
+#' @param cores The number of cores.
+#' @param st The footprint's state.
+#' @return A list: usage and mode.
+#' @noRd
+.fp_usage <- function(usage, usage_mode, stat0, stat1, wall, cpu_t, cores, st) {
+  if (usage_mode == "machine") {
+    if (is.null(stat1)) {
+      usage_mode <- "process"
+      st$assumptions <- c(
+        st$assumptions,
+        "machine CPU accounting became unreadable; process utilisation used"
+      )
+    } else {
+      dt <- stat1[["total"]] - stat0[["total"]]
+      usage <- if (dt > 0) {
+        min(max(1 - (stat1[["idle"]] - stat0[["idle"]]) / dt, 0), 1)
+      } else {
+        0
+      }
+    }
+  }
+  if (usage_mode == "process") {
+    usage <- if (wall > 0) min(max(cpu_t / (wall * cores), 0), 1) else 0
+  }
+  list(usage = usage, mode = usage_mode)
+}
+
+#' The CPU's energy: measured by RAPL, or modelled.
+#' @param used "rapl" or "model".
+#' @param before,after The RAPL counters before and after the run.
+#' @param hours The run's length.
+#' @param cpupwrw,loadcur As for co2fp().
+#' @param usage,usage_mode The CPU's utilisation and how it was measured.
+#' @param st The footprint's state.
+#' @return A list: kwh and used (the method in the end).
+#' @noRd
+.fp_cpu_energy <- function(
+  used,
+  before,
+  after,
+  hours,
+  cpupwrw,
+  usage,
+  loadcur,
+  usage_mode,
+  st
+) {
+  e_cpu_kwh <- NULL
+  if (used == "rapl" && !is.null(after)) {
+    d <- after$uj - before$uj
+    wrapped <- d < 0
+    if (any(wrapped)) {
+      if (anyNA(before$max[wrapped])) {
+        used <- "model"
+        st$assumptions <- c(
+          st$assumptions,
+          "a RAPL counter wrapped and its range was unknown; modelled instead"
+        )
+      } else {
+        d[wrapped] <- d[wrapped] + before$max[wrapped]
+      }
+    }
+    if (used == "rapl") e_cpu_kwh <- sum(d) * 1e-6 / 3.6e6
+  } else if (used == "rapl") {
+    used <- "model"
+    st$assumptions <- c(
+      st$assumptions,
+      "RAPL counters became unreadable during the run; modelled instead"
+    )
+  }
+  if (used == "model") {
+    e_cpu_kwh <- .fp_cpu_model(hours, cpupwrw, usage, loadcur, usage_mode, st)
+  }
+  list(kwh = e_cpu_kwh, used = used)
+}
+
+#' The CPU's energy modelled from its power: the codecarbon fallback when the
+#' power is not given.
+#' @param hours The run's length.
+#' @param cpupwrw,loadcur As for co2fp().
+#' @param usage,usage_mode The CPU's utilisation and how it was measured.
+#' @param st The footprint's state.
+#' @return The energy in kWh.
+#' @noRd
+.fp_cpu_model <- function(hours, cpupwrw, usage, loadcur, usage_mode, st) {
+  if (is.null(cpupwrw)) {
+    st$assumptions <- c(
+      st$assumptions,
+      "CPU power unknown: 85 W x 50% (codecarbon fallback)"
+    )
+    return(hours * 85 * 0.5 / 1000)
+  }
+  # cpupwrw was checked (single, finite, positive) before `expr` ran
+  if (loadcur == "codecarbon") {
+    st$assumptions <- c(
+      st$assumptions,
+      sprintf(
+        "codecarbon %s load curve applied to the CPU power",
+        if (usage_mode == "machine") "machine" else "process"
+      )
+    )
+  }
+  hours * .cpu_load_power(cpupwrw, usage, loadcur, usage_mode) / 1000
+}
+
+#' The memory charged: given, or this machine's total (8 GB when unknown).
+#' @param memgb As for co2fp().
+#' @param st The footprint's state.
+#' @return The memory in GB.
+#' @noRd
+.fp_memory <- function(memgb, st) {
+  if (!is.null(memgb)) {
+    return(memgb)
+  }
+  memgb <- .rmbl_total_memory_gb()
+  if (is.na(memgb)) {
+    st$assumptions <- c(st$assumptions, "memory size unknown: 8 GB assumed")
+    return(8)
+  }
+  st$assumptions <- c(
+    st$assumptions,
+    sprintf("memory charged: the machine's total %.1f GB", memgb)
+  )
+  memgb
+}
+
+#' co2int()'s answer for a carbon intensity given as a number.
+#' @param loc The number passed as `loc`.
+#' @return As for co2int().
+#' @noRd
+.rmbl_ci_user <- function(loc) {
+  if (length(loc) != 1L || !is.finite(loc) || loc < 0) {
+    stop(
+      "a numeric `loc` must be a single non-negative gCO2e/kWh value",
+      call. = FALSE
+    )
+  }
+  list(
+    g_per_kwh = as.numeric(loc),
+    location = "user",
+    name = "user-supplied",
+    year = NA_integer_,
+    basis = "user",
+    source = "user-supplied carbon intensity",
+    note = character(0)
+  )
+}
+
+#' A grid zone with no row of its own, looked up by its country.
+#' @param loc The zone, such as `"US-CAL-CISO"`.
+#' @param tab The carbon-intensity table.
+#' @return A list with the row `i` (`NA` when the country is unknown too) and
+#'   the `note` saying the country was used.
+#' @noRd
+.rmbl_ci_zone <- function(loc, tab) {
+  country <- sub("-.*$", "", loc)
+  i <- .rmbl_ci_match(country, tab)
+  note <- character(0)
+  if (!is.na(i)) {
+    note <- sprintf(
+      "no row for zone %s; its country %s used",
+      toupper(loc),
+      tab$location[i]
+    )
+  }
+  list(i = i, note = note)
+}
+
+#' dtctloc()'s arguments, each one string or NULL.
+#' @param args The arguments, named.
+#' @return `NULL`, invisibly; errors on a bad argument.
+#' @noRd
+.rmbl_loc_args <- function(args) {
+  for (nm in names(args)) {
+    v <- args[[nm]]
+    if (!is.null(v) && !(is.character(v) && length(v) <= 1L)) {
+      stop(sprintf("`%s` must be one string (or NULL)", nm), call. = FALSE)
+    }
+  }
+  invisible(NULL)
+}
+
+#' The location from the RMBL_LOCATION or CODECARBON_COUNTRY_ISO_CODE
+#' setting, warning when RMBL_LOCATION names no known location.
+#' @param envloc,codloc As for dtctloc().
+#' @param known A function returning the location a key names, or `NA`.
+#' @return A list with `location` and `method`, or `NULL`.
+#' @noRd
+.rmbl_loc_from_env <- function(envloc, codloc, known) {
+  loc <- known(envloc)
+  if (!is.na(loc)) {
+    return(list(location = loc, method = "RMBL_LOCATION environment variable"))
+  }
+  .rmbl_loc_ignored(envloc, "RMBL_LOCATION")
+  loc <- known(codloc)
+  if (!is.na(loc)) {
+    return(list(
+      location = loc,
+      method = "CODECARBON_COUNTRY_ISO_CODE environment variable"
+    ))
+  }
+  # an unknown code was skipped without a word, where RMBL_LOCATION warns
+  .rmbl_loc_ignored(codloc, "CODECARBON_COUNTRY_ISO_CODE")
+  NULL
+}
+
+#' Warns that a location given in an environment variable is not known.
+#' @param val The value given; nothing is said when it is empty.
+#' @param var The environment variable's name, for the warning.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_loc_ignored <- function(val, var) {
+  if (length(val) == 1L && !is.na(val) && nzchar(val)) {
+    warning(
+      sprintf(
+        paste(
+          "%s='%s' is not a location co2inttab() knows",
+          "(code, alpha-3 or name); it is ignored"
+        ),
+        var,
+        val
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
+#' co2fp()'s energy reading before the expression runs: the RAPL counters
+#' (unless modelling) and the machine CPU counters (for machine usage).
+#' @param meth The checked method.
+#' @param rapldir,procstat As for co2fp().
+#' @param usage_mode `"process"`, `"machine"` or `"fixed"`.
+#' @param st The environment collecting the assumptions.
+#' @return A list with `domains`, `before`, `used` (`"rapl"` or `"model"`),
+#'   `stat0` and the `usage_mode` in effect.
+#' @noRd
+.fp_before <- function(meth, rapldir, procstat, usage_mode, st) {
+  domains <- if (meth != "model") .rapl_domains(rapldir) else character(0)
+  before <- if (meth != "model") .rapl_read(domains) else NULL
+  if (meth == "rapl" && is.null(before)) {
+    stop(
+      "RAPL energy counters are not readable here (see raplok()); use ",
+      "method = \"model\"",
+      call. = FALSE
+    )
+  }
+  used <- if (is.null(before)) "model" else "rapl"
+  stat0 <- if (usage_mode == "machine") .proc_stat_cpu(procstat) else NULL
+  if (usage_mode == "machine" && is.null(stat0)) {
+    usage_mode <- "process"
+    st$assumptions <- c(
+      st$assumptions,
+      paste0(
+        "machine CPU accounting unreadable (no /proc/stat); process ",
+        "utilisation used"
+      )
+    )
+  }
+  list(
+    domains = domains,
+    before = before,
+    used = used,
+    stat0 = stat0,
+    usage_mode = usage_mode
+  )
+}
+
+#' co2fp()'s running time: wall-clock and CPU seconds, and the cores.
+#'
+#' A run faster than the elapsed clock's resolution read 0 s of wall time
+#' against a millisecond of CPU time, and its energy came out exactly 0: the
+#' work took at least its CPU time spread over the cores.
+#' @param t0,t1 `proc.time()` before and after the expression.
+#' @param cores The checked `cores` argument.
+#' @param st The environment collecting the assumptions.
+#' @return A list with `wall`, `cpu_t` and `cores`.
+#' @noRd
+.fp_times <- function(t0, t1, cores, st) {
+  wall <- max(unname(t1[["elapsed"]] - t0[["elapsed"]]), 0)
+  cpu_t <- .rmbl_cpu_seconds(t0, t1)
+  cores <- .fp_cores(cores, st)
+  if (is.finite(cpu_t) && cpu_t > 0) {
+    wall <- max(wall, cpu_t / max(1, cores))
+  }
+  list(wall = wall, cpu_t = cpu_t, cores = cores)
+}
+
+#' co2fp()'s energy: CPU (measured or modelled) and memory, with the PUE.
+#' @param a The checked arguments, from `.fp_args()`.
+#' @param pre The reading before, from `.fp_before()`.
+#' @param after The RAPL reading after, or `NULL`.
+#' @param stat1 The machine CPU counters after, or `NULL`.
+#' @param t0,t1 `proc.time()` before and after the expression.
+#' @param loadcur,pue As for co2fp() (checked).
+#' @param st The environment collecting the assumptions.
+#' @return A list with `wall`, `cpu_t`, `cores`, `usage`, `usage_mode`,
+#'   `used`, `memgb`, `e_cpu_kwh`, `e_mem_kwh` and `total`.
+#' @noRd
+.fp_energy <- function(a, pre, after, stat1, t0, t1, loadcur, pue, st) {
+  tm <- .fp_times(t0, t1, a$cores, st)
+  hours <- tm$wall / 3600
+  u <- .fp_usage(
+    a$usage,
+    pre$usage_mode,
+    pre$stat0,
+    stat1,
+    tm$wall,
+    tm$cpu_t,
+    tm$cores,
+    st
+  )
+  cpu <- .fp_cpu_energy(
+    pre$used,
+    pre$before,
+    after,
+    hours,
+    a$cpupwrw,
+    u$usage,
+    loadcur,
+    u$mode,
+    st
+  )
+  memgb <- .fp_memory(a$memgb, st)
+  e_mem_kwh <- hours * memgb * a$mempwrwpergb / 1000
+  total <- (cpu$kwh + e_mem_kwh) * pue
+  if (pue > 1) {
+    st$assumptions <- c(st$assumptions, sprintf("PUE %.2f applied", pue))
+  }
+  list(
+    wall = tm$wall,
+    cpu_t = tm$cpu_t,
+    cores = tm$cores,
+    usage = u$usage,
+    usage_mode = u$mode,
+    used = cpu$used,
+    memgb = memgb,
+    e_cpu_kwh = cpu$kwh,
+    e_mem_kwh = e_mem_kwh,
+    total = total
+  )
 }

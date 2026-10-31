@@ -1,6 +1,6 @@
 Package: rmoriebricklayer
 Title: Reproducible Data Capsules with Provenance and Fallback
-Version: 1.0.2
+Version: 1.0.3
 Authors@R: 
     person(c("Vansh", "Singh"), "Ruhela", email = "vsruhela@proton.me",
            role = c("aut", "cre"),
@@ -37,9 +37,10 @@ Encoding: UTF-8
 Language: en-US
 Depends: R (>= 4.1.0)
 Imports: graphics, grDevices, methods, parallel, stats, tools, utils
-Suggests: withr, bslib (>= 0.9.0), digest, jsonlite, knitr, later,
-        MASS, openssl, pkgdown, rmarkdown, sf, promises, shiny,
-        stringi, survival, survey, testthat (>= 3.0.0)
+Suggests: withr, bslib (>= 0.9.0), digest, fixest, jsonlite, knitr,
+        later, lme4, MASS, mgcv, nlme, nnet, openssl, pkgdown,
+        rmarkdown, sf, promises, shiny, stringi, survival, survey,
+        testthat (>= 3.0.0)
 VignetteBuilder: knitr
 URL: https://github.com/rootcoder007/rmorie-bricklayer,
         https://rootcoder007.github.io/rmorie-bricklayer/
@@ -47,12 +48,15 @@ BugReports: https://github.com/rootcoder007/rmorie-bricklayer/issues
 Config/testthat/edition: 3
 SystemRequirements: C++17, libcurl (deb: libcurl4-openssl-dev, rpm:
         libcurl-devel, brew: curl), zlib (deb: zlib1g-dev, rpm:
-        zlib-devel).
-Config/roxygen2/version: 8.0.0
+        zlib-devel). Optional, for mkbndlchk() running a bundle:
+        unshare (util-linux) and systemctl on Linux; podman or docker
+        for container = TRUE.
+Config/roxygen2/version: 8.1.1
+ByteCompile: yes
 NeedsCompilation: yes
-Packaged: 2026-10-22 12:43:35 UTC; rootcoder
+Packaged: 2026-10-31 02:49:06 UTC; rootcoder
 Author: Vansh Singh Ruhela [aut, cre] (ORCID:
     <https://orcid.org/0009-0004-1750-3592>)
 Maintainer: Vansh Singh Ruhela <vsruhela@proton.me>
 Repository: CRAN
-Date/Publication: 2026-10-22 14:20:02 UTC
+Date/Publication: 2026-10-31 04:00:02 UTC

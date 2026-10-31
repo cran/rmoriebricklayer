@@ -64,10 +64,14 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
 
 ## ----capsules-provenance------------------------------------------------------
+ckan <- paste0(
+  "https://data.ontario.ca/api/3/action/package_show",
+  "?id=ontario-public-library-statistics"
+)
 provjson <- '{
   "dataset": {
     "title": "Demo library statistics",
-    "ckan_api_endpoint": "https://data.ontario.ca/api/3/action/package_show?id=ontario-public-library-statistics"
+    "ckan_api_endpoint": "CKAN"
   },
   "resource": { "name_match_pattern": "2014" },
   "schema": {
@@ -86,6 +90,7 @@ provjson <- '{
     }
   }
 }'
+provjson <- sub("CKAN", ckan, provjson, fixed = TRUE)
 
 provpath <- file.path(tempdir(), "data_provenance.json")
 writeLines(provjson, provpath)
@@ -149,10 +154,16 @@ d <- indiex("wellbeing")
 f <- file.path(tempdir(), "indigenous_wellbeing.csv")
 utils::write.csv(d, f, row.names = FALSE)
 h <- sha256file(f)
-m <- mkmnf(list(dataset = "indigenouswellbeing", rows = nrow(d), sha256 = h,
-                        source = "Statistics Canada, Indigenous Peoples Survey 2022",
-                        licence = "Statistics Canada Open Licence"),
-                   env = FALSE)
+m <- mkmnf(
+  list(
+    dataset = "indigenouswellbeing",
+    rows = nrow(d),
+    sha256 = h,
+    source = "Statistics Canada, Indigenous Peoples Survey 2022",
+    licence = "Statistics Canada Open Licence"
+  ),
+  env = FALSE
+)
 vrfsha256(f, h)
 
 ## ----capsules-capsule-plots, fig.width = 7, fig.height = 4.5------------------
@@ -162,18 +173,34 @@ ci_plot <- function(t, lab, main) {
   y <- seq_len(nrow(t))
   op <- par(mar = c(4, 10, 3, 1))
   on.exit(par(op))
-  plot(t$estimate, y, xlim = range(t$lower, t$upper, na.rm = TRUE), yaxt = "n", pch = 19,
-       col = blpal()[1], xlab = "estimate and 95% interval", ylab = "", main = main)
+  plot(
+    t$estimate,
+    y,
+    xlim = range(t$lower, t$upper, na.rm = TRUE),
+    yaxt = "n",
+    pch = 19,
+    col = blpal()[1],
+    xlab = "estimate and 95% interval",
+    ylab = "",
+    main = main
+  )
   segments(t$lower, y, t$upper, y, col = blpal()[1])
   axis(2, y, lab[o], las = 1, cex.axis = 0.7)
 }
 t1 <- d[d$indicator == d$indicator[1], ]
 ci_plot(t1, t1$group, t1$indicator[1])
 v <- tapply(df$visits, df$year, sum)
-barplot(v, col = blpal()[2], main = "Visits by year", xlab = "year", ylab = "visits")
+barplot(
+  v,
+  col = blpal()[2],
+  main = "Visits by year",
+  xlab = "year",
+  ylab = "visits"
+)
 
 ## ----provenance-setup, include = FALSE----------------------------------------
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
@@ -191,7 +218,12 @@ sig <- cpssign(csha256(manifest), key = "team-secret",
 cpsvrf(csha256(manifest), sig, "team-secret")
 
 ## -----------------------------------------------------------------------------
-edited <- sub("fetched=2026-09-12", "fetched=2026-01-01", manifest)
+edited <- sub(
+  "fetched=2026-09-12",
+  "fetched=2026-01-01",
+  manifest,
+  fixed = TRUE
+)
 cpsvrf(csha256(edited), sig, "team-secret")
 
 ## -----------------------------------------------------------------------------
@@ -238,6 +270,13 @@ cpssign("three", k)
 
 ## -----------------------------------------------------------------------------
 pqcbknd()
+
+## ----eval = FALSE-------------------------------------------------------------
+# mod <- fipsmod()
+# mod                       # the module, its build and its certificate
+# key <- fipsmkg("ML-DSA-65", mod)
+# sig <- cpssign("a manifest digest", key)
+# cpsvrf("a manifest digest", sig, key)
 
 ## -----------------------------------------------------------------------------
 m <- mkmnf(list(dataset = "otis", rows = 1200L),
@@ -311,16 +350,46 @@ falsfam(c(ate = 0.02, byyear = 0.3, byprecinct = 0.4,
 ## -----------------------------------------------------------------------------
 evlrr(2, lo = 1.4, hi = 2.9)
 
+## -----------------------------------------------------------------------------
+alloc <- ralloc(arms = c("drug", "placebo"), ratio = c(1, 1),
+                strata = c(Toronto = 24, Ottawa = 16), codes = TRUE,
+                seed = "a vignette, not a trial")
+alloc
+
+## -----------------------------------------------------------------------------
+trial <- fipskg("ML-DSA-44")
+record <- paste(attr(alloc, "alloc")$digest,
+                mnfdgst(mkmnf(list(outcomes = plan$statistics),
+                              env = FALSE)))
+sealed <- cpssign(record, trial, ctx = "trial commitment")
+cpsvrf(record, sealed, fipspubkey(trial), ctx = "trial commitment")
+
+## -----------------------------------------------------------------------------
+rallocvrf(alloc, digest = attr(alloc, "alloc")$digest)
+
+# one allocation changed after the commitment is caught
+moved <- alloc
+moved$arm[1] <- setdiff(c("drug", "placebo"), moved$arm[1])
+rallocvrf(moved, digest = attr(alloc, "alloc")$digest)$ok
+
 ## ----eval = FALSE-------------------------------------------------------------
-# cap <- arccap("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip", "captures",
-#               upload = c("rmorie", "wayback"), reason = "Custody table cited in chapter 3")
-# cap$archive                     # its page at archive.rmorie.com
+# cap <- arccap(
+#   "https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip",
+#   "captures",
+#   upload = c("rmorie", "wayback"),
+#   reason = "Custody table cited in chapter 3"
+# )
+# cap$archive # its page at archive.rmorie.com
 # arcfind("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip")
 # arcget(cap$capture_id, "table.zip", sha256 = cap$sha256)
 
 ## ----eval = FALSE-------------------------------------------------------------
-# fetchvrf("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip", "table.zip",
-#          sha256 = cap$sha256, arcs = c("rmorie", "captures"))
+# fetchvrf(
+#   "https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip",
+#   "table.zip",
+#   sha256 = cap$sha256,
+#   arcs = c("rmorie", "captures")
+# )
 
 ## -----------------------------------------------------------------------------
 dir <- tempfile()
@@ -332,6 +401,38 @@ cpsbndlvrf(attr(b, "path"), dir, man = man)
 
 ## -----------------------------------------------------------------------------
 unlink(dir, recursive = TRUE)
+
+## -----------------------------------------------------------------------------
+proj <- file.path(tempdir(), "my-study")
+p <- mkbndlproj(proj, title = "My study", author = "A. Researcher",
+                contact = "a.researcher@example.org", overwrite = TRUE)
+p
+
+## -----------------------------------------------------------------------------
+dat <- data.frame(group = rep(c("a", "b"), 50), value = rep(c(4, 6), 50),
+                  stringsAsFactors = FALSE)
+csv <- file.path(tempdir(), "my_data.csv")
+write.csv(dat, csv, row.names = FALSE)
+pv <- file.path(proj, "data_provenance.json")
+prov <- fromjs(pv, simplifyVector = FALSE)
+prov$resource$sha256 <- sha256file(csv)
+writeLines(tojs(prov, auto_unbox = TRUE, pretty = TRUE), pv)
+
+## -----------------------------------------------------------------------------
+b <- mkbndl(proj, dest = tempdir(), data = csv, overwrite = TRUE)
+b
+
+## -----------------------------------------------------------------------------
+out <- file.path(tempdir(), "reviewer")
+unzip(b$path, exdir = out)
+st <- file.path(out, sub("[.]zip$", "", basename(b$path)))
+res <- system2(file.path(R.home("bin"), "Rscript"),
+               c(shQuote(file.path(st, "setup_and_run.R")), "--quick"),
+               stdout = TRUE, stderr = TRUE)
+cat(grep("PASS:|DIFFER:|INFO:", res, value = TRUE), sep = "\n")
+
+## -----------------------------------------------------------------------------
+unlink(c(proj, out, csv, b$path), recursive = TRUE)
 
 ## ----eval=FALSE---------------------------------------------------------------
 # res <- tsvrf("response.tsr", data = "manifest.json")
@@ -392,14 +493,20 @@ chnseal(tampered)
 
 ## ----provenance-indigenous-provenance-----------------------------------------
 cr <- readLines(system.file("COPYRIGHTS", package = "rmoriebricklayer"))
-cat(cr[grep("indigenouslifeexpectancy", cr) + 0:4], sep = "\n")
+cat(cr[grep("indigenouslifeexpectancy", cr, fixed = TRUE) + 0:4], sep = "\n")
 
 ## ----provenance-indigenous-tables, eval = FALSE-------------------------------
 # head(indtabs()[, c("key", "rows")])
 
 ## ----provenance-provenance-plot, fig.width = 6, fig.height = 4----------------
-barplot(d$x, names.arg = seq_len(nrow(d)), col = blpal()[1], xlab = "row", ylab = "x",
-        main = "The values the manifest pins")
+barplot(
+  d$x,
+  names.arg = seq_len(nrow(d)),
+  col = blpal()[1],
+  xlab = "row",
+  ylab = "x",
+  main = "The values the manifest pins"
+)
 
 ## ----include = FALSE----------------------------------------------------------
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
@@ -487,19 +594,34 @@ mksyncsv(recipe, tempfile(fileext = ".csv"), nrows = 5)$rows
 d <- indiex("health")
 rules <- list(
   ruleinset("quality", c("ok", "E", "F", "x", "..")),
-  ruleinset("group", c("First Nations", "M\u00e9tis", "Inuit", "Non-Indigenous")),
-  rul("estimate inside its interval",
-       function(x) is.na(x$estimate) | (x$lower <= x$estimate & x$estimate <= x$upper))
+  ruleinset(
+    "group",
+    c("First Nations", "M\u00e9tis", "Inuit", "Non-Indigenous")
+  ),
+  rul("estimate inside its interval", function(x) {
+    is.na(x$estimate) | (x$lower <= x$estimate & x$estimate <= x$upper)
+  })
 )
 valrules(d, rules)
 
 ## ----validation-rules-and-synthetic-data-synthetic-plot, fig.width = 8, fig.height = 4----
 op <- par(mfrow = c(1, 2))
-barplot(table(df$visits), col = blpal()[1], xlab = "visits", ylab = "rows",
-        main = "Synthetic visits")
+barplot(
+  table(df$visits),
+  col = blpal()[1],
+  xlab = "visits",
+  ylab = "rows",
+  main = "Synthetic visits"
+)
 al <- tapply(df$alert == "Yes", df$year, mean)
-barplot(100 * al, col = blpal()[2], ylim = c(0, 100), xlab = "year", ylab = "rows with an alert (%)",
-        main = "Synthetic alert flag")
+barplot(
+  100 * al,
+  col = blpal()[2],
+  ylim = c(0, 100),
+  xlab = "year",
+  ylab = "rows with an alert (%)",
+  main = "Synthetic alert flag"
+)
 abline(h = 20, lty = 2)
 par(op)
 
@@ -593,7 +715,13 @@ b <- hi$estimate[hi$period == "2019/2022"]
 drftks(a[is.finite(a)], b[is.finite(b)])
 
 ## ----dashboard-setup, include = FALSE-----------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4, dpi = 72)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 4,
+  dpi = 72
+)
 library(rmoriebricklayer)
 
 ## -----------------------------------------------------------------------------
@@ -610,12 +738,17 @@ fit$table[, c("rank", "family", "aic", "ks")]
 plot(fit, which = "qq", fams = c("gamma", "weibull"))
 
 ## -----------------------------------------------------------------------------
-led <- ldgrread(system.file("extdata", "ledger_sample.json", package = "rmoriebricklayer"))
+led <- ldgrread(system.file(
+  "extdata",
+  "ledger_sample.json",
+  package = "rmoriebricklayer"
+))
 led
 ldgrchk(led)[, c("check", "ok", "severity")]
 
 ## ----include = FALSE----------------------------------------------------------
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
@@ -630,10 +763,17 @@ llmstat()
 if (is.na(old)) Sys.unsetenv("OLLAMA_HOST") else Sys.setenv(OLLAMA_HOST = old)
 
 ## ----language-model-routes-ask, eval = FALSE----------------------------------
-# llmask("How do I estimate a weighted proportion with bootstrap replicate weights?")
-# llmask(paste(c("Summarise this table:", capture.output(print(head(mtcars)))),
-#                          collapse = "\n"),
-#                    syspro = "Answer in two sentences.", docs = FALSE)
+# llmask(
+#   "How do I estimate a weighted proportion with bootstrap replicate weights?"
+# )
+# llmask(
+#   paste(
+#     c("Summarise this table:", capture.output(print(head(mtcars)))),
+#     collapse = "\n"
+#   ),
+#   syspro = "Answer in two sentences.",
+#   docs = FALSE
+# )
 
 ## ----language-model-routes-services-------------------------------------------
 s <- svcs(offline = TRUE)
@@ -646,13 +786,20 @@ attr(s, "source")
 # dlogout()         # forget the key
 
 ## ----language-model-routes-indigenous-llm, eval = FALSE-----------------------
-# llmask(paste("How do I compare perceived mental health of First Nations,",
-#                          "Metis and Inuit adults with non-Indigenous adults, using",
-#                          "indiex('health_indicators')?"))
+# llmask(paste(
+#   "How do I compare perceived mental health of First Nations,",
+#   "M\u00e9tis and Inuit adults with non-Indigenous adults, using",
+#   "indiex('health_indicators')?"
+# ))
 
 ## ----language-model-routes-providers-plot, fig.width = 6, fig.height = 4------
 pv <- llmprvd()
-barplot(table(pv$api), col = blpal()[1], ylab = "providers", main = "Providers by request shape")
+barplot(
+  table(pv$api),
+  col = blpal()[1],
+  ylab = "providers",
+  main = "Providers by request shape"
+)
 
 ## ----include = FALSE----------------------------------------------------------
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
@@ -719,8 +866,17 @@ o <- order(back$estimate)
 t1 <- back[o, ]
 yy <- seq_len(nrow(t1))
 op <- par(mar = c(4, 16, 3, 1))
-plot(t1$estimate, yy, xlim = range(t1$lower, t1$upper), yaxt = "n", pch = 19, col = blpal()[1],
-     xlab = "estimate and 95% interval", ylab = "", main = t1$measure[1])
+plot(
+  t1$estimate,
+  yy,
+  xlim = range(t1$lower, t1$upper),
+  yaxt = "n",
+  pch = 19,
+  col = blpal()[1],
+  xlab = "estimate and 95% interval",
+  ylab = "",
+  main = t1$measure[1]
+)
 segments(t1$lower, yy, t1$upper, yy, col = blpal()[1])
 axis(2, yy, t1$group, las = 1, cex.axis = 0.7)
 par(op)

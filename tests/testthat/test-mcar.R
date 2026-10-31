@@ -1,4 +1,5 @@
-testthat::skip_on_cran()  # battery: runs in CI and locally; CRAN runs the correctness core
+# battery: runs in CI and locally; CRAN runs the correctness core
+testthat::skip_on_cran()
 # Little's MCAR test and the EM estimator behind it.
 #
 # The EM estimator is anchored EXACTLY: with no missing values it must
@@ -18,13 +19,24 @@ test_that("EM reproduces the ML estimates when nothing is missing", {
 
   fit <- mcartst(df)
   # the mean is the column mean
-  expect_equal(unname(fit$mu), c(mean(x), mean(y)))
+  expect_equal(
+    unname(fit$mu),
+    c(mean(x), mean(y)),
+    tolerance = testthat::testthat_tolerance()
+  )
   # the covariance is the ML one, which divides by n rather than n - 1
-  expect_equal(unname(fit$sigma), unname(stats::cov(cbind(x, y)) *
-                                          (n - 1) / n))
+  expect_equal(
+    unname(fit$sigma),
+    unname(
+      stats::cov(cbind(x, y)) *
+        (n - 1) /
+        n
+    ),
+    tolerance = testthat::testthat_tolerance()
+  )
   # complete data is a single pattern, so there is nothing to test
-  expect_equal(fit$npat, 1L)
-  expect_equal(fit$df, 0)
+  expect_identical(fit$npat, 1L)
+  expect_identical(fit$df, 0)
   expect_true(is.na(fit$p_value))
   expect_false(is.na(fit$note))
   expect_match(fit$note, "nothing to test")
@@ -36,9 +48,9 @@ test_that("EM recovers the parameters under missingness", {
   set.seed(82)
   n <- 2000
   x <- stats::rnorm(n)
-  y <- x + stats::rnorm(n)              # var(y) = 2, cov(x, y) = 1
+  y <- x + stats::rnorm(n) # var(y) = 2, cov(x, y) = 1
   df <- data.frame(x = x, y = y)
-  df$y[sample(n, 600)] <- NA            # MCAR
+  df$y[sample(n, 600)] <- NA # MCAR
 
   fit <- mcartst(df)
   # the estimates are close to the truth despite 30% of y missing
@@ -47,16 +59,17 @@ test_that("EM recovers the parameters under missingness", {
   expect_equal(fit$sigma[2, 2], 2, tolerance = 0.15)
   expect_equal(fit$sigma[1, 2], 1, tolerance = 0.1)
   # the covariance is symmetric and positive definite
-  expect_equal(fit$sigma, t(fit$sigma))
+  expect_identical(fit$sigma, t(fit$sigma))
   expect_true(all(eigen(fit$sigma, symmetric = TRUE)$values > 0))
-  expect_equal(fit$npat, 2L)
-  expect_equal(fit$df, 1)
-  expect_true(fit$iterations >= 1L)
+  expect_identical(fit$npat, 2L)
+  expect_identical(fit$df, 1)
+  expect_gte(fit$iterations, 1L)
 
   # the estimates beat complete-case analysis is not the claim; the
   # claim is that they are consistent, so a bigger sample is closer
   expect_true(is.finite(fit$p_value))
-  expect_true(fit$p_value >= 0 && fit$p_value <= 1)
+  expect_gte(fit$p_value, 0)
+  expect_lte(fit$p_value, 1)
 })
 
 test_that("the test is calibrated under true MCAR", {
@@ -117,7 +130,7 @@ test_that("the statistic is the documented quadratic form", {
   # one observing only `a` and one observing both
   X <- as.matrix(df)
   obs <- !is.na(X)
-  codes <- apply(obs, 1L, function(r) paste0(as.integer(r), collapse = ""))
+  codes <- apply(obs, 1L, function(r) paste(as.integer(r), collapse = ""))
   d2 <- 0
   dfsum <- 0
   for (code in unique(codes)) {
@@ -130,40 +143,56 @@ test_that("the statistic is the documented quadratic form", {
     dfsum <- dfsum + length(o)
   }
   expect_equal(fit$statistic, d2, tolerance = 1e-6)
-  expect_equal(fit$df, dfsum - 2)
+  expect_identical(fit$df, dfsum - 2)
   # and the p-value is the chi-square tail
-  expect_equal(fit$p_value,
-               stats::pchisq(fit$statistic, fit$df, lower.tail = FALSE),
-               tolerance = 1e-8)
+  expect_equal(
+    fit$p_value,
+    stats::pchisq(fit$statistic, fit$df, lower.tail = FALSE),
+    tolerance = 1e-8
+  )
   expect_gte(fit$statistic, 0)
 })
 
 test_that("mcartst handles the awkward inputs", {
   set.seed(84)
-  df <- data.frame(a = stats::rnorm(100), b = stats::rnorm(100),
-                   g = sample(letters[1:3], 100, TRUE),
-                   stringsAsFactors = FALSE)
+  df <- data.frame(
+    a = stats::rnorm(100),
+    b = stats::rnorm(100),
+    g = sample(letters[1:3], 100, TRUE),
+    stringsAsFactors = FALSE
+  )
   df$b[1:20] <- NA
   # a non-numeric column cannot enter a moment, so it is dropped loudly
-  expect_warning(r <- mcartst(df), "non-numeric")
-  expect_equal(r$nvars, 2L)
+  expect_warning(
+    {
+      r <- mcartst(df)
+    },
+    "non-numeric"
+  )
+  expect_identical(r$nvars, 2L)
 
   # three columns and several patterns still works
-  z <- data.frame(a = stats::rnorm(300), b = stats::rnorm(300),
-                  c = stats::rnorm(300))
+  z <- data.frame(
+    a = stats::rnorm(300),
+    b = stats::rnorm(300),
+    c = stats::rnorm(300)
+  )
   z$b[1:80] <- NA
   z$c[200:260] <- NA
   r3 <- mcartst(z)
-  expect_equal(r3$nvars, 3L)
+  expect_identical(r3$nvars, 3L)
   expect_gte(r3$npat, 3L)
   expect_gt(r3$df, 0)
   expect_true(is.finite(r3$p_value))
 
   # a wholly missing column carries nothing and is dropped
-  w <- data.frame(a = stats::rnorm(50), b = stats::rnorm(50),
-                  dead = rep(NA_real_, 50))
+  w <- data.frame(
+    a = stats::rnorm(50),
+    b = stats::rnorm(50),
+    dead = rep(NA_real_, 50)
+  )
   w$b[1:10] <- NA
-  expect_equal(mcartst(w)$nvars, 2L)
+  expect_identical(mcartst(w)$nvars, 2L)
   # a wholly missing row belongs to no pattern
   rr <- data.frame(a = c(stats::rnorm(50), NA), b = c(stats::rnorm(50), NA))
   rr$b[1:10] <- NA
@@ -176,4 +205,49 @@ test_that("mcartst handles the awkward inputs", {
 
   expect_error(mcartst(data.frame(a = 1:10)), "at least two numeric")
   expect_error(mcartst(1:10), "data frame or a numeric matrix")
+})
+
+test_that("mcartst() names `data` when it holds an infinite value", {
+  d <- data.frame(a = c(1, Inf, NA, 2, 3), b = c(1, 2, 3, NA, 5))
+  expect_error(mcartst(d), "`data` has infinite values")
+})
+
+# ---- boxed printouts ---------------------------------------------------------
+
+# print() of a result in an 80-column ASCII console: the lines, whether the
+# value was visible, and the value.
+.o2_box <- function(x, ...) {
+  withr::local_options(rmoriebricklayer.width = 80, rmoriebricklayer.numcol = 1)
+  withr::local_envvar(RMBL_ASCII_ONLY = "1")
+  out <- utils::capture.output({
+    r <- withVisible(print(x, ...))
+  })
+  list(out = out, vis = r$visible, value = r$value)
+}
+
+# The checks every boxed printout passes: an ASCII box under its title, no
+# line past the console, print() returning its argument invisibly, format()
+# giving character lines that hold the facts.
+.o2_check <- function(x, title, facts = character(0)) {
+  b <- .o2_box(x)
+  testthat::expect_false(b$vis)
+  testthat::expect_identical(b$value, x)
+  testthat::expect_true(startsWith(b$out[1L], paste0("+-- ", title, " -")))
+  testthat::expect_match(b$out[length(b$out)], "^\\+-+\\+$")
+  testthat::expect_true(all(nchar(b$out) <= 80L))
+  txt <- format(x)
+  testthat::expect_type(txt, "character")
+  # the text with the box and the wrapping taken out, for phrases
+  flat <- gsub("[| ]+", " ", paste(b$out, collapse = " "))
+  for (f in facts) {
+    testthat::expect_true(grepl(f, flat, fixed = TRUE), info = f)
+  }
+  invisible(b$out)
+}
+
+test_that("mcartst() prints as a box", {
+  set.seed(8)
+  d <- data.frame(a = stats::rnorm(60), b = stats::rnorm(60))
+  d$a[1:10] <- NA
+  .o2_check(mcartst(d), "Little's MCAR test", c("EM iterations", "p-value"))
 })

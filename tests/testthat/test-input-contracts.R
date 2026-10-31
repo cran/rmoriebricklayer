@@ -1,13 +1,28 @@
-testthat::skip_on_cran()  # battery: runs in CI and locally; CRAN runs the correctness core
+# battery: runs in CI and locally; CRAN runs the correctness core
+testthat::skip_on_cran()
 # Input contracts found by the degenerate-input sweep of 2026-09-18: every
 # call here used to return a value that looked like an answer.
 
 test_that("numeric kernels refuse non-numeric input instead of coercing", {
-  for (f in list(cmn, cvari, csdev, cmed, cmad, ciqr,
-                 cmom, cqnt, ctrmmean,
-                 cwinsmean, ctkyfnc, cmidrk,
-                 cbootmean, inlhist, cnormpdf,
-                 cnormlpdf, hurwzeta)) {
+  for (f in list(
+    cmn,
+    cvari,
+    csdev,
+    cmed,
+    cmad,
+    ciqr,
+    cmom,
+    cqnt,
+    ctrmmean,
+    cwinsmean,
+    ctkyfnc,
+    cmidrk,
+    cbootmean,
+    inlhist,
+    cnormpdf,
+    cnormlpdf,
+    hurwzeta
+  )) {
     expect_error(f("abc"), "must be numeric")
     expect_error(f(list(1, 2)), "must be numeric")
     expect_error(f(data.frame(a = 1)), "must be numeric")
@@ -43,10 +58,10 @@ test_that("sketch registers are validated", {
   expect_error(dstncnt(-1), "non-negative integer")
   expect_error(dstncnt(c(1.5, 2)), "non-negative integer")
   expect_error(skchmrg("", ""), "must be numeric")
-  expect_equal(dstncnt(integer(0)), 0)
+  expect_identical(dstncnt(integer(0)), 0)
   s <- dstnskch(c("a", "b", "a"))
-  expect_equal(round(dstncnt(s)), 2)
-  expect_equal(dstncnt(NULL), 0)
+  expect_identical(round(dstncnt(s)), 2)
+  expect_identical(dstncnt(NULL), 0)
 })
 
 test_that("hashes treat NA as NA and signatures need text or bytes", {
@@ -54,7 +69,7 @@ test_that("hashes treat NA as NA and signatures need text or bytes", {
   expect_true(is.na(csha512(NA)))
   expect_true(is.na(cblake2b(NA)))
   expect_true(is.na(csha256(NA)))
-  expect_equal(csha512(c("a", NA))[1], csha512("a"))
+  expect_identical(csha512(c("a", NA))[1], csha512("a"))
   expect_error(chmac(-1, "m"), "character or raw")
   expect_error(drvkey(1, 2), "character or raw")
   expect_error(cpssign(-1, "k"), "character or raw")
@@ -76,8 +91,7 @@ test_that("parsers, rules, manifests and guards refuse wrong input", {
   expect_error(bandvals(NA), "character band labels")
   expect_error(fylbl(-1), "positive")
   expect_error(fylbl(list()), "numeric or character")
-  for (f in list(rulenull, ruleuniq, ruleincr,
-                 rulemad)) {
+  for (f in list(rulenull, ruleuniq, ruleincr, rulemad)) {
     expect_error(f(NULL), "single non-empty string")
     expect_error(f(-1), "single non-empty string")
   }
@@ -89,7 +103,7 @@ test_that("parsers, rules, manifests and guards refuse wrong input", {
   expect_error(mnfdgst(NULL), "must be a list")
   expect_error(vrfrcd(NULL, NULL, c(a = "b")), "atomic vectors")
   expect_error(grdbin(NULL, "d"), "atomic vector")
-  expect_error(grdlvls(c("a"), NULL), "non-empty character")
+  expect_error(grdlvls("a", NULL), "non-empty character")
   expect_error(capdeps(-1), "package names")
 })
 
@@ -100,8 +114,7 @@ test_that("I/O helpers refuse empty paths and missing capsules", {
   expect_error(wrmnfjs(list(), ""), "single non-empty string")
   expect_error(wrtxtfb("t", ""), "single non-empty string")
   expect_error(vrfcps(""), "single non-empty string")
-  expect_error(vrfcps("/no/such/dir/at/all"),
-               "not an existing directory")
+  expect_error(vrfcps("/no/such/dir/at/all"), "not an existing directory")
   expect_error(valsch(NULL, NULL), "data frame")
   expect_error(schval(NULL, NULL), "data frame")
   expect_error(rvkfetch(""), "non-empty list of parsed certificates")
@@ -123,8 +136,9 @@ test_that("IPW weights refuse non-binary treatment, bad propensities", {
   expect_error(cipw(c(0, 1), c(-0.2, 0.5)), "\\[0, 1\\]")
   expect_error(cipw(c(0, 1), c(0.5, 1.4)), "\\[0, 1\\]")
   w <- cipw(c(1, NA, 0), c(0.5, 0.5, NA))
-  expect_true(is.na(w[2]) && is.na(w[3]))
-  expect_equal(w[1], 2)
+  expect_true(is.na(w[2]))
+  expect_true(is.na(w[3]))
+  expect_identical(w[1], 2)
 })
 
 test_that("sir separates excess from deficit and pubbnd labels NA", {
@@ -135,12 +149,52 @@ test_that("sir separates excess from deficit and pubbnd labels NA", {
   expect_true(r$excess[2])
   expect_false(r$deficit[2])
   b <- pubbnd(c(10, NA))
-  expect_equal(b$status, c("exact", "missing"))
+  expect_identical(b$status, c("exact", "missing"))
 })
 
 test_that("midranks keep NA in place and registers must be finite", {
   expect_equal(cmidrk(c(3, NA, 1, 3)), c(2.5, NA, 1, 2.5))
-  expect_equal(cmidrk(NA), NA_real_)
+  expect_identical(cmidrk(NA), NA_real_)
   expect_error(skchmrg(Inf, Inf), "non-negative integer registers")
   expect_error(dstncnt(c(1, NaN)), "non-negative integer registers")
+})
+
+test_that("writers given a folder, or a folder that is not there, say so", {
+  dd <- withr::local_tempdir()
+  miss <- file.path(dd, "no-such-folder", "out.csv")
+  y <- yoy(data.frame(p = 2020:2022, n = c(1, 2, 4)), "n", "p")
+  man <- mkmnf(list(project = "x"), env = FALSE)
+  calls <- list(
+    yoycsv = function(t) yoycsv(y, t),
+    yoytsv = function(t) yoytsv(y, t),
+    yoymd = function(t) yoymd(y, t),
+    yoyjs = function(t) yoyjs(y, t),
+    yoyhtml = function(t) yoyhtml(y, t),
+    yoywr = function(t) yoywr(y, t, format = "csv"),
+    wrmnfjs = function(t) wrmnfjs(man, t),
+    wrtxtfb = function(t) wrtxtfb("hello", t),
+    mksyncsv = function(t) {
+      mksyncsv(list(columns = list(a = list(type = "integer", min = 1,
+                                             max = 2))), t, nrows = 2)
+    },
+    bldl = function(t) bldl("https://example.org/a.csv", t),
+    blfetch = function(t) blfetch("https://example.org/a.csv", t),
+    fetchvrf = function(t) {
+      fetchvrf("https://example.org/a.csv", t, sha256 = strrep("0", 64))
+    },
+    dldata = function(t) dldata("https://example.org/a.csv", t),
+    tsstmp = function(t) {
+      tsstmp(charToRaw("x"), tsa = "https://example.org/tsr", file = t)
+    }
+  )
+  for (nm in names(calls)) {
+    expect_error(calls[[nm]](dd), "folder", info = nm)
+    expect_error(calls[[nm]](miss), "does not exist|directory does not",
+                 info = nm)
+    e <- tryCatch(calls[[nm]](dd), error = conditionMessage)
+    expect_false(grepl("cannot open the connection", e, fixed = TRUE),
+                 info = nm)
+  }
+  expect_error(mkset(rtcalc(data.frame(n = 1, pop = 10), "n", "pop"),
+                     file = dd), "is a folder")
 })

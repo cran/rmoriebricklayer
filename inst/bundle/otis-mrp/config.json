@@ -1,0 +1,89 @@
+{
+  "project": {
+    "name":         "otis-mrp",
+    "title":        "OTIS A01RCDD MRP — Alert Complexity and Placement Volatility",
+    "paper_title":  "Alert Complexity and Placement Volatility in Ontario Restrictive Confinement Data",
+    "work_type":    "Major Research Paper",
+    "author":       "Vansh Singh Ruhela",
+    "contact":      "vsruhela@proton.me",
+    "orcid":        "0009-0004-1750-3592",
+    "affiliation":  "MA candidate, Centre for Criminology and Sociolegal Studies, University of Toronto",
+    "supervisor":   "Prof. Ángela Zorro Medina",
+    "submission":   "August 17, 2026",
+    "licence":      "AGPL-3.0-or-later",
+    "_comment":     "Project metadata. Used to render README/SECURITY/INSTRUCTIONS templates."
+  },
+
+  "analysis": {
+    "r_script":     "analysis.R",
+    "_comment":     "Project's analysis script (sits alongside setup_and_run.R)."
+  },
+
+  "r_packages": [
+    "data.table", "MatchIt", "glmmTMB", "lme4",
+    "DHARMa", "Hmisc", "jsonlite", "digest"
+  ],
+  "synthetic_env": ["OTIS_MRP_SYNTHETIC"],
+
+  "env_packages": {
+    "OTIS_REGION_MAP_SHP": ["sf"]
+  },
+
+  "optional_stages": [
+    {
+      "env": "OTIS_DML_RECOMPUTE",
+      "packages": ["DoubleML", "mlr3", "mlr3learners"],
+      "note": "the published route; ~24 min, ~6 GB RAM",
+      "alternative": "rmorie",
+      "alternative_install": "rmorie gives the same estimator in ~10 s (it is on r-universe, not CRAN): install.packages(\"rmorie\", repos = c(\"https://rootcoder007.r-universe.dev\", \"https://cloud.r-project.org\"))",
+      "skip_note": "the 8 DML checks then record as INFO."
+    }
+  ],
+
+  "r_packages_optional": {
+    "_comment": "Only for the opt-in DML recompute (OTIS_DML_RECOMPUTE=1); NOT needed for the 28 deterministic checks. PREFERRED: install 'rmorie' -> canonical morie_otis_irm_dml runs the recompute in ~10s and reproduces the published effects to <=0.001. FALLBACK (no rmorie): the self-contained DoubleML port uses the packages below and takes ~24 min.",
+    "preferred": ["rmorie"],
+    "fallback": ["DoubleML", "mlr3", "mlr3learners"]
+  },
+
+  "data": {
+    "default_candidates": [
+      "correctional_stats_report_environment1b.RData",
+      "otis_input.RData",
+      "otis_input.csv"
+    ],
+    "_comment": "Filenames probed in the working directory and beside the script, in this order, before asking the user. Relative on purpose: an absolute path cannot exist on a reviewer's machine, and naming one publishes a local directory layout."
+  },
+
+  "network": {
+    "endpoints": [
+      "https://data.ontario.ca/api/3/action/package_show?id=data-on-inmates-in-ontario",
+      "https://data.ontario.ca/dataset/.../*.csv"
+    ],
+    "_comment": "Listed in the WHERE EVERYTHING WILL GO panel for transparency."
+  },
+
+  "summary": {
+    "what_was_done": [
+      "1. Located the OTIS A01RCDD dataset.",
+      "2. Built the person-year analytical panel.",
+      "3. Computed full-sample and matched-sample descriptives.",
+      "4. Fit the negative-binomial GLMM (glmmTMB nbinom2).",
+      "5. Cross-checked Double Machine Learning estimates (if .RData input).",
+      "6. Wrote every result to its own CSV (numbered 01..07).",
+      "7. Wrote manifest.json with expected vs observed for every claim."
+    ]
+  },
+
+  "expected": {
+    "total_checks": 55,
+    "pass_csv":     41,
+    "_pass_real_comment": "DERIVED, not measured: no .RData input was available to run. Real mode turns the 8 DML records from INFO into PASS and changes nothing else, so 41 + 8 = 49. Re-measure with the .RData before quoting it.",
+    "pass_real":    49,
+    "_recompute_comment": "With the optional heavy DML recompute (OTIS_DML_RECOMPUTE=1), the 8 DML checks reproduce from public data within +/-0.02 (reference run matched to ~0.00004) and one aggregate confirmation is added. DERIVED the same way: 41 + 8 + 1 = 50 of 56.",
+    "pass_csv_recompute":   50,
+    "total_checks_recompute": 56,
+    "dml_recompute_tol":    0.02,
+    "_groups_comment": "CSV-mode record counts by group, measured in the same run: region map 15 (12 PASS, 3 INFO), DML 8 (INFO), descriptive_full 6, model 6, descriptive_matched 5, bivariate_full 4, bivariate_matched 4, matched 3, structural 2, yoy_published 1 (INFO), capacity_mnar 1 (INFO); of the 6 model records nb_family is always INFO (platform-dependent Hessian), so 14 INFO + 41 PASS = 55."
+  }
+}

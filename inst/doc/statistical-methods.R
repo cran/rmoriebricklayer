@@ -7,27 +7,40 @@ if (!interactive() && !any(nzchar(Sys.getenv(c("NOT_CRAN", "MY_UNIVERSE", "IN_PK
 }
 
 ## ----survey-estimation-setup, include = FALSE---------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4, dpi = 72)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  dpi = 72
+)
 library(rmoriebricklayer)
 
 ## ----survey-estimation-design-------------------------------------------------
 set.seed(1)
 n <- 600
-d <- data.frame(region = sample(c("north", "south", "east"), n, replace = TRUE),
-                age = sample(c("15-24", "25-49", "50+"), n, replace = TRUE),
-                used = rbinom(n, 1, 0.3), drinks = rpois(n, 3), w = runif(n, 40, 160))
+d <- data.frame(
+  region = sample(c("north", "south", "east"), n, replace = TRUE),
+  age = sample(c("15-24", "25-49", "50+"), n, replace = TRUE),
+  used = rbinom(n, 1, 0.3),
+  drinks = rpois(n, 3),
+  w = runif(n, 40, 160)
+)
 # a stratified design: variance by linearization
 lin <- svydes(d, w = "w", strata = "region")
 lin
-# a replicate design: 200 bootstrap weights, made here by resampling within region
-reps <- sapply(1:200, function(r) {
+# a replicate design: 200 bootstrap weights, made here by resampling within
+# region
+reps <- vapply(1:200, function(r) {
   m <- numeric(n)
   for (g in unique(d$region)) {
     i <- which(d$region == g)
-    m[i] <- tabulate(sample(length(i), replace = TRUE), length(i)) * length(i) / (length(i) - 1)
+    m[i] <- tabulate(sample(length(i), replace = TRUE), length(i)) *
+      length(i) /
+      (length(i) - 1)
   }
   d$w * m
-})
+}, numeric(n))
 repdes <- svydes(d, w = "w", reps = reps, type = "bootstrap")
 repdes
 
@@ -48,13 +61,28 @@ plot(cmp)
 # b <- dload("csus_2023/bootstrap")   # PUMF_ID, WGT_PUMF and BWGT1 ... BWGT1000
 
 ## ----survey-estimation-csus-open, eval = FALSE--------------------------------
-# src <- "https://open.canada.ca/data/dataset/65e2d45e-efc6-4c29-9a9b-db59bc96aa0e/resource"
+# src <- paste0(
+#   "https://open.canada.ca/data/dataset/",
+#   "65e2d45e-efc6-4c29-9a9b-db59bc96aa0e/resource"
+# )
 # pumf <- file.path(tempdir(), "csus2023_pumf_final.csv")
 # bwt <- file.path(tempdir(), "csus2023_pumf_bwt.csv")
-# bldl(paste0(src, "/c2c1795b-4501-49ba-9dd1-5b8360cc3b2e/download/",
-#                            "csus2023_pumf_final.csv"), pumf)
-# bldl(paste0(src, "/7d19d47a-5f42-4447-b735-aa4d677ad5ed/download/",
-#                            "csus2023_pumf_bwt.csv"), bwt)
+# bldl(
+#   file.path(
+#     src,
+#     "c2c1795b-4501-49ba-9dd1-5b8360cc3b2e/download",
+#     "csus2023_pumf_final.csv"
+#   ),
+#   pumf
+# )
+# bldl(
+#   file.path(
+#     src,
+#     "7d19d47a-5f42-4447-b735-aa4d677ad5ed/download",
+#     "csus2023_pumf_bwt.csv"
+#   ),
+#   bwt
+# )
 # a <- utils::read.csv(pumf)
 # b <- utils::read.csv(bwt)
 # # With rmorie installed, the same two files come from
@@ -68,11 +96,21 @@ plot(cmp)
 
 ## ----survey-estimation-published-only-----------------------------------------
 h <- indiex("health")
-mh <- h[h$period == "2019/2022" & h$age == "Total, 18 years and over" &
-          h$indicator == "Perceived mental health, very good or excellent", ]
-indgap(mh, "group", "estimate", "lower", "upper", qual = "quality")[
-  , c("group", "difference", "diflo", "difup")]
-dstntst(mh[mh$group != "Non-Indigenous", ], "group", "estimate", "lower", "upper")
+mh <- h[
+  h$period == "2019/2022" &
+    h$age == "Total, 18 years and over" &
+    h$indicator == "Perceived mental health, very good or excellent",
+]
+indgap(mh, "group", "estimate", "lower", "upper", qual = "quality")[,
+  c("group", "difference", "diflo", "difup")
+]
+dstntst(
+  mh[mh$group != "Non-Indigenous", ],
+  "group",
+  "estimate",
+  "lower",
+  "upper"
+)
 
 ## ----survey-estimation-agree--------------------------------------------------
 rbind(linearization = svyest(lin, d, "drinks")[, c("estimate", "se")],
@@ -99,7 +137,18 @@ fit$ate + c(-1.96, 1.96) * fit$se
 # ps <- dload("nsw_dw/psid_controls")
 
 ## ----causal-effects-nsw-open, eval = FALSE------------------------------------
-# cols <- c("treat", "age", "educ", "black", "hisp", "married", "nodegree", "re74", "re75", "re78")
+# cols <- c(
+#   "treat",
+#   "age",
+#   "educ",
+#   "black",
+#   "hisp",
+#   "married",
+#   "nodegree",
+#   "re74",
+#   "re75",
+#   "re78"
+# )
 # nber <- function(f) {
 #   dest <- file.path(tempdir(), f)
 #   bldl(paste0("https://users.nber.org/~rdehejia/data/", f), dest)
@@ -113,8 +162,8 @@ fit$ate + c(-1.96, 1.96) * fit$se
 # x <- c("age", "educ", "black", "hisp", "married", "nodegree", "re74", "re75")
 # exp <- rbind(tr, ct)
 # obs <- rbind(tr, ps)
-# mean(tr$re78) - mean(ct$re78)                 # the experiment
-# mean(tr$re78) - mean(ps$re78)                 # treated against the PSID, unadjusted
+# mean(tr$re78) - mean(ct$re78) # the experiment
+# mean(tr$re78) - mean(ps$re78) # treated against the PSID, unadjusted
 # plrcf(exp, "re78", "treat", x)
 # plrcf(obs, "re78", "treat", x)
 # plrcf(obs, "re78", "treat", x, kfol = 10, seed = 2)
@@ -144,7 +193,13 @@ indgap(x, "group", "estimate", "lower", "upper", qual = "quality")[
       "difup")]
 
 ## ----include = FALSE----------------------------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4, dpi = 72)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 4,
+  dpi = 72
+)
 library(rmoriebricklayer)
 
 ## ----policy-evaluation-data---------------------------------------------------
@@ -158,7 +213,15 @@ plndid(p, "district", "month", "crmrate", "reformed")
 plot(cohtrnd(p, "district", "month", "crmrate", "refmonth", win = c(-10, 10)))
 
 ## ----policy-evaluation-event, fig.height = 3.5--------------------------------
-es <- evstudy(p, "district", "month", "crmrate", "refmonth", leads = 4, lags = 6)
+es <- evstudy(
+  p,
+  "district",
+  "month",
+  "crmrate",
+  "refmonth",
+  leads = 4,
+  lags = 6
+)
 es
 plot(es)
 
@@ -185,10 +248,21 @@ plot(r, type = "histogram")
 plot(loounit(p, "district", "month", "crmrate", "reformed"))
 
 ## ----policy-evaluation-grid, fig.height = 3.5---------------------------------
-plotevgrid(list(
-  "Crime rate" = es,
-  "Arrest rate" = evstudy(p, "district", "month", "arrrate", "refmonth", leads = 4,
-                              lags = 6)), style = "stata")
+plotevgrid(
+  list(
+    "Crime rate" = es,
+    "Arrest rate" = evstudy(
+      p,
+      "district",
+      "month",
+      "arrrate",
+      "refmonth",
+      leads = 4,
+      lags = 6
+    )
+  ),
+  style = "stata"
+)
 
 ## ----policy-evaluation-pois---------------------------------------------------
 plnpois(p, "district", "month", "crimes", "reformed", offset = "logpop")
@@ -200,11 +274,23 @@ sc
 plot(sc)
 
 ## ----policy-evaluation-measures-----------------------------------------------
-d <- data.frame(city = rep(c("A", "B"), each = 3), year = 2024,
-                offence = rep(c("homicide", "robbery", "burglary"), 2),
-                n = c(5, 120, 300, 2, 90, 410), pop = rep(c(250000, 180000), each = 3))
-sevidx(d, "city", "year", "offence", "n",
-               w = c(homicide = 25, robbery = 8, burglary = 4), pop = "pop")
+d <- data.frame(
+  city = rep(c("A", "B"), each = 3),
+  year = 2024,
+  offence = rep(c("homicide", "robbery", "burglary"), 2),
+  n = c(5, 120, 300, 2, 90, 410),
+  pop = rep(c(250000, 180000), each = 3),
+  stringsAsFactors = FALSE
+)
+sevidx(
+  d,
+  "city",
+  "year",
+  "offence",
+  "n",
+  w = c(homicide = 25, robbery = 8, burglary = 4),
+  pop = "pop"
+)
 cmlrisk(16:20, c(900, 1400, 1700, 1600, 1400), rep(1e5, 5))
 
 ## ----policy-evaluation-wild---------------------------------------------------
@@ -222,7 +308,15 @@ m <- mtchdid(p, "district", "month", "crmrate", "refmonth", ratio = 2)
 m$estimate
 
 ## ----policy-evaluation-sdid, fig.height = 3.5---------------------------------
-sd <- syndid(p13, "district", "month", "crmrate", "refmonth", reps = 50, seed = 1)
+sd <- syndid(
+  p13,
+  "district",
+  "month",
+  "crmrate",
+  "refmonth",
+  reps = 50,
+  seed = 1
+)
 sd
 plot(sd)
 
@@ -231,6 +325,42 @@ pw <- plnpwr(p[p$month <= 12, ], "district", "month", "crmrate", ntrt = 10,
                   adopt = 7:10, eff = c(0, 0.5, 1, 1.5), reps = 40, seed = 1)
 pw
 plot(pw)
+
+## ----policy-evaluation-own-data-----------------------------------------------
+own <- data.frame(
+  town = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 10),
+  year = rep(2015:2024, times = 8),
+  stringsAsFactors = FALSE
+)
+i <- match(own$town, unique(own$town))
+own$first <- c(2019, 2019, 2021, 2021, NA, NA, NA, NA)[i]
+own$bylaw <- as.integer(!is.na(own$first) & own$year >= own$first)
+own$pop <- c(12, 30, 8, 22, 15, 40, 9, 18)[i] * 1000
+own$county <- rep(c("North", "South"), 4)[i]
+own$income <- 50 + own$year - 2015 + cos(seq_len(80))
+own$rate <- 30 + i + 0.5 * (own$year - 2015) - 4 * own$bylaw +
+  0.2 * own$income + sin(seq_len(80))
+head(own)
+
+## ----policy-evaluation-own-trends, fig.height = 3.5---------------------------
+plot(cohtrnd(own, "town", "year", "rate", "first", win = c(-3, 3), ma = 1))
+
+## ----policy-evaluation-own-did------------------------------------------------
+plndid(own, "town", "year", "rate", "bylaw", covs = "income", w = "pop",
+       conflvl = 0.9)
+
+## ----policy-evaluation-own-event, fig.height = 3.5----------------------------
+es <- evstudy(own, "town", "year", "rate", "first", leads = 3, lags = 3,
+              covs = "income", w = "pop")
+plot(es)
+tse(es, seed = 1)
+
+## ----policy-evaluation-own-staggered------------------------------------------
+stgatt(own, "town", "year", "rate", "first", reps = 49, seed = 1)$overall
+
+## ----policy-evaluation-own-inference------------------------------------------
+wcb(own, "town", "year", "rate", "bylaw", covs = "income")
+perminf(own, "town", "year", "rate", "first", reps = 99, seed = 1)
 
 ## ----policy-evaluation-indigenous-policy--------------------------------------
 hi <- indiex("health")
@@ -293,10 +423,17 @@ falsfam(fam)
 falsfam(c(a = 0.01, b = 0.04, c = 0.2, d = 0.5))$results
 
 ## ----falsification-and-power-evalue-------------------------------------------
-evlrr(2)                       # needs a confounder associated by 3.41 with both
-evlrr(0.5)                     # a protective effect is inverted; same answer
-evlrr(2, lo = 0.9, hi = 4.4)   # an interval that includes the null needs nothing
-evlrr(3, lo = 2.1, hi = 4.3)   # a strong result with a limit well above the null
+evlrr(2) # needs a confounder associated by 3.41 with both
+evlrr(0.5) # a protective effect is inverted; same answer
+evlrr(2, lo = 0.9, hi = 4.4) # an interval that includes the null needs nothing
+evlrr(3, lo = 2.1, hi = 4.3) # a strong result with a limit well above the null
+
+## ----falsification-and-power-plant--------------------------------------------
+set.seed(4)
+tr <- data.frame(x = rbinom(150, 1, 0.5))
+tr$y <- 1.5 * tr$x + rnorm(150)
+diffmeans <- function(z) mean(z$y[z$x == 1]) - mean(z$y[z$x == 0])
+cpsplant(tr, diffmeans, y = "y", trt = "x", n = 25, seed = 4)
 
 ## ----falsification-and-power-indigenous-falsify-------------------------------
 hi <- indiex("health")
@@ -318,7 +455,12 @@ plot(fake)
 plot(pw)
 
 ## ----include = FALSE----------------------------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 3.8)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 3.8
+)
 library(rmoriebricklayer)
 
 ## ----small-area-rates-expected------------------------------------------------
@@ -326,7 +468,8 @@ d <- data.frame(
   region = rep(c("North", "South", "East"), each = 2),
   age = rep(c("18 to 24", "25 to 49"), 3),
   n = c(30, 45, 12, 60, 8, 20),
-  pop = c(1000, 6000, 900, 9000, 400, 3500)
+  pop = c(1000, 6000, 900, 9000, 400, 3500),
+  stringsAsFactors = FALSE
 )
 expcnts(d$n, d$pop, d$region)
 
@@ -334,10 +477,12 @@ expcnts(d$n, d$pop, d$region)
 expcnts(d$n, d$pop, d$region, strata = d$age)
 
 ## ----small-area-rates-direct--------------------------------------------------
-r <- agestd(events = c(4, 9, 11, 6, 3, 40, 70, 90, 80, 60),
-                     pop = c(9000, 8000, 6000, 4000, 2000, 300000, 320000, 350000, 340000, 300000),
-                     std = c(30, 25, 20, 15, 10),
-                     grp = rep(c("Inuit", "Non-Indigenous"), each = 5))
+r <- agestd(
+  events = c(4, 9, 11, 6, 3, 40, 70, 90, 80, 60),
+  pop = c(9000, 8000, 6000, 4000, 2000, 300000, 320000, 350000, 340000, 300000),
+  std = c(30, 25, 20, 15, 10),
+  grp = rep(c("Inuit", "Non-Indigenous"), each = 5)
+)
 r
 rategap(r, "Inuit", "Non-Indigenous")
 
@@ -367,19 +512,25 @@ abline(h = 1, col = "grey")
 points(c(20, 14, 5), c(30, 12, 3) / c(20, 14, 5), pch = 19, col = 2)
 
 ## ----small-area-rates-moran---------------------------------------------------
-nb <- list(2L, c(1L, 3L), c(2L, 4L), c(3L, 5L), c(4L, 6L), 5L)   # six areas in a line
+# six areas in a line
+nb <- list(2L, c(1L, 3L), c(2L, 4L), c(3L, 5L), c(4L, 6L), 5L)
 
 set.seed(1)
-morani(c(1, 2, 3, 4, 5, 6), nb, nperm = 999L)[c("I", "p_value")]   # a gradient
+morani(c(1, 2, 3, 4, 5, 6), nb, nperm = 999L)[c("I", "p_value")] # a gradient
 
 set.seed(1)
-morani(c(1, 6, 1, 6, 1, 6), nb, nperm = 999L)[c("I", "p_value")]   # alternating
+morani(c(1, 6, 1, 6, 1, 6), nb, nperm = 999L)[c("I", "p_value")] # alternating
 
 ## ----small-area-rates-moran-null----------------------------------------------
 -1 / (6 - 1)
 
 ## ----include = FALSE----------------------------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 3.5)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 3.5
+)
 library(rmoriebricklayer)
 
 ## ----hawkes-processes-simulate------------------------------------------------
@@ -405,9 +556,9 @@ fit$theta
 fit$braratio
 
 ## ----hawkes-processes-kernels-------------------------------------------------
-sapply(c("exponential", "weibull", "lomax"), function(k) {
+vapply(c("exponential", "weibull", "lomax"), function(k) {
   chwkfit(times, 300, kernel = k)$aic
-})
+}, numeric(1))
 
 ## ----hawkes-processes-sinus---------------------------------------------------
 chwkfit(times, 300, kernel = "exponential", base = "sinusoidal")$aic
@@ -417,7 +568,7 @@ U <- chwkres(times, 300, "exponential", fit$theta)
 stats::ks.test(U, "punif")$p.value
 
 ## ----hawkes-processes-qq------------------------------------------------------
-plot(stats::qunif(stats::ppoints(length(U))), sort(U), pch = 20, cex = .6,
+plot(stats::qunif(stats::ppoints(length(U))), sort(U), pch = 20, cex = 0.6,
      xlab = "uniform quantiles", ylab = "rescaled residuals",
      main = "Time-rescaling check")
 abline(0, 1, col = 2)
@@ -469,18 +620,41 @@ fylbl(2024)
 
 ## ----stock-and-flow-indigenous-stock------------------------------------------
 cp <- indiex("censuspop")
-fc <- cp[cp$GEO_NAME == "Canada" & cp$AGE_GROUP == "0 to 14 years" &
-           cp$RESIDENCE == "Total - Residence on or off reserve", ]
-kids <- fc[grepl("Total - Children in census families", fc$CHARACTERISTIC_NAME),
-           c("FIRST_NATIONS", "NON_IND")]
-fost <- fc[grepl("Foster children", fc$CHARACTERISTIC_NAME), c("FIRST_NATIONS", "NON_IND")]
+fc <- cp[
+  cp$GEO_NAME == "Canada" &
+    cp$AGE_GROUP == "0 to 14 years" &
+    cp$RESIDENCE == "Total - Residence on or off reserve",
+]
+kids <- fc[
+  grepl(
+    "Total - Children in census families",
+    fc$CHARACTERISTIC_NAME,
+    fixed = TRUE
+  ),
+  c("FIRST_NATIONS", "NON_IND")
+]
+fost <- fc[
+  grepl("Foster children", fc$CHARACTERISTIC_NAME, fixed = TRUE),
+  c("FIRST_NATIONS", "NON_IND")
+]
 round(100 * unlist(fost) / unlist(kids), 2)
 
 ## ----stock-and-flow-stock-flow-plots, fig.width = 8, fig.height = 4-----------
 op <- par(mfrow = c(1, 2))
 per1000 <- unlist(fost) / unlist(kids) * 1000
-barplot(per1000, names.arg = c("First Nations", "non-Indigenous"), col = blpal()[1:2],
-        ylab = "per 1,000 children", main = "Children in foster care")
-hist(stays, breaks = 30, col = blpal()[2], xlab = "length of stay", main = "Lengths of stay")
+barplot(
+  per1000,
+  names.arg = c("First Nations", "non-Indigenous"),
+  col = blpal()[1:2],
+  ylab = "per 1,000 children",
+  main = "Children in foster care"
+)
+hist(
+  stays,
+  breaks = 30,
+  col = blpal()[2],
+  xlab = "length of stay",
+  main = "Lengths of stay"
+)
 par(op)
 

@@ -58,195 +58,98 @@
 #'   or the path of a \code{.der}, \code{.crt}, \code{.cer} or \code{.pem}
 #'   file.
 #' @return A list of class \code{bricklayer_certificate} with these elements:
-#'   \itemize{
-#'     \item \code{version} (integer) and \code{serial} (hex);
-#'     \item \code{issuer} and \code{subject} (distinguished names as text);
-#'     \item \code{not_before} and \code{not_after} (\code{POSIXct}, UTC);
-#'     \item \code{signature_algorithm} (a name such as \code{"ECDSA-SHA256"})
-#'       and \code{signature_oid};
-#'     \item \code{signature} and \code{tbs} (raw; the signed part);
-#'     \item \code{key} (a list: \code{type} \code{"RSA"} or \code{"EC"},
-#'       \code{bits}, and the key values, with \code{curve} for EC);
-#'     \item \code{is_ca} and \code{path_len};
-#'     \item \code{key_usage} and \code{extended_key_usage} (character; EKU as
-#'       OIDs);
-#'     \item \code{subject_rdns}, \code{issuer_rdns}, \code{san} and
-#'       \code{name_constraints};
-#'     \item the policy fields \code{policies}, \code{policy_mappings} and
-#'       \code{require_explicit_policy};
-#'     \item the policy fields \code{inhibit_policy_mapping} and \code{inhibit_any_policy};
-#'     \item \code{self_signed} (logical: issuer equals subject);
-#'     \item \code{der} (the bytes).
-#'   }
-#'   \code{print()} shows a summary.
+#'   \itemize{ \item \code{version} (integer) and \code{serial} (hex); \item
+#'   \code{issuer} and \code{subject} (distinguished names as text); \item
+#'   \code{not_before} and \code{not_after} (\code{POSIXct}, UTC); \item
+#'   \code{signature_algorithm} (a name such as \code{"ECDSA-SHA256"}) and
+#'   \code{signature_oid}; \item \code{signature} and \code{tbs} (raw; the
+#'   signed part); \item \code{key} (a list: \code{type} \code{"RSA"} or
+#'   \code{"EC"}, \code{bits}, and the key values, with \code{curve} for EC);
+#'   \item \code{is_ca} and \code{path_len}; \item \code{key_usage} and
+#'   \code{extended_key_usage} (character; EKU as OIDs); \item
+#'   \code{subject_rdns}, \code{issuer_rdns}, \code{san} and
+#'   \code{name_constraints}; \item the policy fields \code{policies},
+#'   \code{policy_mappings} and \code{require_explicit_policy}; \item the policy
+#'   fields \code{inhibit_policy_mapping} and \code{inhibit_any_policy}; \item
+#'   \code{self_signed} (logical: issuer equals subject); \item \code{der} (the
+#'   bytes). } \code{print()} shows a summary.
 #' @seealso
 #' [certchnvrf()],
 #' [tsvrf()].
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
-#' # A small test chain shipped as hexadecimal DER: a self-signed P-256 root
-#' # and a leaf it issued (a throwaway test authority; trust it for nothing).
-#' roothex <- paste0(
-#'   "308201973082013ca003020102021452157dfd900c163c5027372ed4090b9d11748286300a06",
-#'   "082a8648ce3d040302302931123010060355040a0c09726d626c207465737431133011060355",
-#'   "04030c0a454332353620526f6f74301e170d3236313030323038343334315a170d3336303932",
-#'   "393038343334315a302931123010060355040a0c09726d626c20746573743113301106035504",
-#'   "030c0a454332353620526f6f743059301306072a8648ce3d020106082a8648ce3d0301070342",
-#'   "0004624ad2e98f4566cd8f003a188f822875fa4760ed894507e8a4130a08fcb59280e958aa6c",
-#'   "e6147989d155ce20d1a6d94fe109d3d2f2bc13d1394cea3520197fdda3423040300f0603551d",
-#'   "130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e04160414",
-#'   "2ef598166f5b9e6bb65d3252cf127b2c992348ae300a06082a8648ce3d040302034900304602",
-#'   "21009cd3d7968f65630677b3c7437cae5187021d553c756820d34b6a8a1240e7efb7022100a3",
-#'   "c37f0a8e1f38a5263b14414e6f916962bbd36bcbaca40b07d371352de745c0")
-#' leafhex <- paste0(
-#'   "308201ae30820154a00302010202142fa99d48ead4c033c568837b2288f9e9bf137068300a06",
-#'   "082a8648ce3d040302302931123010060355040a0c09726d626c207465737431133011060355",
-#'   "04030c0a454332353620526f6f74301e170d3236313030323038343334315a170d3331313030",
-#'   "313038343334315a302931123010060355040a0c09726d626c20746573743113301106035504",
-#'   "030c0a4543323536204c6561663059301306072a8648ce3d020106082a8648ce3d0301070342",
-#'   "00045f0ad14e657dedf3f6cc18530f9d905823b6e9f492ecc0eb1989c9ad8a11a859ebb7681a",
-#'   "e5b1f579974e3c6709e824245608c448da6fe248ebf67bf727d598f4a35a305830090603551d",
-#'   "1304023000300b0603551d0f040403020780301d0603551d0e04160414b1d22b6dd5987f0dfa",
-#'   "0ff3a5d0140351d752e0fb301f0603551d230418301680142ef598166f5b9e6bb65d3252cf12",
-#'   "7b2c992348ae300a06082a8648ce3d0403020348003045022100bc9d6ec452554adb8f33e4ac",
-#'   "53d5e29620fc19528074153028ce849d98c8c15202205c841de357dbad5042daba7fb4af3724",
-#'   "78d684f648e6ef23c68a3d764894c8fc")
-#' hex2raw <- function(h) {
-#'   as.raw(strtoi(substring(h, seq(1, nchar(h), 2), seq(2, nchar(h), 2)), 16L))
+#' # Pass the certificate file you were given (.der, .crt, .cer or .pem), for
+#' # example the one a timestamping authority publishes, or raw DER bytes.
+#' # Here: a small test chain shipped with the package, a self-signed P-256
+#' # root and a leaf it issued (a throwaway test authority; trust it for
+#' # nothing).
+#' x509 <- function(f) {
+#'   system.file("extdata", "x509", f, package = "rmoriebricklayer")
 #' }
-#' root <- certprs(hex2raw(roothex))
+#' root <- certprs(x509("test-root.der"))
 #' root
-#' leaf <- certprs(hex2raw(leafhex))
+#' leaf <- certprs(x509("test-leaf.der"))
 #' leaf$subject
 #' leaf$key$curve
 #' c(leaf$not_before, leaf$not_after)
 #'
-#' # the same certificate from a PEM file
-#' pem <- tempfile(fileext = ".pem")
-#' writeLines(c("-----BEGIN CERTIFICATE-----",
-#'              strsplit(jsb64enc(hex2raw(roothex)), "\n")[[1]],
-#'              "-----END CERTIFICATE-----"), pem)
-#' certprs(pem)$self_signed
+#' # the same root as PEM, the text form most authorities hand out
+#' certprs(x509("test-root.pem"))$self_signed
+#'
+#' # raw DER bytes work too
+#' f <- x509("test-leaf.der")
+#' der <- readBin(f, "raw", file.size(f))
+#' identical(certprs(der)$serial, leaf$serial)
 #'
 #' # bytes that are not a certificate
 #' try(certprs(charToRaw("not a certificate")))
 #' @export
 certprs <- function(cert) {
   der <- .rmbl_as_bytes(cert, "cert")
-  top <- .Call(C_rmbl_der_parse, der)
-  if (length(top$children) < 3L) {
-    stop("not an X.509 certificate", call. = FALSE)
-  }
-  tbs <- top$children[[1]]
-  sig_alg <- .rmbl_oid_string(tbs_alg_oid(top$children[[2]]))
-  sig_bits <- top$children[[3]]$value
-  if (!length(sig_bits)) {
-    stop("the certificate has no signature",
-      call. = FALSE
-    )
-  }
-  sig <- sig_bits[-1] # drop the unused-bits octet
-
-  k <- tbs$children
-  # an explicit [0] version shifts every following field along by one
-  off <- if (length(k) && identical(k[[1]]$class, 2L) &&
-    identical(k[[1]]$tag, 0)) {
-    1L
-  } else {
-    0L
-  }
-  version <- if (off == 1L) {
-    as.integer(k[[1]]$children[[1]]$value[1]) + 1L
-  } else {
-    1L
-  }
-  serial <- .rmbl_hexlify(k[[off + 1L]]$value)
-  issuer <- .rmbl_x509_name(k[[off + 3L]])
-  validity <- k[[off + 4L]]$children
-  subject <- .rmbl_x509_name(k[[off + 5L]])
-  spki <- k[[off + 6L]]
-
-  exts <- .rmbl_x509_extensions(k)
-  out <- list(
-    version = version,
-    serial = serial,
-    issuer = issuer,
-    subject = subject,
-    not_before = .rmbl_x509_time(validity[[1]]),
-    not_after = .rmbl_x509_time(validity[[2]]),
-    signature_algorithm = .rmbl_x509_sigalg_name(sig_alg),
-    signature_oid = sig_alg,
-    signature = sig,
-    tbs = der[(tbs$start + 1L):(tbs$offset + tbs$length)],
-    key = .rmbl_x509_key(spki),
-    is_ca = exts$is_ca,
-    path_len = exts$path_len,
-    key_usage = exts$key_usage,
-    extended_key_usage = exts$eku,
-    subject_rdns = .rmbl_x509_rdns(k[[off + 5L]]),
-    issuer_rdns = .rmbl_x509_rdns(k[[off + 3L]]),
-    san = exts$san,
-    name_constraints = exts$name_constraints,
-    policies = exts$policies,
-    policy_mappings = exts$policy_mappings,
-    require_explicit_policy = exts$require_explicit_policy,
-    inhibit_policy_mapping = exts$inhibit_policy_mapping,
-    inhibit_any_policy = exts$inhibit_any_policy,
-    self_signed = identical(issuer, subject),
-    der = der
-  )
-  class(out) <- c("bricklayer_certificate", "list")
-  out
-}
-
-#' A small non-negative INTEGER's value.
-#' @param v The INTEGER's content bytes.
-#' @return The value as an integer, NA for no bytes.
-#' @noRd
-.rmbl_int_of <- function(v) {
-  if (!length(v)) {
-    return(NA_integer_)
-  }
-  r <- 0L
-  for (b in as.integer(v)) r <- r * 256L + b
-  r
-}
-
-#' Returns the OID bytes of an AlgorithmIdentifier.
-#' @param alg The parsed AlgorithmIdentifier node.
-#' @return A raw vector, empty when the node has no children.
-#' @noRd
-tbs_alg_oid <- function(alg) {
-  if (!length(alg$children)) {
-    return(raw(0))
-  }
-  alg$children[[1]]$value
+  # a malformed certificate is refused in words: a fuzzed one gave
+  # "subscript out of bounds" and "missing value where TRUE/FALSE needed"
+  # (recheck of a8cdaf9). The package's own refusals pass through.
+  tryCatch(.rmbl_certprs(der), error = function(e) {
+    if (is.null(conditionCall(e))) {
+      stop(e)
+    }
+    stop(sprintf("not a valid X.509 certificate (%s)", conditionMessage(e)),
+         call. = FALSE)
+  })
 }
 
 #' @export
 format.bricklayer_certificate <- function(x, ...) {
-  c(
-    .rmbl_rule("X.509 certificate"),
-    .rmbl_kv(list(
-      subject = x$subject,
-      issuer = x$issuer,
-      serial = substring(x$serial, 1L, 32L),
-      "valid from" = format(x$not_before, tz = "UTC"),
-      "valid to" = format(x$not_after, tz = "UTC"),
-      key = sprintf("%s %d bits", x$key$type, x$key$bits),
-      signature = x$signature_algorithm,
-      "is a CA" = x$is_ca,
-      "key usage" = paste(x$extended_key_usage,
-        collapse = ", "
-      )
-    )),
-    .rmbl_rule()
+  .rmbl_stat_block(
+    "X.509 certificate",
+    facts = list(
+      Subject = x$subject,
+      Issuer = x$issuer,
+      Serial = substring(x$serial, 1L, 32L),
+      `Valid from` = format(x$not_before, tz = "UTC"),
+      `Valid to` = format(x$not_after, tz = "UTC"),
+      Key = sprintf("%s %d bits", x$key$type, x$key$bits),
+      Signature = x$signature_algorithm,
+      `Is a CA` = x$is_ca,
+      `Self-signed` = x$self_signed,
+      `Key usage` = if (length(x$key_usage)) {
+        toString(x$key_usage)
+      } else {
+        "none stated"
+      },
+      `Extended key usage` = if (length(x$extended_key_usage)) {
+        toString(x$extended_key_usage)
+      } else {
+        "none stated"
+      },
+      `Alternative names` = if (length(x$san)) length(x$san)
+    ),
+    reading = .rmbl_cert_reading(x, Sys.time()),
+    notes = paste(
+      "What the certificate says about itself. Nothing here is checked:",
+      "certchnvrf() verifies it against trust anchors you choose."
+    )
   )
 }
-
-#' @rdname printmeth
-#' @export
-#' @method print bricklayer_certificate
-print.bricklayer_certificate <- .rmbl_print_via_format
 
 #' Verify a certificate chain
 #'
@@ -320,38 +223,14 @@ print.bricklayer_certificate <- .rmbl_print_via_format
 #' [certprs()],
 #' [tsvrf()].
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
-#' # A small test chain shipped as hexadecimal DER: a self-signed P-256 root
-#' # and a leaf it issued (a throwaway test authority; trust it for nothing).
-#' roothex <- paste0(
-#'   "308201973082013ca003020102021452157dfd900c163c5027372ed4090b9d11748286300a06",
-#'   "082a8648ce3d040302302931123010060355040a0c09726d626c207465737431133011060355",
-#'   "04030c0a454332353620526f6f74301e170d3236313030323038343334315a170d3336303932",
-#'   "393038343334315a302931123010060355040a0c09726d626c20746573743113301106035504",
-#'   "030c0a454332353620526f6f743059301306072a8648ce3d020106082a8648ce3d0301070342",
-#'   "0004624ad2e98f4566cd8f003a188f822875fa4760ed894507e8a4130a08fcb59280e958aa6c",
-#'   "e6147989d155ce20d1a6d94fe109d3d2f2bc13d1394cea3520197fdda3423040300f0603551d",
-#'   "130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e04160414",
-#'   "2ef598166f5b9e6bb65d3252cf127b2c992348ae300a06082a8648ce3d040302034900304602",
-#'   "21009cd3d7968f65630677b3c7437cae5187021d553c756820d34b6a8a1240e7efb7022100a3",
-#'   "c37f0a8e1f38a5263b14414e6f916962bbd36bcbaca40b07d371352de745c0")
-#' leafhex <- paste0(
-#'   "308201ae30820154a00302010202142fa99d48ead4c033c568837b2288f9e9bf137068300a06",
-#'   "082a8648ce3d040302302931123010060355040a0c09726d626c207465737431133011060355",
-#'   "04030c0a454332353620526f6f74301e170d3236313030323038343334315a170d3331313030",
-#'   "313038343334315a302931123010060355040a0c09726d626c20746573743113301106035504",
-#'   "030c0a4543323536204c6561663059301306072a8648ce3d020106082a8648ce3d0301070342",
-#'   "00045f0ad14e657dedf3f6cc18530f9d905823b6e9f492ecc0eb1989c9ad8a11a859ebb7681a",
-#'   "e5b1f579974e3c6709e824245608c448da6fe248ebf67bf727d598f4a35a305830090603551d",
-#'   "1304023000300b0603551d0f040403020780301d0603551d0e04160414b1d22b6dd5987f0dfa",
-#'   "0ff3a5d0140351d752e0fb301f0603551d230418301680142ef598166f5b9e6bb65d3252cf12",
-#'   "7b2c992348ae300a06082a8648ce3d0403020348003045022100bc9d6ec452554adb8f33e4ac",
-#'   "53d5e29620fc19528074153028ce849d98c8c15202205c841de357dbad5042daba7fb4af3724",
-#'   "78d684f648e6ef23c68a3d764894c8fc")
-#' hex2raw <- function(h) {
-#'   as.raw(strtoi(substring(h, seq(1, nchar(h), 2), seq(2, nchar(h), 2)), 16L))
+#' # The test chain shipped with the package: a self-signed P-256 root and a
+#' # leaf it issued (a throwaway test authority; trust it for nothing). With
+#' # your own certificates, pass their files (or certprs() results).
+#' x509 <- function(f) {
+#'   system.file("extdata", "x509", f, package = "rmoriebricklayer")
 #' }
-#' root <- certprs(hex2raw(roothex))
-#' leaf <- certprs(hex2raw(leafhex))
+#' root <- certprs(x509("test-root.der"))
+#' leaf <- certprs(x509("test-leaf.der"))
 #'
 #' # the leaf chains to the root, checked a day after it was issued
 #' res <- certchnvrf(leaf, trust = root, attm = leaf$not_before + 86400)
@@ -362,8 +241,12 @@ print.bricklayer_certificate <- .rmbl_print_via_format
 #' certchnvrf(leaf, trust = root, attm = leaf$not_after + 86400)$ok
 #'
 #' # a purpose the leaf was not issued for
-#' r <- certchnvrf(leaf, trust = root, attm = leaf$not_before + 86400,
-#'                        purp = "timeStamping")
+#' r <- certchnvrf(
+#'   leaf,
+#'   trust = root,
+#'   attm = leaf$not_before + 86400,
+#'   purp = "timeStamping"
+#' )
 #' r$checks[!r$checks$ok, ]
 #'
 #' # a chain must end at something you trust
@@ -374,38 +257,29 @@ print.bricklayer_certificate <- .rmbl_print_via_format
 #' certchnvrf("tsa.crt", trust = "ca.crt", purp = "timeStamping",
 #'                   rvk = "fetch")
 #' @export
-certchnvrf <- function(leaf, trust, inter = list(),
-                              attm = Sys.time(), purp = NULL,
-                              crls = list(), pols = NULL,
-                              rvk = c(
-                                "supplied", "fetch",
-                                "none"
-                              )) {
-  .rmbl_no_fn(purpose = purp, policies = pols)
-  if (!(inherits(attm, c("POSIXt", "Date")) || (is.numeric(attm) && !is.object(attm))) ||
-        length(attm) != 1L || is.na(attm) || !is.finite(as.numeric(attm))) {
-    stop("`attm` must be a single date-time (POSIXct)", call. = FALSE)
-  }
-  as_cert <- function(x) {
-    if (inherits(x, "bricklayer_certificate")) x else certprs(x)
-  }
-  as_list <- function(x) {
-    if (is.null(x)) {
-      return(list())
-    }
-    if (inherits(x, "bricklayer_certificate") || is.raw(x) ||
-      (is.character(x) && length(x) == 1L)) {
-      list(x)
-    } else {
-      as.list(x)
-    }
-  }
-  leaf <- as_cert(leaf)
-  trust <- lapply(as_list(trust), as_cert)
-  inter <- lapply(as_list(inter), as_cert)
-  crls <- as_list(crls)
+certchnvrf <- function(
+  leaf,
+  trust,
+  inter = list(),
+  attm = Sys.time(),
+  purp = NULL,
+  crls = list(),
+  pols = NULL,
+  rvk = c(
+    "supplied",
+    "fetch",
+    "none"
+  )
+) {
+  .rmbl_no_fn(purp = purp, pols = pols)
+  .cv_check_time(attm)
+  leaf <- .cv_as_cert(leaf)
+  trust <- lapply(.cv_as_list(trust), .cv_as_cert)
+  inter <- lapply(.cv_as_list(inter), .cv_as_cert)
+  crls <- .cv_as_list(crls)
   if (!length(trust)) {
-    stop("`trust` must name at least one anchor; a chain that reaches ",
+    stop(
+      "`trust` must name at least one anchor; a chain that reaches ",
       "nothing you have decided to believe proves nothing",
       call. = FALSE
     )
@@ -415,16 +289,430 @@ certchnvrf <- function(leaf, trust, inter = list(),
 
   acc <- new.env(parent = emptyenv())
   acc$checks <- list()
-  note_row <- function(check, ok, detail = "") {
-    acc$checks[[length(acc$checks) + 1L]] <- data.frame(
-      check = check, ok = isTRUE(ok), detail = as.character(detail),
-      stringsAsFactors = FALSE
-    )
+  path <- .cv_build_path(acc, leaf, inter, trust)
+  .cv_links(acc, path, attm)
+  attr(path, "anchor") <- NULL
+  .cv_name_constraints(acc, path)
+  .cv_path_len(acc, path)
+  pol <- .cv_policies(acc, path, pols)
+  if (!is.null(purp)) {
+    .cv_purpose(acc, leaf, purp)
   }
+  .cv_revocation(acc, path, crls, rvk, attm)
 
-  # Build the path: follow issuer names up through the intermediates
-  # until an anchor is reached. A depth cap because a cycle among
-  # supplied certificates would otherwise loop.
+  df <- do.call(rbind, acc$checks)
+  rownames(df) <- NULL
+  out <- list(
+    ok = all(df$ok),
+    path = path,
+    checks = df,
+    at_time = attm,
+    policies = pol
+  )
+  class(out) <- c("bricklayer_certpath_check", "list")
+  out
+}
+
+#' @export
+format.bricklayer_certpath_check <- function(x, ...) {
+  .rmbl_stat_block(
+    sprintf(
+      "Certificate chain: %s",
+      if (isTRUE(x$ok)) "verified" else "NOT verified"
+    ),
+    facts = list(
+      Certificates = length(x$path),
+      `Checked at` = format(x$at_time, "%Y-%m-%d %H:%M:%S UTC", tz = "UTC")
+    ),
+    reading = .rmbl_check_reading(
+      x$ok,
+      "the path reaches a trust anchor and every certificate on it was valid",
+      "the certificate cannot be relied on for this use at this time"
+    ),
+    notes = .rmbl_check_lines(x$checks)
+  )
+}
+
+#' certprs() on DER bytes.
+#' @param der The certificate's bytes.
+#' @return The parsed certificate.
+#' @noRd
+.rmbl_certprs <- function(der) {
+  top <- .Call(C_rmbl_der_parse, der)
+  if (length(top$children) < 3L) {
+    stop("not an X.509 certificate", call. = FALSE)
+  }
+  .rmbl_x509_shape(top, der)
+  tbs <- top$children[[1]]
+  sig_alg <- .rmbl_oid_string(tbs_alg_oid(top$children[[2]]))
+  sig <- .rmbl_x509_sig_bits(top$children[[3]]$value)
+  k <- tbs$children
+  vo <- .rmbl_x509_version(k)
+  off <- vo$off
+  version <- vo$version
+  serial <- .rmbl_hexlify(k[[off + 1L]]$value)
+  issuer <- .rmbl_x509_name(k[[off + 3L]])
+  validity <- k[[off + 4L]]$children
+  subject <- .rmbl_x509_name(k[[off + 5L]])
+  spki <- k[[off + 6L]]
+  exts <- .rmbl_x509_extensions(k)
+  out <- list(
+    version = version,
+    serial = serial,
+    issuer = issuer,
+    subject = subject,
+    not_before = .rmbl_x509_time(validity[[1]]),
+    not_after = .rmbl_x509_time(validity[[2]]),
+    signature_algorithm = .rmbl_x509_sigalg_name(sig_alg),
+    signature_oid = sig_alg,
+    signature = sig,
+    tbs = der[(tbs$start + 1L):(tbs$offset + tbs$length)],
+    key = .rmbl_x509_key(spki),
+    is_ca = exts$is_ca,
+    path_len = exts$path_len,
+    key_usage = exts$key_usage,
+    extended_key_usage = exts$eku,
+    subject_rdns = .rmbl_x509_rdns(k[[off + 5L]]),
+    issuer_rdns = .rmbl_x509_rdns(k[[off + 3L]]),
+    san = exts$san,
+    name_constraints = exts$name_constraints,
+    policies = exts$policies,
+    policy_mappings = exts$policy_mappings,
+    require_explicit_policy = exts$require_explicit_policy,
+    inhibit_policy_mapping = exts$inhibit_policy_mapping,
+    inhibit_any_policy = exts$inhibit_any_policy,
+    self_signed = identical(issuer, subject),
+    der = der
+  )
+  class(out) <- c("bricklayer_certificate", "list")
+  out
+}
+
+#' A small non-negative INTEGER's value.
+#' @param v The INTEGER's content bytes.
+#' @return The value as an integer, NA for no bytes.
+#' @noRd
+.rmbl_int_of <- function(v) {
+  if (!length(v)) {
+    return(NA_integer_)
+  }
+  r <- 0L
+  for (b in as.integer(v)) {
+    r <- r * 256L + b
+  }
+  r
+}
+
+#' Whether a DER node has the class, tag and form given.
+#' @inheritParams .rmbl_ts_want
+#' @param class,tag The class (0 universal, 2 context) and the tag.
+#' @param cons TRUE for a constructed node, FALSE for a primitive one.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_x509_is <- function(nd, class, tag, cons) {
+  !is.null(nd) && identical(nd$class, class) && identical(nd$tag, tag) &&
+    identical(isTRUE(nd$constructed), cons)
+}
+
+#' A certificate's layout checked field by field (RFC 5280 4.1): every tag,
+#' form and count where the profile puts it, and the outer
+#' signatureAlgorithm the same bytes as the one signed (4.1.1.2).
+#' @param top The parsed certificate.
+#' @param der Its bytes.
+#' @return NULL, invisibly; an error naming the first field out of place.
+#' @noRd
+.rmbl_x509_shape <- function(top, der) {
+  bad <- function(what) {
+    stop(sprintf("not an X.509 certificate: %s", what), call. = FALSE)
+  }
+  is <- .rmbl_x509_is
+  o <- top$children
+  if (!is(top, 0L, 16, TRUE) || length(o) != 3L) {
+    bad("it is not a SEQUENCE of three fields")
+  }
+  if (!is(o[[1L]], 0L, 16, TRUE)) {
+    bad("the tbsCertificate is not a SEQUENCE")
+  }
+  .rmbl_x509_alg_shape(o[[2L]], "signatureAlgorithm", bad)
+  sv <- o[[3L]]
+  if (.rmbl_anyof(!is(sv, 0L, 3, FALSE), !length(sv$value),
+                  sv$value[1L] != as.raw(0L))) {
+    bad("the signatureValue is not a BIT STRING of whole bytes")
+  }
+  k <- o[[1L]]$children
+  i <- .rmbl_x509_ver_shape(k, bad)
+  if (length(k) < i + 5L) {
+    bad("the tbsCertificate is incomplete")
+  }
+  if (!is(k[[i]], 0L, 2, FALSE) || !length(k[[i]]$value)) {
+    bad("the serialNumber is not an INTEGER")
+  }
+  .rmbl_x509_alg_shape(k[[i + 1L]], "signature", bad)
+  span <- function(nd) der[(nd$start + 1L):(nd$offset + nd$length)]
+  if (!identical(span(o[[2L]]), span(k[[i + 1L]]))) {
+    bad(paste(
+      "the outer signatureAlgorithm is not the one signed",
+      "(RFC 5280 4.1.1.2)"
+    ))
+  }
+  .rmbl_x509_name_shape(k[[i + 2L]], "issuer", bad)
+  .rmbl_x509_val_shape(k[[i + 3L]], bad)
+  .rmbl_x509_name_shape(k[[i + 4L]], "subject", bad)
+  .rmbl_x509_spki_shape(k[[i + 5L]], bad)
+  .rmbl_x509_tail_shape(k[-seq_len(i + 5L)], bad)
+  invisible(NULL)
+}
+
+#' The optional [0] version: v1, v2 or v3.
+#' @param k The tbsCertificate's children.
+#' @param bad The function that refuses.
+#' @return The serialNumber's position: 2 after a version, else 1.
+#' @noRd
+.rmbl_x509_ver_shape <- function(k, bad) {
+  if (!length(k) || !identical(k[[1L]]$class, 2L)) {
+    return(1L)
+  }
+  v <- k[[1L]]
+  vv <- if (length(v$children) == 1L) v$children[[1L]]
+  if (.rmbl_anyof(!.rmbl_x509_is(v, 2L, 0, TRUE),
+                  !.rmbl_x509_is(vv, 0L, 2, FALSE), length(vv$value) != 1L,
+                  !as.integer(vv$value) %in% 0:2)) {
+    bad("the version is not v1, v2 or v3")
+  }
+  2L
+}
+
+#' The validity: a SEQUENCE of two times, each a UTCTime or GeneralizedTime.
+#' @param val The node.
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_val_shape <- function(val, bad) {
+  tm <- function(t) {
+    identical(t$class, 0L) && t$tag %in% c(23, 24) && !isTRUE(t$constructed)
+  }
+  if (!.rmbl_x509_is(val, 0L, 16, TRUE) || length(val$children) != 2L ||
+        !all(vapply(val$children, tm, NA))) {
+    bad("the validity is not two times")
+  }
+  invisible(NULL)
+}
+
+#' The subjectPublicKeyInfo: an AlgorithmIdentifier and a BIT STRING.
+#' @param sp The node.
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_spki_shape <- function(sp, bad) {
+  k <- sp$children
+  if (.rmbl_anyof(!.rmbl_x509_is(sp, 0L, 16, TRUE), length(k) != 2L,
+                  !.rmbl_x509_is(k[[2L]], 0L, 3, FALSE),
+                  !length(k[[2L]]$value))) {
+    bad("the subjectPublicKeyInfo is not an algorithm and a BIT STRING")
+  }
+  .rmbl_x509_alg_shape(k[[1L]], "key algorithm", bad)
+}
+
+#' The optional fields after a certificate's key: [1] and [2] unique
+#' identifiers, [3] extensions, in that order, once each. (A certificate
+#' without the version field that still carries extensions is read: the
+#' version sits inside the signed bytes.)
+#' @param rest The nodes after subjectPublicKeyInfo.
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_tail_shape <- function(rest, bad) {
+  tags <- vapply(rest, function(nd) {
+    if (identical(nd$class, 2L)) as.numeric(nd$tag) else -1
+  }, 0)
+  if (!all(tags %in% 1:3) || is.unsorted(tags, strictly = TRUE)) {
+    bad("a field after the key that RFC 5280 does not define")
+  }
+  for (nd in rest) {
+    if (nd$tag %in% c(1, 2) && isTRUE(nd$constructed)) {
+      bad("a unique identifier is not a BIT STRING")
+    }
+    if (nd$tag == 3) {
+      .rmbl_x509_exts(nd, bad)
+    }
+  }
+  invisible(NULL)
+}
+
+#' The [3] extensions field: one SEQUENCE of extensions.
+#' @param nd The [3] node.
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_exts <- function(nd, bad) {
+  if (!isTRUE(nd$constructed) || length(nd$children) != 1L) {
+    bad("the extensions are not one SEQUENCE")
+  }
+  .rmbl_x509_ext_shape(nd$children[[1L]], bad)
+}
+
+#' Whether a node is a universal OBJECT IDENTIFIER with contents.
+#' @inheritParams .rmbl_ts_want
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_x509_oid <- function(nd) {
+  .rmbl_x509_is(nd, 0L, 6, FALSE) && length(nd$value) > 0L
+}
+
+#' An AlgorithmIdentifier: an OID, then no parameters, a NULL, an OID (a
+#' curve) or a SEQUENCE (RSASSA-PSS).
+#' @inheritParams .rmbl_ts_digest_algs
+#' @param what Its name, for the refusal.
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_alg_shape <- function(nd, what, bad) {
+  k <- nd$children
+  if (.rmbl_anyof(!.rmbl_x509_is(nd, 0L, 16, TRUE), !length(k),
+                  length(k) > 2L, !.rmbl_x509_oid(k[[1L]]))) {
+    bad(sprintf("the %s is not an AlgorithmIdentifier", what))
+  }
+  p <- if (length(k) == 2L) k[[2L]]
+  if (!is.null(p) && !.rmbl_anyof(
+    .rmbl_x509_is(p, 0L, 5, FALSE) && !length(p$value),
+    .rmbl_x509_oid(p),
+    .rmbl_x509_is(p, 0L, 16, TRUE)
+  )) {
+    bad(sprintf("the %s has parameters of no form RFC 5280 uses", what))
+  }
+  invisible(NULL)
+}
+
+#' Whether a node is one AttributeTypeAndValue: an OID and a string (the
+#' types a DirectoryString, an IA5String and a PrintableString take).
+#' @param a The node.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_x509_atv <- function(a) {
+  v <- if (length(a$children) == 2L) a$children[[2L]]
+  str <- function(v) {
+    v$tag %in% c(12, 18, 19, 20, 22, 26, 28, 30) &&
+      .rmbl_x509_is(v, 0L, v$tag, FALSE)
+  }
+  !.rmbl_anyof(!.rmbl_x509_is(a, 0L, 16, TRUE), is.null(v),
+               !.rmbl_x509_oid(a$children[[1L]]), !str(v))
+}
+
+#' A Name: a SEQUENCE of non-empty SETs of (OID, string) pairs.
+#' @inheritParams .rmbl_ts_digest_algs
+#' @param what "issuer" or "subject".
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_name_shape <- function(nd, what, bad) {
+  rdn <- function(r) {
+    .rmbl_x509_is(r, 0L, 17, TRUE) && length(r$children) > 0L &&
+      all(vapply(r$children, .rmbl_x509_atv, NA))
+  }
+  if (!.rmbl_x509_is(nd, 0L, 16, TRUE) ||
+        !all(vapply(nd$children, rdn, NA))) {
+    bad(sprintf("the %s is not a Name", what))
+  }
+  invisible(NULL)
+}
+
+#' Whether a node is one Extension: an OID, a critical flag (present only
+#' when TRUE, as DER has it) and an OCTET STRING.
+#' @param e The node.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_x509_ext1 <- function(e) {
+  k <- e$children
+  n <- length(k)
+  if (!.rmbl_x509_is(e, 0L, 16, TRUE) || !n %in% 2:3) {
+    return(FALSE)
+  }
+  flag <- n == 2L || (.rmbl_x509_is(k[[2L]], 0L, 1, FALSE) &&
+                        identical(k[[2L]]$value, as.raw(0xff)))
+  .rmbl_x509_oid(k[[1L]]) && .rmbl_x509_is(k[[n]], 0L, 4, FALSE) && flag
+}
+
+#' The extensions: one or more, no OID twice (RFC 5280 4.2).
+#' @param nd The Extensions SEQUENCE.
+#' @param bad The function that refuses.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_x509_ext_shape <- function(nd, bad) {
+  if (!.rmbl_x509_is(nd, 0L, 16, TRUE) || !length(nd$children) ||
+        !all(vapply(nd$children, .rmbl_x509_ext1, NA))) {
+    bad("an extension is not an OID, a flag and an OCTET STRING")
+  }
+  oids <- vapply(nd$children, function(e) {
+    .rmbl_hexlify(e$children[[1L]]$value)
+  }, "")
+  if (anyDuplicated(oids)) {
+    bad("an extension appears twice")
+  }
+  invisible(NULL)
+}
+
+#' Returns the OID bytes of an AlgorithmIdentifier.
+#' @param alg The parsed AlgorithmIdentifier node.
+#' @return A raw vector, empty when the node has no children.
+#' @noRd
+tbs_alg_oid <- function(alg) {
+  if (!length(alg$children)) {
+    return(raw(0))
+  }
+  alg$children[[1]]$value
+}
+
+#' certchnvrf()'s `attm`, checked: one date-time.
+#' @param attm As for certchnvrf().
+#' @noRd
+.cv_check_time <- function(attm) {
+  if (
+    !(inherits(attm, c("POSIXt", "Date")) ||
+      (is.numeric(attm) && !is.object(attm))) ||
+      length(attm) != 1L ||
+      is.na(attm) ||
+      !is.finite(as.numeric(attm))
+  ) {
+    stop("`attm` must be a single date-time (POSIXct)", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+#' A certificate: one already parsed, or parsed now.
+#' @param x A certificate, its DER bytes or its PEM text.
+#' @return The parsed certificate.
+#' @noRd
+.cv_as_cert <- function(x) {
+  if (inherits(x, "bricklayer_certificate")) x else certprs(x)
+}
+
+#' One certificate (or CRL) or several, as a list.
+#' @param x NULL, one, or a list.
+#' @return A list.
+#' @noRd
+.cv_as_list <- function(x) {
+  if (is.null(x)) {
+    return(list())
+  }
+  if (
+    inherits(x, "bricklayer_certificate") ||
+      is.raw(x) ||
+      (is.character(x) && length(x) == 1L)
+  ) {
+    list(x)
+  } else {
+    as.list(x)
+  }
+}
+
+#' Builds the path: follow issuer names up through the intermediates until an
+#' anchor is reached. A depth cap because a cycle among supplied certificates
+#' would otherwise loop.
+#' @param acc The checks so far, extended by the path building.
+#' @param leaf,inter,trust The leaf, the intermediates and the anchors.
+#' @return The path, leaf first, ending at the anchor when one was reached.
+#' @noRd
+.cv_build_path <- function(acc, leaf, inter, trust) {
   path <- list(leaf)
   pool <- c(inter, trust)
   cur <- leaf
@@ -435,31 +723,51 @@ certchnvrf <- function(leaf, trust, inter = list(),
       anchor <- hit[[1]]
       break
     }
-    nxt <- Filter(function(c) {
-      identical(c$subject, cur$issuer) &&
-        !identical(c$der, cur$der)
-    }, pool)
-    if (!length(nxt)) break
+    nxt <- Filter(
+      function(c) {
+        identical(c$subject, cur$issuer) &&
+          !identical(c$der, cur$der)
+      },
+      pool
+    )
+    if (!length(nxt)) {
+      break
+    }
     path[[length(path) + 1L]] <- nxt[[1]]
     cur <- nxt[[1]]
   }
-  note_row(
-    "path_to_anchor", !is.null(anchor),
+  .vc_note(
+    acc,
+    "path_to_anchor",
+    !is.null(anchor),
     if (is.null(anchor)) {
       sprintf("no trust anchor issued '%s'", cur$issuer)
     } else {
       sprintf("anchored at '%s'", anchor$subject)
     }
   )
-  if (!is.null(anchor)) path[[length(path) + 1L]] <- anchor
+  if (!is.null(anchor)) {
+    path[[length(path) + 1L]] <- anchor
+  }
+  attr(path, "anchor") <- anchor
+  path
+}
 
-  # every link: issuer name, signature, validity, and CA-ness
+#' Every link of the path: issuer name, signature, validity, and CA-ness; then
+#' the anchor.
+#' @param acc The checks so far, extended by the signature links.
+#' @param path The path.
+#' @param attm The time checked at.
+#' @noRd
+.cv_links <- function(acc, path, attm) {
   for (i in seq_along(path)) {
     cert <- path[[i]]
     tag <- sprintf("[%d] %s", i, substring(cert$subject, 1L, 24L))
     within <- attm >= cert$not_before && attm <= cert$not_after
-    note_row(
-      paste("validity", tag), within,
+    .vc_note(
+      acc,
+      paste("validity", tag),
+      within,
       sprintf(
         "%s to %s, checked at %s",
         format(cert$not_before, "%Y-%m-%d", tz = "UTC"),
@@ -470,8 +778,10 @@ certchnvrf <- function(leaf, trust, inter = list(),
     if (i > 1L) {
       # An issuer must be a CA. Without this any leaf certificate could
       # sign a certificate for any name at all.
-      note_row(
-        paste("is a CA", tag), isTRUE(cert$is_ca),
+      .vc_note(
+        acc,
+        paste("is a CA", tag),
+        isTRUE(cert$is_ca),
         if (isTRUE(cert$is_ca)) {
           "basicConstraints says CA"
         } else {
@@ -480,16 +790,27 @@ certchnvrf <- function(leaf, trust, inter = list(),
       )
     }
     if (i < length(path)) {
-      issuer <- path[[i + 1L]]
-      v <- .rmbl_cert_verify_sig(cert, issuer)
-      note_row(paste("signature", tag), v$ok, v$detail)
+      v <- .rmbl_cert_verify_sig(cert, path[[i + 1L]])
+      .vc_note(acc, paste("signature", tag), v$ok, v$detail)
     }
   }
+  .cv_anchor_note(acc, path)
+}
+
+#' Notes the chain's anchor, which nothing above vouches for.
+#' @param acc The accumulator of check rows.
+#' @param path The certificate path, with its `anchor` attribute.
+#' @return NULL, invisibly.
+#' @noRd
+.cv_anchor_note <- function(acc, path) {
   # a self-signed anchor is expected to be self-signed, and nothing
   # above it vouches for it -- that is what makes it an anchor
+  anchor <- attr(path, "anchor")
   if (!is.null(anchor)) {
-    note_row(
-      "anchor_self_signed", TRUE,
+    .vc_note(
+      acc,
+      "anchor_self_signed",
+      TRUE,
       if (isTRUE(anchor$self_signed)) {
         "the anchor is self-signed, as an anchor is"
       } else {
@@ -497,139 +818,161 @@ certchnvrf <- function(leaf, trust, inter = list(),
       }
     )
   }
+  invisible(NULL)
+}
 
-  # Name constraints. Each CA in the path constrains everything below
-  # it, so the check runs for every pair, not only for the leaf: a CA
-  # constrained to one name space must not be able to issue an
-  # intermediate that escapes it.
-  if (length(path) > 1L) {
-    for (up in seq(2L, length(path))) {
-      nc <- path[[up]]$name_constraints
-      if (is.null(nc)) next
-      for (down in seq_len(up - 1L)) {
-        probs <- .rmbl_nc_check_one(path[[down]], nc)
-        note_row(
-          sprintf("name constraints [%d under %d]", down, up),
-          length(probs) == 0L,
-          if (length(probs)) {
-            paste(probs, collapse = "; ")
-          } else {
-            "within the permitted name space"
-          }
-        )
-      }
+#' certchnvrf()'s policy tree, with its check row when one is asked for.
+#' @param acc The accumulator of check rows.
+#' @param path The certificate path whose policies are checked.
+#' @param pols As for certchnvrf().
+#' @return The policy tree.
+#' @noRd
+.cv_policies <- function(acc, path, pols) {
+  pol <- .rmbl_policy_tree(
+    path,
+    initial = if (is.null(pols)) {
+      kAnyPolicy
+    } else {
+      pols
     }
+  )
+  if (!is.null(pols) || isTRUE(pol$explicit_required)) {
+    .cv_policy_row(acc, pol)
   }
+  pol
+}
 
-  # pathLenConstraint: how many CAs a CA permits beneath it. Counted in
-  # non-self-issued intermediates, as RFC 5280 counts them.
-  if (length(path) > 2L) {
-    for (up in seq(2L, length(path))) {
-      pl <- .rmbl_na_int(path[[up]]$path_len)
-      if (is.na(pl)) next
-      below <- up - 2L
-      note_row(
-        sprintf("path length [%d]", up), below <= pl,
-        sprintf(
-          "permits %d intermediate(s) below it, path has %d",
-          pl, below
-        )
+#' Name constraints. Each CA in the path constrains everything below it, so the
+#' check runs for every pair, not only for the leaf: a CA constrained to one
+#' name space must not be able to issue an intermediate that escapes it.
+#' @param acc The checks so far, extended by the name constraints.
+#' @param path The path.
+#' @noRd
+.cv_name_constraints <- function(acc, path) {
+  if (length(path) <= 1L) {
+    return(invisible(NULL))
+  }
+  for (up in seq(2L, length(path))) {
+    nc <- path[[up]]$name_constraints
+    if (is.null(nc)) {
+      next
+    }
+    for (down in seq_len(up - 1L)) {
+      probs <- .rmbl_nc_check_one(path[[down]], nc)
+      .vc_note(
+        acc,
+        sprintf("name constraints [%d under %d]", down, up),
+        length(probs) == 0L,
+        if (length(probs)) {
+          paste(probs, collapse = "; ")
+        } else {
+          "within the permitted name space"
+        }
       )
     }
   }
+}
 
-  pol <- .rmbl_policy_tree(path, initial = if (is.null(pols)) {
-    kAnyPolicy
-  } else {
-    pols
-  })
-  if (!is.null(pols) || isTRUE(pol$explicit_required)) {
-    note_row(
-      "certificate policies", pol$ok,
-      if (pol$ok) {
-        sprintf(
-          "acceptable: %s",
-          paste(utils::head(pol$authorities_constrained_to, 4L),
-            collapse = ", "
-          )
-        )
-      } else {
-        paste(c(
+#' pathLenConstraint: how many CAs a CA permits beneath it. Counted in
+#' non-self-issued intermediates, as RFC 5280 counts them.
+#' @param acc The checks so far, extended by the path length check.
+#' @param path The path.
+#' @noRd
+.cv_path_len <- function(acc, path) {
+  if (length(path) <= 2L) {
+    return(invisible(NULL))
+  }
+  for (up in seq(2L, length(path))) {
+    pl <- .rmbl_na_int(path[[up]]$path_len)
+    if (is.na(pl)) {
+      next
+    }
+    below <- up - 2L
+    .vc_note(
+      acc,
+      sprintf("path length [%d]", up),
+      below <= pl,
+      sprintf(
+        "permits %d intermediate(s) below it, path has %d",
+        pl,
+        below
+      )
+    )
+  }
+}
+
+#' The certificate-policies row.
+#' @param acc The checks so far, extended by the policy row.
+#' @param pol The policy tree's result.
+#' @noRd
+.cv_policy_row <- function(acc, pol) {
+  .vc_note(
+    acc,
+    "certificate policies",
+    pol$ok,
+    if (pol$ok) {
+      sprintf(
+        "acceptable: %s",
+        toString(utils::head(pol$authorities_constrained_to, 4L))
+      )
+    } else {
+      paste(
+        c(
           "no acceptable policy survives the path",
           pol$notes
-        ), collapse = "; ")
-      }
-    )
-  }
+        ),
+        collapse = "; "
+      )
+    }
+  )
+}
 
-  if (!is.null(purp)) {
-    want <- .rmbl_eku_oid(purp)
-    have <- leaf$extended_key_usage
-    ok <- length(have) == 0L || want %in% .rmbl_eku_oid(have)
-    note_row(
-      "purpose", ok && length(have) > 0L,
-      if (length(have) == 0L) {
-        "the leaf states no extended key usage at all"
-      } else {
-        sprintf("leaf permits: %s", paste(have, collapse = ", "))
-      }
-    )
-  }
+#' The leaf's extended key usage against the purpose asked for.
+#' @param acc The checks so far, extended by the purpose check.
+#' @param leaf The leaf.
+#' @param purp As for certchnvrf().
+#' @noRd
+.cv_purpose <- function(acc, leaf, purp) {
+  want <- .rmbl_eku_oid(purp)
+  have <- leaf$extended_key_usage
+  ok <- length(have) == 0L || want %in% .rmbl_eku_oid(have)
+  .vc_note(
+    acc,
+    "purpose",
+    ok && length(have) > 0L,
+    if (length(have) == 0L) {
+      "the leaf states no extended key usage at all"
+    } else {
+      sprintf("leaf permits: %s", toString(have))
+    }
+  )
+}
 
+#' Revocation: the CRLs supplied, and with rvk = "fetch" the ones the
+#' certificates point to.
+#'
+#' Fetching is opt-in and never the default. A verifier that reaches out during
+#' a check stops working offline, and tells whoever runs the responder which
+#' certificates are being checked and when.
+#' @param acc The checks so far, extended by the revocation checks.
+#' @param path The path.
+#' @param crls,rvk,attm As for certchnvrf().
+#' @noRd
+.cv_revocation <- function(acc, path, crls, rvk, attm) {
   if (identical(rvk, "fetch")) {
-    # Fetching is opt-in and never the default. A verifier that reaches
-    # out during a check stops working offline, and tells whoever runs
-    # the responder which certificates are being checked and when.
     fetched <- .rmbl_revocation_fetch(path)
     crls <- c(crls, fetched$crls)
     for (i in seq_along(fetched$notes)) {
-      note_row(names(fetched$notes)[i], fetched$ok[i], fetched$notes[[i]])
+      .vc_note(acc, names(fetched$notes)[i], fetched$ok[i], fetched$notes[[i]])
     }
   }
   if (length(crls) && !identical(rvk, "none")) {
     rv <- .rmbl_crl_check(path, crls, attm)
     for (i in seq_len(nrow(rv))) {
-      note_row(rv$check[i], rv$ok[i], rv$detail[i])
+      .vc_note(acc, rv$check[i], rv$ok[i], rv$detail[i])
     }
   }
-
-  df <- do.call(rbind, acc$checks)
-  rownames(df) <- NULL
-  out <- list(
-    ok = all(df$ok), path = path, checks = df,
-    at_time = attm, policies = pol
-  )
-  class(out) <- c("bricklayer_certpath_check", "list")
-  out
 }
-
-#' @export
-format.bricklayer_certpath_check <- function(x, ...) {
-  c(
-    .rmbl_rule(sprintf(
-      "Certificate chain: %s",
-      if (x$ok) "verified" else "NOT verified"
-    )),
-    sprintf(
-      "  %d certificate(s), validity checked at %s",
-      length(x$path), format(x$at_time, "%Y-%m-%d %H:%M:%S UTC",
-        tz = "UTC"
-      )
-    ),
-    .rmbl_rule(),
-    sprintf(
-      "  %-34s %-5s %s", substring(x$checks$check, 1L, 34L),
-      ifelse(x$checks$ok, "ok", "FAIL"),
-      substring(x$checks$detail, 1L, 34L)
-    ),
-    .rmbl_rule()
-  )
-}
-
-#' @rdname printmeth
-#' @export
-#' @method print bricklayer_certpath_check
-print.bricklayer_certpath_check <- .rmbl_print_via_format
 
 # ---------------------------------------------------------------- #
 # The pieces
@@ -645,23 +988,28 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
 #' @noRd
 .rmbl_x509_name <- function(nd) {
   short <- c(
-    "2.5.4.3" = "CN", "2.5.4.6" = "C", "2.5.4.7" = "L",
-    "2.5.4.8" = "ST", "2.5.4.10" = "O", "2.5.4.11" = "OU",
+    "2.5.4.3" = "CN",
+    "2.5.4.6" = "C",
+    "2.5.4.7" = "L",
+    "2.5.4.8" = "ST",
+    "2.5.4.10" = "O",
+    "2.5.4.11" = "OU",
     "1.2.840.113549.1.9.1" = "emailAddress"
   )
   parts <- character(0)
   for (rdn in nd$children) {
     for (atv in rdn$children) {
-      if (length(atv$children) < 2L) next
+      if (length(atv$children) < 2L) {
+        next
+      }
       oid <- .rmbl_oid_string(atv$children[[1]]$value)
       nm <- if (oid %in% names(short)) short[[oid]] else oid
-      val <- tryCatch(rawToChar(atv$children[[2]]$value),
-        error = function(e) ""
-      )
+      # byte-safe: a name that is not UTF-8 shows its bytes as <xx>
+      val <- .rmbl_raw_text(atv$children[[2]]$value)
       parts <- c(parts, sprintf("%s=%s", nm, val))
     }
   }
-  paste(parts, collapse = ", ")
+  toString(parts)
 }
 
 #' Reads a UTCTime or GeneralizedTime.
@@ -674,28 +1022,48 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
 #' @noRd
 .rmbl_x509_time <- function(nd) {
   s <- tryCatch(rawToChar(nd$value), error = function(e) "")
+  # RFC 5280 4.1.2.5: YYMMDDHHMMSSZ or YYYYMMDDHHMMSSZ, nothing else; a
+  # UTCTime with letters in it gave "missing value where TRUE/FALSE needed"
+  utc <- identical(nd$tag, 23)
+  if (!utc && !identical(nd$tag, 24) ||
+        !grepl(if (utc) "^[0-9]{12}Z$" else "^[0-9]{14}Z$", s,
+               useBytes = TRUE)) {
+    stop("a certificate or CRL time is not the UTCTime or GeneralizedTime ",
+         "RFC 5280 allows", call. = FALSE)
+  }
   s <- sub("Z$", "", s)
   if (identical(nd$tag, 23)) {
     yy <- as.integer(substring(s, 1L, 2L))
     century <- if (yy >= 50L) "19" else "20"
     s <- paste0(century, s)
   }
-  as.POSIXct(strptime(substring(s, 1L, 14L), "%Y%m%d%H%M%S", tz = "UTC"),
+  t <- as.POSIXct(
+    strptime(substring(s, 1L, 14L), "%Y%m%d%H%M%S", tz = "UTC"),
     tz = "UTC"
   )
+  if (is.na(t)) {
+    stop("a certificate or CRL time is not a date (month 13, day 32, ...)",
+         call. = FALSE)
+  }
+  t
 }
 
 #' Reads the certificate extensions that path validation uses.
 #' @param k The children of the TBSCertificate node.
-#' @return A list with the CA flag, path length, key usage, extended key usage, subject alternative names, name
-#'   constraints, policies, policy mappings and the policy constraint counters.
+#' @return A list with the CA flag, path length, key usage, extended key usage,
+#'   subject alternative names, name constraints, policies, policy mappings and
+#'   the policy constraint counters.
 #' @noRd
 .rmbl_x509_extensions <- function(k) {
   out <- list(
-    is_ca = FALSE, path_len = NA_integer_,
-    key_usage = character(0), eku = character(0),
-    san = list(), name_constraints = NULL,
-    policies = character(0), policy_mappings = NULL,
+    is_ca = FALSE,
+    path_len = NA_integer_,
+    key_usage = character(0),
+    eku = character(0),
+    san = list(),
+    name_constraints = NULL,
+    policies = character(0),
+    policy_mappings = NULL,
     require_explicit_policy = NA_integer_,
     inhibit_policy_mapping = NA_integer_,
     inhibit_any_policy = NA_integer_
@@ -707,65 +1075,128 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
   if (is.null(ext) || !length(ext$children)) {
     return(out)
   }
+  handlers <- .rmbl_x509_ext_handlers()
   for (e in ext$children[[1]]$children) {
-    if (length(e$children) < 2L) next
+    if (length(e$children) < 2L) {
+      next
+    }
     oid <- .rmbl_oid_string(e$children[[1]]$value)
     val <- e$children[[length(e$children)]]$value
     inner <- tryCatch(.Call(C_rmbl_der_parse, val), error = function(z) NULL)
-    if (is.null(inner)) next
-    if (identical(oid, "2.5.29.19")) {
-      # basicConstraints: SEQUENCE { cA BOOLEAN DEFAULT FALSE, ... }
+    if (is.null(inner)) {
+      next
+    }
+    h <- handlers[[oid]]
+    if (!is.null(h)) {
+      out <- h(out, inner, val)
+    }
+  }
+  out
+}
+
+#' The certificate extensions read, by OID: each handler takes the fields read
+#' so far, the parsed extension value and its bytes, and returns the fields.
+#' @return A named list of functions.
+#' @noRd
+.rmbl_x509_ext_handlers <- function() {
+  list(
+    # basicConstraints: SEQUENCE { cA BOOLEAN DEFAULT FALSE, ... }
+    "2.5.29.19" = function(out, inner, val) {
       kids <- inner$children
-      out$is_ca <- length(kids) >= 1L && identical(kids[[1]]$tag, 1) &&
-        length(kids[[1]]$value) >= 1L && kids[[1]]$value[1] != as.raw(0)
+      out$is_ca <- length(kids) >= 1L &&
+        identical(kids[[1]]$tag, 1) &&
+        length(kids[[1]]$value) >= 1L &&
+        kids[[1]]$value[1] != as.raw(0)
       # pathLenConstraint, when present, caps how many CAs may appear
       # below this one
       for (kk in kids) {
         if (identical(kk$tag, 2)) out$path_len <- .rmbl_int_of(kk$value)
       }
-    } else if (identical(oid, "2.5.29.37")) {
+      out
+    },
+    "2.5.29.37" = function(out, inner, val) {
       out$eku <- vapply(
         inner$children,
         function(z) .rmbl_oid_string(z$value),
         character(1)
       )
-    } else if (identical(oid, "2.5.29.15")) {
+      out
+    },
+    "2.5.29.15" = function(out, inner, val) {
       out$key_usage <- .rmbl_key_usage_bits(inner$value)
-    } else if (identical(oid, "2.5.29.17")) {
+      out
+    },
+    "2.5.29.17" = function(out, inner, val) {
       out$san <- .rmbl_general_names(inner)
-    } else if (identical(oid, "2.5.29.30")) {
+      out
+    },
+    "2.5.29.30" = function(out, inner, val) {
       out$name_constraints <- .rmbl_name_constraints(val)
-    } else if (identical(oid, "2.5.29.32")) {
-      # certificatePolicies: SEQUENCE OF PolicyInformation, whose first
-      # field is the identifier. Qualifiers are not processed.
-      out$policies <- unlist(lapply(inner$children, function(pi) {
-        if (!length(pi$children)) {
-          return(NULL)
-        }
-        .rmbl_oid_string(pi$children[[1]]$value)
-      }))
-      if (is.null(out$policies)) out$policies <- character(0)
-    } else if (identical(oid, "2.5.29.33")) {
-      out$policy_mappings <- lapply(inner$children, function(m) {
-        if (length(m$children) < 2L) {
-          return(NULL)
-        }
-        list(
-          issuer = .rmbl_oid_string(m$children[[1]]$value),
-          subject = .rmbl_oid_string(m$children[[2]]$value)
-        )
-      })
-      out$policy_mappings <- Filter(Negate(is.null), out$policy_mappings)
-    } else if (identical(oid, "2.5.29.36")) {
-      for (pc in inner$children) {
-        if (!identical(pc$class, 2L)) next
-        v <- .rmbl_int_of(pc$value)
-        if (identical(pc$tag, 0)) out$require_explicit_policy <- v
-        if (identical(pc$tag, 1)) out$inhibit_policy_mapping <- v
-      }
-    } else if (identical(oid, "2.5.29.54")) {
+      out
+    },
+    "2.5.29.32" = .rmbl_ext_policies,
+    "2.5.29.33" = .rmbl_ext_policy_mappings,
+    "2.5.29.36" = .rmbl_ext_policy_constraints,
+    "2.5.29.54" = function(out, inner, val) {
       out$inhibit_any_policy <- .rmbl_int_of(inner$value)
+      out
     }
+  )
+}
+
+#' certificatePolicies: SEQUENCE OF PolicyInformation, whose first field is the
+#' identifier. Qualifiers are not processed.
+#' @param out The fields read so far.
+#' @param inner The parsed extension value.
+#' @param val Its bytes.
+#' @return The fields.
+#' @noRd
+.rmbl_ext_policies <- function(out, inner, val) {
+  out$policies <- unlist(lapply(inner$children, function(pi) {
+    if (!length(pi$children)) {
+      return(NULL)
+    }
+    .rmbl_oid_string(pi$children[[1]]$value)
+  }))
+  if (is.null(out$policies)) {
+    out$policies <- character(0)
+  }
+  out
+}
+
+#' policyMappings: issuer and subject domain policies.
+#' @param out,inner,val As for .rmbl_ext_policies().
+#' @return The fields.
+#' @noRd
+.rmbl_ext_policy_mappings <- function(out, inner, val) {
+  out$policy_mappings <- lapply(inner$children, function(m) {
+    if (length(m$children) < 2L) {
+      return(NULL)
+    }
+    list(
+      issuer = .rmbl_oid_string(m$children[[1]]$value),
+      subject = .rmbl_oid_string(m$children[[2]]$value)
+    )
+  })
+  out$policy_mappings <- Filter(Negate(is.null), out$policy_mappings)
+  out
+}
+
+#' policyConstraints: requireExplicitPolicy (tag 0) and
+#'   inhibitPolicyMapping (tag 1).
+#' @param out,inner,val As for .rmbl_ext_policies().
+#' @return The fields.
+#' @noRd
+.rmbl_ext_policy_constraints <- function(out, inner, val) {
+  for (pc in inner$children) {
+    if (!identical(pc$class, 2L)) {
+      next
+    }
+    v <- .rmbl_int_of(pc$value)
+    if (identical(pc$tag, 0)) {
+      out$require_explicit_policy <- v
+    }
+    if (identical(pc$tag, 1)) out$inhibit_policy_mapping <- v
   }
   out
 }
@@ -779,15 +1210,23 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
     return(character(0))
   }
   names9 <- c(
-    "digitalSignature", "nonRepudiation", "keyEncipherment",
-    "dataEncipherment", "keyAgreement", "keyCertSign",
-    "cRLSign", "encipherOnly", "decipherOnly"
+    "digitalSignature",
+    "nonRepudiation",
+    "keyEncipherment",
+    "dataEncipherment",
+    "keyAgreement",
+    "keyCertSign",
+    "cRLSign",
+    "encipherOnly",
+    "decipherOnly"
   )
   bits <- character(0)
   body <- v[-1]
   for (i in seq_along(names9)) {
     byte <- (i - 1L) %/% 8L + 1L
-    if (byte > length(body)) break
+    if (byte > length(body)) {
+      break
+    }
     bit <- 7L - ((i - 1L) %% 8L)
     if (bitwAnd(as.integer(body[byte]), bitwShiftL(1L, bit)) != 0L) {
       bits <- c(bits, names9[i])
@@ -810,9 +1249,14 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
     OCSPSigning = "1.3.6.1.5.5.7.3.9",
     anyExtendedKeyUsage = "2.5.29.37.0"
   )
-  vapply(as.character(x), function(v) {
-    if (v %in% names(map)) map[[v]] else v
-  }, character(1), USE.NAMES = FALSE)
+  vapply(
+    as.character(x),
+    function(v) {
+      if (v %in% names(map)) map[[v]] else v
+    },
+    character(1),
+    USE.NAMES = FALSE
+  )
 }
 
 #' Names a signature algorithm OID.
@@ -820,22 +1264,23 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
 #' @return A name such as `"RSA-SHA256"`, or the OID when it is not known.
 #' @noRd
 .rmbl_x509_sigalg_name <- function(oid) {
-  switch(oid,
+  switch(
+    oid,
     "1.2.840.113549.1.1.11" = "RSA-SHA256",
     "1.2.840.113549.1.1.12" = "RSA-SHA384",
     "1.2.840.113549.1.1.13" = "RSA-SHA512",
-    "1.2.840.113549.1.1.5"  = "RSA-SHA1",
-    "1.2.840.10045.4.3.2"   = "ECDSA-SHA256",
-    "1.2.840.10045.4.3.3"   = "ECDSA-SHA384",
-    "1.2.840.10045.4.3.4"   = "ECDSA-SHA512",
+    "1.2.840.113549.1.1.5" = "RSA-SHA1",
+    "1.2.840.10045.4.3.2" = "ECDSA-SHA256",
+    "1.2.840.10045.4.3.3" = "ECDSA-SHA384",
+    "1.2.840.10045.4.3.4" = "ECDSA-SHA512",
     oid
   )
 }
 
 #' The public key, whichever kind it is.
 #' @param spki The parsed SubjectPublicKeyInfo node.
-#' @return A list with `type` and `bits`, plus the modulus and exponent of an RSA key or the curve and point of an EC
-#'   key.
+#' @return A list with `type` and `bits`, plus the modulus and exponent of an
+#'   RSA key or the curve and point of an EC key.
 #' @noRd
 .rmbl_x509_key <- function(spki) {
   alg <- spki$children[[1]]
@@ -843,43 +1288,100 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
   bits <- spki$children[[2]]$value
   inner <- if (length(bits) > 1L) bits[-1] else raw(0)
   if (identical(oid, "1.2.840.113549.1.1.1")) {
-    rsa <- tryCatch(.Call(C_rmbl_der_parse, inner), error = function(e) NULL)
-    if (is.null(rsa) || length(rsa$children) < 2L) {
-      return(list(type = "unknown", bits = 0L))
-    }
-    strip <- function(v) {
-      while (length(v) > 1L && v[1] == as.raw(0)) v <- v[-1]
-      v
-    }
-    m <- strip(rsa$children[[1]]$value)
-    list(
-      type = "RSA", bits = 8L * length(m), modulus = m,
-      exponent = strip(rsa$children[[2]]$value)
-    )
+    .rmbl_x509_rsa_key(inner)
   } else if (identical(oid, "1.2.840.10045.2.1")) {
-    curve <- if (length(alg$children) >= 2L) {
-      .rmbl_oid_string(alg$children[[2]]$value)
-    } else {
-      NA_character_
-    }
-    nm <- switch(curve,
-      "1.2.840.10045.3.1.7" = "P-256",
-      "1.3.132.0.34" = "P-384",
-      "1.3.132.0.35" = "P-521",
-      NA_character_
-    )
-    if (is.na(nm) || !length(inner) || inner[1] != as.raw(0x04)) {
-      # a compressed point would need decompression, which is not done
-      return(list(type = "EC", bits = 0L, curve = curve))
-    }
-    n <- (length(inner) - 1L) %/% 2L
-    list(
-      type = "EC", bits = 8L * n, curve = nm,
-      x = inner[2:(1L + n)], y = inner[(2L + n):(1L + 2L * n)]
-    )
+    .rmbl_x509_ec_key(alg, inner)
   } else {
     list(type = oid, bits = 0L)
   }
+}
+
+#' An RSA public key from a SubjectPublicKeyInfo's key bytes.
+#' @param inner The key bytes (the BIT STRING without its unused-bits octet).
+#' @return A list: type, bits, modulus and exponent.
+#' @noRd
+.rmbl_x509_rsa_key <- function(inner) {
+  rsa <- tryCatch(.Call(C_rmbl_der_parse, inner), error = function(e) NULL)
+  if (is.null(rsa) || length(rsa$children) < 2L) {
+    return(list(type = "unknown", bits = 0L))
+  }
+  strip <- function(v) {
+    while (length(v) > 1L && v[1] == as.raw(0)) {
+      v <- v[-1]
+    }
+    v
+  }
+  m <- strip(rsa$children[[1]]$value)
+  list(
+    type = "RSA",
+    bits = 8L * length(m),
+    modulus = m,
+    exponent = strip(rsa$children[[2]]$value)
+  )
+}
+
+#' An EC public key from a SubjectPublicKeyInfo.
+#' @param alg The AlgorithmIdentifier node (it names the curve).
+#' @param inner The key bytes (the BIT STRING without its unused-bits octet).
+#' @return A list: type, bits, curve and, for an uncompressed point, x and y.
+#' @noRd
+.rmbl_x509_ec_key <- function(alg, inner) {
+  curve <- if (length(alg$children) >= 2L) {
+    .rmbl_oid_string(alg$children[[2]]$value)
+  } else {
+    NA_character_
+  }
+  nm <- switch(
+    curve,
+    "1.2.840.10045.3.1.7" = "P-256",
+    "1.3.132.0.34" = "P-384",
+    "1.3.132.0.35" = "P-521",
+    NA_character_
+  )
+  if (is.na(nm) || !length(inner) || inner[1] != as.raw(0x04)) {
+    # a compressed point would need decompression, which is not done
+    return(list(type = "EC", bits = 0L, curve = curve))
+  }
+  n <- (length(inner) - 1L) %/% 2L
+  list(
+    type = "EC",
+    bits = 8L * n,
+    curve = nm,
+    x = inner[2:(1L + n)],
+    y = inner[(2L + n):(1L + 2L * n)]
+  )
+}
+
+#' A certificate's signature bytes, without the unused-bits octet.
+#' @param sig_bits The BIT STRING's content.
+#' @return The signature as raw bytes.
+#' @noRd
+.rmbl_x509_sig_bits <- function(sig_bits) {
+  if (!length(sig_bits)) {
+    stop("the certificate has no signature", call. = FALSE)
+  }
+  sig_bits[-1] # drop the unused-bits octet
+}
+
+#' A TBSCertificate's version and the offset it gives the later fields.
+#' @param k The TBSCertificate's children.
+#' @return A list: off (0 or 1) and version.
+#' @noRd
+.rmbl_x509_version <- function(k) {
+  # an explicit [0] version shifts every following field along by one
+  off <- if (
+    length(k) && identical(k[[1]]$class, 2L) && identical(k[[1]]$tag, 0)
+  ) {
+    1L
+  } else {
+    0L
+  }
+  version <- if (off == 1L) {
+    as.integer(k[[1]]$children[[1]]$value[1]) + 1L
+  } else {
+    1L
+  }
+  list(off = off, version = version)
 }
 
 #' One certificate's signature, under its issuer's key.
@@ -890,11 +1392,11 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
 .rmbl_cert_verify_sig <- function(cert, issuer) {
   name <- cert$signature_algorithm
   key <- issuer$key
-  dalg <- if (grepl("SHA256", name)) {
+  dalg <- if (grepl("SHA256", name, fixed = TRUE)) {
     "sha256"
-  } else if (grepl("SHA384", name)) {
+  } else if (grepl("SHA384", name, fixed = TRUE)) {
     "sha384"
-  } else if (grepl("SHA512", name)) {
+  } else if (grepl("SHA512", name, fixed = TRUE)) {
     "sha512"
   } else {
     NA_character_
@@ -906,55 +1408,89 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
     ))
   }
   if (startsWith(name, "RSA")) {
-    if (!identical(key$type, "RSA")) {
-      return(list(
-        ok = FALSE,
-        detail = "the issuer's key is not an RSA key"
-      ))
-    }
-    em <- tryCatch(
-      .Call(
-        C_rmbl_rsa_recover, cert$signature, key$modulus,
-        key$exponent
-      ),
-      error = function(e) NULL
-    )
-    if (is.null(em)) {
-      return(list(ok = FALSE, detail = "the RSA operation failed"))
-    }
-    r <- .rmbl_pkcs1_check(em, dalg, cert$tbs)
-    return(list(ok = r$ok, detail = paste(name, r$detail)))
+    return(.rmbl_cert_verify_rsa(cert, key, name, dalg))
   }
   if (startsWith(name, "ECDSA")) {
-    if (!identical(key$type, "EC") || is.null(key$x)) {
-      return(list(
-        ok = FALSE,
-        detail = "the issuer's key is not a usable EC key"
-      ))
-    }
-    rs <- .rmbl_ecdsa_rs(cert$signature)
-    if (is.null(rs)) {
-      return(list(ok = FALSE, detail = "the ECDSA signature is malformed"))
-    }
-    dig <- .rmbl_ts_digest(dalg, cert$tbs)
-    ok <- tryCatch(
-      .Call(
-        C_rmbl_ecdsa_verify, key$curve, key$x, key$y,
-        rs$r, rs$s, dig
-      ),
-      error = function(e) FALSE
-    )
-    return(list(ok = isTRUE(ok), detail = sprintf(
-      "%s on %s", name,
-      key$curve
-    )))
+    return(.rmbl_cert_verify_ecdsa(cert, key, name, dalg))
   }
   list(ok = FALSE, detail = sprintf("%s is not verified here", name))
 }
 
+#' One certificate's RSA signature, under its issuer's key.
+#' @param cert The parsed certificate.
+#' @param key The issuer's parsed key.
+#' @param name The signature algorithm's name.
+#' @param dalg The digest algorithm of the RSA signature.
+#' @return A list with `ok` and `detail`.
+#' @noRd
+.rmbl_cert_verify_rsa <- function(cert, key, name, dalg) {
+  if (!identical(key$type, "RSA")) {
+    return(list(
+      ok = FALSE,
+      detail = "the issuer's key is not an RSA key"
+    ))
+  }
+  em <- tryCatch(
+    .Call(
+      C_rmbl_rsa_recover,
+      cert$signature,
+      key$modulus,
+      key$exponent
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(em)) {
+    return(list(ok = FALSE, detail = "the RSA operation failed"))
+  }
+  r <- .rmbl_pkcs1_check(em, dalg, cert$tbs)
+  list(ok = r$ok, detail = paste(name, r$detail))
+}
+
+#' One certificate's ECDSA signature, under its issuer's key.
+#' @param cert The parsed certificate.
+#' @param key The issuer's parsed key.
+#' @param name The signature algorithm's name.
+#' @param dalg The digest algorithm of the ECDSA signature.
+#' @return A list with `ok` and `detail`.
+#' @noRd
+.rmbl_cert_verify_ecdsa <- function(cert, key, name, dalg) {
+  if (!identical(key$type, "EC") || is.null(key$x)) {
+    return(list(
+      ok = FALSE,
+      detail = "the issuer's key is not a usable EC key"
+    ))
+  }
+  rs <- .rmbl_ecdsa_rs(cert$signature)
+  if (is.null(rs)) {
+    return(list(ok = FALSE, detail = "the ECDSA signature is malformed"))
+  }
+  dig <- .rmbl_ts_digest(dalg, cert$tbs)
+  ok <- tryCatch(
+    .Call(
+      C_rmbl_ecdsa_verify,
+      key$curve,
+      key$x,
+      key$y,
+      rs$r,
+      rs$s,
+      dig
+    ),
+    error = function(e) FALSE
+  )
+  list(
+    ok = isTRUE(ok),
+    detail = sprintf(
+      "%s on %s",
+      name,
+      key$curve
+    )
+  )
+}
+
 #' An ECDSA signature is SEQUENCE { INTEGER r, INTEGER s }.
 #' @param sig The DER signature bytes.
-#' @return A list with raw `r` and `s`, or NULL when the encoding is not canonical.
+#' @return A list with raw `r` and `s`, or NULL when the encoding is not
+#'   canonical.
 #' @noRd
 .rmbl_ecdsa_rs <- function(sig) {
   d <- tryCatch(.Call(C_rmbl_der_parse, sig), error = function(e) NULL)
@@ -963,77 +1499,84 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
   # superfluous leading zero, or a negative value) is not a signature,
   # however its r and s read. Wycheproof's malleability vectors are the
   # test for exactly these.
-  if (is.null(d) || d$class != 0L || !isTRUE(d$constructed) || d$tag != 16 ||
-      length(d$children) != 2L) {
+  if (
+    is.null(d) ||
+      d$class != 0L ||
+      !isTRUE(d$constructed) ||
+      d$tag != 16 ||
+      length(d$children) != 2L
+  ) {
     return(NULL)
   }
-  int_value <- function(nd) {
-    v <- nd$value
-    if (nd$class != 0L || isTRUE(nd$constructed) || nd$tag != 2 ||
-        length(v) == 0L) {
-      return(NULL)
-    }
-    if (as.integer(v[1]) >= 0x80L) return(NULL)                 # negative
-    if (length(v) > 1L && v[1] == as.raw(0) && as.integer(v[2]) < 0x80L) {
-      return(NULL)                                               # padded
-    }
-    if (length(v) > 1L && v[1] == as.raw(0)) v <- v[-1]
-    v
+  r <- .rmbl_der_uint(d$children[[1]])
+  s <- .rmbl_der_uint(d$children[[2]])
+  if (is.null(r) || is.null(s)) {
+    return(NULL)
   }
-  r <- int_value(d$children[[1]])
-  s <- int_value(d$children[[2]])
-  if (is.null(r) || is.null(s)) return(NULL)
   list(r = r, s = s)
+}
+
+#' A canonical non-negative DER INTEGER's magnitude bytes.
+#' @param nd The parsed node.
+#' @return The bytes without the sign byte, or NULL when it is not a canonical
+#'   non-negative INTEGER.
+#' @noRd
+.rmbl_der_uint <- function(nd) {
+  v <- nd$value
+  if (
+    nd$class != 0L || isTRUE(nd$constructed) || nd$tag != 2 || length(v) == 0L
+  ) {
+    return(NULL)
+  }
+  if (as.integer(v[1]) >= 0x80L) {
+    return(NULL)
+  } # negative
+  if (length(v) > 1L && v[1] == as.raw(0) && as.integer(v[2]) < 0x80L) {
+    return(NULL) # padded
+  }
+  if (length(v) > 1L && v[1] == as.raw(0)) {
+    v <- v[-1]
+  }
+  v
 }
 
 #' Revocation, against a CRL that was handed in. Nothing is fetched.
 #' @param path The parsed certificates of the path.
 #' @param crls The CRLs, as DER bytes or PEM text.
 #' @param at_time The time of the check.
-#' @return A data frame with `check`, `ok` and `detail`, one row per certificate.
+#' @return A data frame with `check`, `ok` and `detail`, one row per
+#'   certificate.
 #' @noRd
 .rmbl_crl_check <- function(path, crls, at_time) {
   acc <- new.env(parent = emptyenv())
   acc$rows <- list()
   add <- function(check, ok, detail) {
     acc$rows[[length(acc$rows) + 1L]] <- data.frame(
-      check = check, ok = ok, detail = detail, stringsAsFactors = FALSE
+      check = check,
+      ok = ok,
+      detail = detail,
+      stringsAsFactors = FALSE
     )
   }
-  revoked <- character(0)
-  for (cr in crls) {
-    der <- tryCatch(.rmbl_as_bytes(cr, "crl"), error = function(e) NULL)
-    if (is.null(der)) next
-    d <- tryCatch(.Call(C_rmbl_der_parse, der), error = function(e) NULL)
-    if (is.null(d) || !length(d$children)) next
-    tbs <- d$children[[1]]$children
-    # TBSCertList: version?, signature, issuer, thisUpdate, nextUpdate?,
-    # revokedCertificates?  The revoked list is the first SEQUENCE OF
-    # whose members open with an INTEGER serial and a time.
-    for (nd in tbs) {
-      if (!isTRUE(nd$constructed) || !identical(nd$tag, 16)) next
-      kids <- nd$children
-      looks <- length(kids) > 0L && isTRUE(kids[[1]]$constructed) &&
-        length(kids[[1]]$children) >= 2L &&
-        identical(kids[[1]]$children[[1]]$tag, 2)
-      if (!looks) next
-      for (entry in kids) {
-        revoked <- c(
-          revoked,
-          .rmbl_hexlify(entry$children[[1]]$value)
-        )
-      }
-    }
-  }
-  if (!length(revoked)) {
+  # A CRL counts only when a CA in the path signed it and it is current at
+  # the time checked. Unsigned, unreadable or stale ones were skipped and
+  # the rest pooled, so an empty CRL served over plain http passed every
+  # certificate.
+  cv <- .rmbl_crl_cover(path, crls, at_time, add)
+  covered <- cv$covered
+  if (!length(crls) || (!length(acc$rows) && !cv$listed)) {
     add("revocation", TRUE, "the CRLs supplied list nothing revoked")
     return(do.call(rbind, acc$rows))
   }
   for (i in seq_along(path)) {
+    if (is.null(covered[[i]])) {
+      next
+    }
     cert <- path[[i]]
-    hit <- tolower(cert$serial) %in% tolower(revoked)
+    hit <- tolower(cert$serial) %in% tolower(covered[[i]])
     add(
-      sprintf("revocation [%d]", i), !hit,
+      sprintf("revocation [%d]", i),
+      !hit,
       if (hit) {
         sprintf("serial %s is on a CRL", cert$serial)
       } else {
@@ -1041,5 +1584,122 @@ print.bricklayer_certpath_check <- .rmbl_print_via_format
       }
     )
   }
+  if (!length(acc$rows)) {
+    add("revocation", FALSE, "no CRL supplied covers a certificate in the path")
+  }
   do.call(rbind, acc$rows)
+}
+
+#' The serials each certificate's CRLs list, from the CRLs that count.
+#' @param path The parsed certificates of the path.
+#' @param crls The CRLs.
+#' @param at_time The time of the check.
+#' @param add The function that records a refused CRL's row.
+#' @return A list: `covered` (per certificate, NULL when no CRL covers it)
+#'   and `listed` (how many serials the counted CRLs list).
+#' @noRd
+.rmbl_crl_cover <- function(path, crls, at_time, add) {
+  covered <- vector("list", length(path))
+  listed <- 0L
+  for (j in seq_along(crls)) {
+    cr <- .rmbl_crl_read(crls[[j]])
+    why <- .rmbl_crl_trusted(cr, path, at_time)
+    if (!is.null(why)) {
+      add(sprintf("crl [%d]", j), FALSE, why)
+      next
+    }
+    listed <- listed + length(cr$serials)
+    for (i in seq_along(path)) {
+      if (identical(path[[i]]$issuer, cr$issuer)) {
+        covered[[i]] <- c(covered[[i]], "", cr$serials)
+      }
+    }
+  }
+  list(covered = covered, listed = listed)
+}
+
+#' Why a CRL cannot be used for a path at a time, or NULL when it can.
+#' @param cr The CRL read by .rmbl_crl_read(), or NULL.
+#' @param path The parsed certificates of the path.
+#' @param at_time The time of the check.
+#' @return A sentence, or NULL.
+#' @noRd
+.rmbl_crl_trusted <- function(cr, path, at_time) {
+  if (is.null(cr)) {
+    return("not a CRL that can be read")
+  }
+  signers <- Filter(function(p) {
+    identical(p$subject, cr$issuer) && isTRUE(p$is_ca)
+  }, path)
+  if (!length(signers)) {
+    return(sprintf("no CA in the path issued this CRL (%s)", cr$issuer))
+  }
+  ok <- vapply(signers, function(s) {
+    isTRUE(tryCatch(.rmbl_cert_verify_sig(cr, s)$ok, error = function(e) {
+      FALSE
+    }))
+  }, logical(1))
+  if (!any(ok)) {
+    return("its signature does not verify under the CA that issued it")
+  }
+  if (!is.null(cr$nxt) && (is.na(cr$nxt) || cr$nxt < at_time - 300)) {
+    return(sprintf(
+      "it is stale: it held until %s",
+      format(cr$nxt, "%Y-%m-%d %H:%M UTC", tz = "UTC")
+    ))
+  }
+  NULL
+}
+
+#' One CRL, read by position.
+#'
+#' CertificateList: tbsCertList, signatureAlgorithm, signatureValue.
+#' TBSCertList: version?, signature, issuer, thisUpdate, nextUpdate?,
+#' revokedCertificates?, \[0\] crlExtensions?.
+#' @param cr The CRL (bytes, PEM text or a path).
+#' @return A list: issuer, this, nxt (NULL when absent), serials (hex),
+#'   and tbs, signature_algorithm and signature for
+#'   .rmbl_cert_verify_sig(); NULL when it is not a CRL.
+#' @noRd
+.rmbl_crl_read <- function(cr) {
+  der <- tryCatch(.rmbl_as_bytes(cr, "crl"), error = function(e) NULL)
+  d <- if (!is.null(der)) {
+    tryCatch(.Call(C_rmbl_der_parse, der), error = function(e) NULL)
+  }
+  if (is.null(d) || length(d$children) != 3L ||
+        !identical(d$children[[3L]]$tag, 3) ||
+        !length(d$children[[2L]]$children)) {
+    return(NULL)
+  }
+  tbs <- d$children[[1L]]
+  k <- tbs$children
+  off <- if (length(k) && identical(k[[1L]]$class, 0L) &&
+               identical(k[[1L]]$tag, 2)) 1L else 0L
+  is_time <- function(nd) {
+    identical(nd$class, 0L) && isTRUE(nd$tag %in% c(23, 24))
+  }
+  if (length(k) < off + 3L || !is_time(k[[off + 3L]])) {
+    return(NULL)
+  }
+  nxt <- if (length(k) >= off + 4L && is_time(k[[off + 4L]])) k[[off + 4L]]
+  rest <- k[-seq_len(off + 3L + !is.null(nxt))]
+  rl <- Filter(function(nd) {
+    identical(nd$class, 0L) && identical(nd$tag, 16)
+  }, rest)
+  entries <- if (length(rl)) rl[[1L]]$children else list()
+  serials <- vapply(entries, function(e) {
+    if (length(e$children)) .rmbl_hexlify(e$children[[1L]]$value) else ""
+  }, character(1))
+  sig <- d$children[[3L]]$value
+  list(
+    issuer = .rmbl_x509_name(k[[off + 2L]]),
+    this = .rmbl_x509_time(k[[off + 3L]]),
+    nxt = if (!is.null(nxt)) .rmbl_x509_time(nxt),
+    serials = serials,
+    tbs = der[(tbs$start + 1L):(tbs$offset + tbs$length)],
+    signature_algorithm = .rmbl_x509_sigalg_name(
+      .rmbl_oid_string(d$children[[2L]]$children[[1L]]$value)
+    ),
+    signature = if (length(sig) > 1L) sig[-1L] else raw(0)
+  )
 }

@@ -1,4 +1,5 @@
-testthat::skip_on_cran()  # battery: runs in CI and locally; CRAN runs the correctness core
+# battery: runs in CI and locally; CRAN runs the correctness core
+testthat::skip_on_cran()
 old_sen_ci <- function(x, y, var_s, conflvl) {
   n <- length(y)
   slopes <- numeric(0)
@@ -9,7 +10,9 @@ old_sen_ci <- function(x, y, var_s, conflvl) {
     }
   }
   m <- length(slopes)
-  if (m < 2L || is.na(var_s) || var_s <= 0) return(c(NA_real_, NA_real_))
+  if (m < 2L || is.na(var_s) || var_s <= 0) {
+    return(c(NA_real_, NA_real_))
+  }
   slopes <- sort(slopes)
   z <- stats::qnorm(1 - (1 - conflvl) / 2)
   c_alpha <- z * sqrt(var_s)
@@ -22,10 +25,10 @@ old_sen_ci <- function(x, y, var_s, conflvl) {
 
 test_that("the Sen interval in C matches the former R loop exactly", {
   set.seed(8)
-  x <- c(1:25, 25, 26:40)   # one repeated x: that pair contributes no slope
+  x <- c(1:25, 25, 26:40) # one repeated x: that pair contributes no slope
   y <- 0.3 * x + rnorm(length(x))
-  mk <- .Call(rmoriebricklayer:::C_rmbl_mann_kendall, y[order(x)])
-  new <- rmoriebricklayer:::.rmbl_sen_ci(sort(x), y[order(x)], mk$var, 0.95)
+  mk <- .Call(C_rmbl_mann_kendall, y[order(x)])
+  new <- .rmbl_sen_ci(sort(x), y[order(x)], mk$var, 0.95)
   old <- old_sen_ci(sort(x), y[order(x)], mk$var, 0.95)
   # the C version also says whether a rank was clamped; the values match
   expect_identical(as.numeric(new), old)
@@ -38,18 +41,25 @@ test_that("trndtst scales to thousands of periods, refuses absurd sizes", {
   t0 <- proc.time()[["elapsed"]]
   r <- trndtst(y)
   expect_lt(proc.time()[["elapsed"]] - t0, wall_limit(30))
-  expect_true(is.finite(r$slopelo) && is.finite(r$slopeup))
+  expect_true(is.finite(r$slopelo))
+  expect_true(is.finite(r$slopeup))
   expect_error(trndtst(seq_len(20001)), "20001")
 })
 
-test_that("stepchg leaves the session's random state as it found it, present or not", {
-  y <- c(1, 1.2, 0.9, 1.1, 1, 0.8, 5, 5.1, 4.9, 5.2, 5, 4.8)
-  suppressWarnings(rm(".Random.seed", envir = globalenv()))
-  r <- stepchg(y, nperm = 50L, seed = 3L)
-  expect_identical(r$index, 6L)
-  expect_false(exists(".Random.seed", envir = globalenv()))
-  set.seed(11)
-  before <- get(".Random.seed", envir = globalenv())
-  stepchg(y, nperm = 50L, seed = 3L)
-  expect_identical(get(".Random.seed", envir = globalenv()), before)
-})
+test_that(
+  paste0(
+    "stepchg leaves the session's random ",
+    "state as it found it, present or not"
+  ),
+  {
+    y <- c(1, 1.2, 0.9, 1.1, 1, 0.8, 5, 5.1, 4.9, 5.2, 5, 4.8)
+    suppressWarnings(rm(".Random.seed", envir = globalenv()))
+    r <- stepchg(y, nperm = 50L, seed = 3L)
+    expect_identical(r$index, 6L)
+    expect_false(exists(".Random.seed", envir = globalenv()))
+    set.seed(11)
+    before <- get(".Random.seed", envir = globalenv())
+    stepchg(y, nperm = 50L, seed = 3L)
+    expect_identical(get(".Random.seed", envir = globalenv()), before)
+  }
+)

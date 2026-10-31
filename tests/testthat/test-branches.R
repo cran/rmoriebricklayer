@@ -13,57 +13,74 @@ test_that("an aggregation restores each key column's own type", {
   mk <- function(period, by = NULL) {
     d <- data.frame(n = c(1, 2, 3, 4, 5, 6))
     d$p <- period
-    if (!is.null(by)) d$g <- by
+    if (!is.null(by)) {
+      d$g <- by
+    }
     d
   }
   # two rows per period, so the aggregation path is taken
-  int <- yoy(mk(rep(c(2019L, 2020L, 2021L), each = 2L)),
-    value = "n", prd = "p", minbase = 0
+  int <- yoy(
+    mk(rep(c(2019L, 2020L, 2021L), each = 2L)),
+    value = "n",
+    prd = "p",
+    minbase = 0
   )
   expect_type(as.data.frame(int)$p, "integer")
-  expect_equal(as.data.frame(int)$value, c(3, 7, 11))
+  expect_identical(as.data.frame(int)$value, c(3, 7, 11))
 
-  dbl <- yoy(mk(rep(c(1.5, 2.5, 3.5), each = 2L)),
+  dbl <- yoy(
+    mk(rep(c(1.5, 2.5, 3.5), each = 2L)),
     value = "n",
-    prd = "p", minbase = 0
+    prd = "p",
+    minbase = 0
   )
   expect_type(as.data.frame(dbl)$p, "double")
 
-  dte <- yoy(mk(rep(as.Date(c("2019-01-01", "2020-01-01", "2021-01-01")),
-    each = 2L
-  )), value = "n", prd = "p", minbase = 0)
+  dte <- yoy(
+    mk(rep(as.Date(c("2019-01-01", "2020-01-01", "2021-01-01")), each = 2L)),
+    value = "n",
+    prd = "p",
+    minbase = 0
+  )
   expect_s3_class(as.data.frame(dte)$p, "Date")
 
   # a POSIXct period keeps its class and its time zone
-  tm <- rep(as.POSIXct(c("2019-01-01", "2020-01-01", "2021-01-01"),
-    tz = "UTC"
-  ), each = 2L)
+  tm <- rep(
+    as.POSIXct(c("2019-01-01", "2020-01-01", "2021-01-01"), tz = "UTC"),
+    each = 2L
+  )
   pos <- yoy(mk(tm), value = "n", prd = "p", minbase = 0)
   expect_s3_class(as.data.frame(pos)$p, "POSIXct")
 
   # a FACTOR grouping column, which is what read.csv used to give and
   # what a factor-coded region still is
   fac <- yoy(
-    mk(rep(2019:2021, each = 2L),
-      by = factor(rep(c("a", "b"), 3L))
-    ),
-    value = "n", prd = "p", by = "g", minbase = 0
+    mk(rep(2019:2021, each = 2L), by = factor(rep(c("a", "b"), 3L))),
+    value = "n",
+    prd = "p",
+    by = "g",
+    minbase = 0
   )
   expect_s3_class(as.data.frame(fac)$g, "factor")
-  expect_equal(levels(as.data.frame(fac)$g), c("a", "b"))
+  expect_identical(levels(as.data.frame(fac)$g), c("a", "b"))
 
   # a logical grouping column
   lg <- yoy(
-    mk(rep(2019:2021, each = 2L),
-      by = rep(c(TRUE, FALSE), 3L)
-    ),
-    value = "n", prd = "p", by = "g", minbase = 0
+    mk(rep(2019:2021, each = 2L), by = rep(c(TRUE, FALSE), 3L)),
+    value = "n",
+    prd = "p",
+    by = "g",
+    minbase = 0
   )
   expect_type(as.data.frame(lg)$g, "logical")
 
   # and a character one, which needs no restoring but must survive
-  ch <- yoy(mk(rep(2019:2021, each = 2L), by = rep(c("x", "y"), 3L)),
-    value = "n", prd = "p", by = "g", minbase = 0
+  ch <- yoy(
+    mk(rep(2019:2021, each = 2L), by = rep(c("x", "y"), 3L)),
+    value = "n",
+    prd = "p",
+    by = "g",
+    minbase = 0
   )
   expect_type(as.data.frame(ch)$g, "character")
 })
@@ -73,19 +90,23 @@ test_that("a gap inside groups is completed within each group", {
   d <- data.frame(
     year = rep(c(2019, 2020, 2022), each = 2L),
     region = rep(c("N", "S"), 3L),
-    n = c(100, 200, 110, 210, 130, 230)
+    n = c(100, 200, 110, 210, 130, 230),
+    stringsAsFactors = FALSE
   )
-  got <- as.data.frame(yoy(d,
-    value = "n", prd = "year",
-    by = "region", minbase = 0
+  got <- as.data.frame(yoy(
+    d,
+    value = "n",
+    prd = "year",
+    by = "region",
+    minbase = 0
   ))
   # both regions gain a 2021 row with no value
-  expect_equal(nrow(got), 8L)
-  expect_equal(sum(got$year == 2021), 2L)
+  expect_identical(nrow(got), 8L)
+  expect_identical(sum(got$year == 2021), 2L)
   expect_true(all(is.na(got$value[got$year == 2021])))
   # and 2022 has no comparison period in either region
   expect_true(all(is.na(got$previous[got$year == 2022])))
-  expect_equal(sort(unique(got$region)), c("N", "S"))
+  expect_identical(sort(unique(got$region)), c("N", "S"))
 })
 
 test_that("a period column that is not a grid is left alone", {
@@ -98,19 +119,21 @@ test_that("a period column that is not a grid is left alone", {
       p = c(1, 2, 5, 11),
       n = c(10, 20, 30, 40)
     ),
-    value = "n", prd = "p", minbase = 0
+    value = "n",
+    prd = "p",
+    minbase = 0
   ))
-  expect_equal(nrow(irr), 11L)
-  expect_equal(irr$p, 1:11)
-  expect_equal(sum(!is.na(irr$value)), 4L)
+  expect_identical(nrow(irr), 11L)
+  expect_identical(irr$p, as.double(1:11))
+  expect_identical(sum(!is.na(irr$value)), 4L)
   # A predecessor is found wherever the period one step back carries a
   # value: period 2 follows 1, and periods 3 and 6 follow the observed
   # 2 and 5 -- so an empty period does not hide the year before it, it
   # only stops the year AFTER it from reaching across.
-  expect_equal(irr$previous[irr$p == 2], 10)
-  expect_equal(irr$previous[irr$p == 3], 20)
-  expect_equal(irr$previous[irr$p == 6], 30)
-  expect_equal(sum(!is.na(irr$previous)), 3L)
+  expect_identical(irr$previous[irr$p == 2], 10)
+  expect_identical(irr$previous[irr$p == 3], 20)
+  expect_identical(irr$previous[irr$p == 6], 30)
+  expect_identical(sum(!is.na(irr$previous)), 3L)
   # and the periods following a gap have none
   expect_true(is.na(irr$previous[irr$p == 5]))
   expect_true(is.na(irr$previous[irr$p == 11]))
@@ -124,44 +147,53 @@ test_that("a period column that is not a grid is left alone", {
       p = c(1, 1.5, 4.2),
       n = c(10, 20, 30)
     ),
-    value = "n", prd = "p", minbase = 0
+    value = "n",
+    prd = "p",
+    minbase = 0
   ))
   expect_true(4.2 %in% odd$p)
-  expect_equal(odd$value[odd$p == 4.2], 30)
-  expect_equal(sum(!is.na(odd$value)), 3L)
+  expect_identical(odd$value[odd$p == 4.2], 30)
+  expect_identical(sum(!is.na(odd$value)), 3L)
 
   # a single period has no step either
-  one <- as.data.frame(yoy(data.frame(p = 2019, n = 5),
-    value = "n",
-    prd = "p"
-  ))
-  expect_equal(nrow(one), 1L)
+  one <- as.data.frame(yoy(data.frame(p = 2019, n = 5), value = "n", prd = "p"))
+  expect_identical(nrow(one), 1L)
   expect_true(is.na(one$previous))
 
   # A character period has no arithmetic, so "one period earlier" means
   # nothing. It must report that rather than raising: taking diff() of
   # it failed with "non-numeric argument to binary operator" and killed
   # the whole call.
-  chr <- as.data.frame(yoy(
-    data.frame(
-      p = c("Q1", "Q2", "Q3"),
-      n = c(10, 20, 30)
-    ),
-    value = "n", prd = "p", minbase = 0
-  ))
-  expect_equal(nrow(chr), 3L)
-  expect_equal(chr$value, c(10, 20, 30))
+  expect_warning(
+    {
+      chr <- as.data.frame(yoy(
+        data.frame(
+          p = c("Q1", "Q2", "Q3"),
+          n = c(10, 20, 30),
+          stringsAsFactors = FALSE
+        ),
+        value = "n",
+        prd = "p",
+        minbase = 0
+      ))
+    },
+    "prdord"
+  )
+  expect_identical(nrow(chr), 3L)
+  expect_identical(chr$value, c(10, 20, 30))
   expect_true(all(is.na(chr$previous)))
   expect_true(all(chr$flag == "no comparison period"))
   # a factor period is the same case
-  fct <- as.data.frame(yoy(
+  expect_warning(fct <- as.data.frame(yoy(
     data.frame(
       p = factor(c("Q1", "Q2")),
       n = c(10, 20)
     ),
-    value = "n", prd = "p", minbase = 0
-  ))
-  expect_equal(nrow(fct), 2L)
+    value = "n",
+    prd = "p",
+    minbase = 0
+  )), "of no form yoy\\(\\) reads")
+  expect_identical(nrow(fct), 2L)
   expect_true(all(is.na(fct$previous)))
 
   # a period range so wide that completing it would fabricate a vast
@@ -171,21 +203,26 @@ test_that("a period column that is not a grid is left alone", {
       p = c(1, 2, 1e9),
       n = c(10, 20, 30)
     ),
-    value = "n", prd = "p", minbase = 0
+    value = "n",
+    prd = "p",
+    minbase = 0
   ))
-  expect_equal(nrow(huge), 3L)
+  expect_identical(nrow(huge), 3L)
 
   # a column name must be a name or a string, not an expression
-  expect_error(yoy(data.frame(a = 1:3, b = 1:3),
-    value = 1 + 1,
-    prd = "a"
-  ), "must be a column name")
+  expect_error(
+    yoy(data.frame(a = 1:3, b = 1:3), value = 1 + 1, prd = "a"),
+    "must be a column name"
+  )
 })
 
 test_that("the value-digit count handles both extremes", {
   # no finite values to inspect
-  na <- yoy(data.frame(p = 2019:2021, n = rep(NA_real_, 3L)),
-    value = "n", prd = "p", units = "continuous"
+  na <- yoy(
+    data.frame(p = 2019:2021, n = rep(NA_real_, 3L)),
+    value = "n",
+    prd = "p",
+    units = "continuous"
   )
   expect_output(print(na, color = FALSE), "2019")
 
@@ -195,20 +232,25 @@ test_that("the value-digit count handles both extremes", {
       p = 2019:2021,
       n = c(1.1234567891, 2.2, 3.3)
     ),
-    value = "n", prd = "p", units = "continuous"
+    value = "n",
+    prd = "p",
+    units = "continuous"
   )
-  out <- paste(utils::capture.output(print(fine, color = FALSE)),
-    collapse = ""
-  )
+  out <- paste(utils::capture.output(print(fine, color = FALSE)), collapse = "")
   expect_match(out, "1.123457", fixed = TRUE)
 
   # an integer-valued continuous measure prints without decimals
-  whole <- yoy(data.frame(p = 2019:2021, n = c(1, 2, 3)),
-    value = "n", prd = "p", units = "continuous"
+  whole <- yoy(
+    data.frame(p = 2019:2021, n = c(1, 2, 3)),
+    value = "n",
+    prd = "p",
+    units = "continuous"
   )
-  expect_match(paste(utils::capture.output(print(whole, color = FALSE)),
-    collapse = ""
-  ), " 1 ", fixed = TRUE)
+  expect_match(
+    paste(utils::capture.output(print(whole, color = FALSE)), collapse = ""),
+    " 1 ",
+    fixed = TRUE
+  )
 })
 
 test_that("the writers refuse anything that is not a change table", {
@@ -221,8 +263,11 @@ test_that("the writers refuse anything that is not a change table", {
 test_that("the settings line reports the units and the direction", {
   # a percentage-units table says so, and names no interval it does not
   # have
-  pct <- yoy(data.frame(p = 2019:2021, s = c(4.1, 4.6, 5.2)),
-    value = "s", prd = "p", units = "percent",
+  pct <- yoy(
+    data.frame(p = 2019:2021, s = c(4.1, 4.6, 5.2)),
+    value = "s",
+    prd = "p",
+    units = "percent",
     dir = "lower"
   )
   line <- yoycsv(pct, NULL)
@@ -230,13 +275,20 @@ test_that("the settings line reports the units and the direction", {
   expect_match(line, "direction: lower is better")
   expect_false(grepl("exact rate ratio", line, fixed = TRUE))
   # and a count table names the interval and the base gate instead
-  cnt <- yoy(data.frame(p = 2019:2021, n = c(100, 120, 140)),
-    value = "n", prd = "p"
+  cnt <- yoy(
+    data.frame(p = 2019:2021, n = c(100, 120, 140)),
+    value = "n",
+    prd = "p"
   )
   cl <- yoycsv(cnt, NULL)
   expect_match(cl, "exact rate ratio")
   expect_false(grepl("bases below", cl, fixed = TRUE))
-  noted <- yoy(data.frame(p = 2019:2021, n = c(100, 120, 140)), value = "n", prd = "p", minbase = 20)
+  noted <- yoy(
+    data.frame(p = 2019:2021, n = c(100, 120, 140)),
+    value = "n",
+    prd = "p",
+    minbase = 20
+  )
   expect_match(yoycsv(noted, NULL), "bases below 20 noted")
   expect_false(grepl("direction:", cl, fixed = TRUE))
   # the Markdown footer carries the same line, so the caveat cannot
@@ -246,9 +298,14 @@ test_that("the settings line reports the units and the direction", {
   g <- yoy(
     data.frame(
       p = rep(2019:2020, each = 2L),
-      k = rep(c("a", "b"), 2L), n = c(1, 2, 3, 4)
+      k = rep(c("a", "b"), 2L),
+      n = c(1, 2, 3, 4),
+      stringsAsFactors = FALSE
     ),
-    value = "n", prd = "p", by = "k", minbase = 0
+    value = "n",
+    prd = "p",
+    by = "k",
+    minbase = 0
   )
   expect_match(yoycsv(g, NULL), "by: k")
 })
@@ -274,11 +331,9 @@ test_that("the tail index reports when there is nothing to estimate", {
   expect_true(is.na(fb$alpha))
   expect_match(fb$method, "not estimable")
   # a value of zero cannot be logged, so it is not in the tail at all
-  expect_equal(hilltlidx(c(0, 0, 3, 4, 5, 9),
-    xmin = 3
-  )$ntl, 4L)
+  expect_identical(hilltlidx(c(0, 0, 3, 4, 5, 9), xmin = 3)$ntl, 4L)
   # an infinite value is not data
-  expect_equal(hilltlidx(c(Inf, 3, 4, 5, 9), xmin = 3)$ntl, 4L)
+  expect_identical(hilltlidx(c(Inf, 3, 4, 5, 9), xmin = 3)$ntl, 4L)
 })
 
 test_that("the discrete distance degrades on degenerate input", {
@@ -299,7 +354,8 @@ test_that("the discrete distance degrades on degenerate input", {
     c(1, 1, 2, 3),
     function(q) stats::pbinom(q, 3, 0.4)
   )
-  expect_true(d >= 0 && d <= 1)
+  expect_gte(d, 0)
+  expect_lte(d, 1)
 })
 
 test_that("the zeta likelihood refuses an exponent it cannot normalise", {

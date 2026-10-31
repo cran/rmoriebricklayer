@@ -18,7 +18,9 @@ x509_branch_fx <- function(file) {
   )
 }
 
-der_tlv <- function(tag, body) c(as.raw(tag), .rmbl_der_length(length(body)), body)
+der_tlv <- function(tag, body) {
+  c(as.raw(tag), .rmbl_der_length(length(body)), body)
+}
 der_oid <- function(hex) der_tlv(0x06, .rmbl_hex_to_raw(hex))
 der_seq <- function(...) der_tlv(0x30, c(...))
 der_ctx0 <- function(...) der_tlv(0xa0, c(...))
@@ -42,72 +44,123 @@ test_that("a three-link chain honours pathLenConstraint and names its anchor", {
   expect_match(pl$detail, "permits 0 intermediate")
 
   # the leaf is asked for a purpose it never states
-  p <- certchnvrf(leaf, trust = root, inter = inter, attm = at, purp = "timeStamping")
+  p <- certchnvrf(
+    leaf,
+    trust = root,
+    inter = inter,
+    attm = at,
+    purp = "timeStamping"
+  )
   expect_false(p$ok)
-  expect_match(p$checks$detail[p$checks$check == "purpose"], "no extended key usage")
+  expect_match(
+    p$checks$detail[p$checks$check == "purpose"],
+    "no extended key usage"
+  )
 
   # anchoring at the intermediate: trusted because it was supplied
   mid <- certchnvrf(leaf, trust = inter, attm = at)
   expect_true(mid$ok)
-  expect_match(mid$checks$detail[mid$checks$check == "anchor_self_signed"], "supplied as trusted")
+  expect_match(
+    mid$checks$detail[mid$checks$check == "anchor_self_signed"],
+    "supplied as trusted"
+  )
 
-  # a certificate issued by a non-CA leaf: the signature is sound, the issuer may not issue
+  # a certificate issued by a non-CA leaf: the signature is sound, the issuer
+  # may not issue
   leaf2 <- certprs(f$chain_leaf2)
   bad <- certchnvrf(leaf2, trust = leaf, attm = leaf2$not_before + 86400)
   expect_false(bad$ok)
-  expect_match(bad$checks$detail[startsWith(bad$checks$check, "is a CA")], "does not permit issuing")
+  expect_match(
+    bad$checks$detail[startsWith(bad$checks$check, "is a CA")],
+    "does not permit issuing"
+  )
   expect_true(bad$checks$ok[startsWith(bad$checks$check, "signature [1]")])
 
   # revocation = "fetch" consults the fetcher and folds its notes in
   testthat::local_mocked_bindings(.rmbl_revocation_fetch = function(path, ...) {
-    list(crls = list(), notes = list(ocsp = "the responder said good"), ok = TRUE)
+    list(
+      crls = list(),
+      notes = list(ocsp = "the responder said good"),
+      ok = TRUE
+    )
   })
   fe <- certchnvrf(leaf, trust = root, inter = inter, attm = at, rvk = "fetch")
   expect_true(fe$checks$ok[fe$checks$check == "ocsp"])
   expect_match(fe$checks$detail[fe$checks$check == "ocsp"], "responder")
 
-  # CRLs that are not files, not DER, or empty are skipped, and nothing is revoked
-  rv <- .rmbl_crl_check(list(leaf), list("no-such-file.crl", as.raw(c(0x30, 0x00)), as.raw(c(0x30, 0x05))), at)
-  expect_identical(rv$check, "revocation")
-  expect_true(rv$ok)
-  expect_match(rv$detail, "nothing revoked")
+  # CRLs that are not files, not DER, or empty are refused, one row each:
+  # skipping them passed the path as if a CRL had been checked
+  rv <- .rmbl_crl_check(
+    list(leaf),
+    list("no-such-file.crl", as.raw(c(0x30, 0x00)), as.raw(c(0x30, 0x05))),
+    at
+  )
+  expect_identical(rv$check, c("crl [1]", "crl [2]", "crl [3]"))
+  expect_false(any(rv$ok))
+  expect_identical(unique(rv$detail), "not a CRL that can be read")
 })
 
-test_that("ECDSA-signed certificates verify on P-256 and P-384, and SHA-512 RSA too", {
-  f <- x509_branch_fx("x509-fixtures.txt")
-  for (nm in c("256", "384")) {
-    root <- certprs(f[[paste0("chain_ec", nm)]])
-    leaf <- certprs(f[[paste0("chain_ecleaf", nm)]])
-    expect_identical(leaf$signature_algorithm, paste0("ECDSA-SHA", nm), info = nm)
-    ch <- certchnvrf(leaf, trust = root, attm = leaf$not_before + 86400)
-    expect_true(ch$ok, info = nm)
-    expect_match(ch$checks$detail[startsWith(ch$checks$check, "signature [1]")], "ECDSA.*on P-", info = nm)
-    # the wrong key family, a signature that is not a DER pair, and other bytes
-    v <- .rmbl_cert_verify_sig(leaf, certprs(f$chain_root))
-    expect_false(v$ok)
-    expect_match(v$detail, "not a usable EC key")
-    broken <- leaf
-    broken$signature <- as.raw(c(0x30, 0x00))
-    expect_match(.rmbl_cert_verify_sig(broken, root)$detail, "malformed")
-    tampered <- leaf
-    tampered$tbs[10] <- xor(tampered$tbs[10], as.raw(1))
-    expect_false(.rmbl_cert_verify_sig(tampered, root)$ok, info = nm)
+test_that(
+  paste0(
+    "ECDSA-signed certificates verify on ",
+    "P-256 and P-384, and SHA-512 RSA too"
+  ),
+  {
+    f <- x509_branch_fx("x509-fixtures.txt")
+    for (nm in c("256", "384")) {
+      root <- certprs(f[[paste0("chain_ec", nm)]])
+      leaf <- certprs(f[[paste0("chain_ecleaf", nm)]])
+      expect_identical(
+        leaf$signature_algorithm,
+        paste0("ECDSA-SHA", nm),
+        info = nm
+      )
+      ch <- certchnvrf(leaf, trust = root, attm = leaf$not_before + 86400)
+      expect_true(ch$ok, info = nm)
+      expect_match(
+        ch$checks$detail[startsWith(ch$checks$check, "signature [1]")],
+        "ECDSA.*on P-",
+        info = nm
+      )
+      # the wrong key family, a signature that is not a DER pair, and other
+      # bytes
+      v <- .rmbl_cert_verify_sig(leaf, certprs(f$chain_root))
+      expect_false(v$ok)
+      expect_match(v$detail, "not a usable EC key")
+      broken <- leaf
+      broken$signature <- as.raw(c(0x30, 0x00))
+      expect_match(.rmbl_cert_verify_sig(broken, root)$detail, "malformed")
+      tampered <- leaf
+      tampered$tbs[10] <- xor(tampered$tbs[10], as.raw(1))
+      expect_false(.rmbl_cert_verify_sig(tampered, root)$ok, info = nm)
+    }
+
+    l512 <- certprs(f$chain_leaf512)
+    root <- certprs(f$chain_root)
+    expect_identical(l512$signature_algorithm, "RSA-SHA512")
+    ch <- certchnvrf(l512, trust = root, attm = l512$not_before + 86400)
+    expect_true(ch$ok)
+    expect_match(
+      ch$checks$detail[startsWith(ch$checks$check, "signature [1]")],
+      "RSA over sha512"
+    )
+    expect_match(
+      .rmbl_cert_verify_sig(l512, certprs(f$chain_ec256))$detail,
+      "not an RSA key"
+    )
+    expect_false(
+      .rmbl_cert_verify_sig(
+        l512,
+        list(key = list(type = "RSA", modulus = raw(0), exponent = raw(0)))
+      )$ok
+    )
+    unk <- l512
+    unk$signature_algorithm <- "RSA-SHA1"
+    expect_match(.rmbl_cert_verify_sig(unk, root)$detail, "not verified here")
+    unk$signature_algorithm <- "DSA-SHA256"
+    expect_match(.rmbl_cert_verify_sig(unk, root)$detail, "not verified here")
   }
-
-  l512 <- certprs(f$chain_leaf512)
-  root <- certprs(f$chain_root)
-  expect_identical(l512$signature_algorithm, "RSA-SHA512")
-  ch <- certchnvrf(l512, trust = root, attm = l512$not_before + 86400)
-  expect_true(ch$ok)
-  expect_match(ch$checks$detail[startsWith(ch$checks$check, "signature [1]")], "RSA over sha512")
-  expect_match(.rmbl_cert_verify_sig(l512, certprs(f$chain_ec256))$detail, "not an RSA key")
-  expect_false(.rmbl_cert_verify_sig(l512, list(key = list(type = "RSA", modulus = raw(0), exponent = raw(0))))$ok)
-  unk <- l512
-  unk$signature_algorithm <- "RSA-SHA1"
-  expect_match(.rmbl_cert_verify_sig(unk, root)$detail, "not verified here")
-  unk$signature_algorithm <- "DSA-SHA256"
-  expect_match(.rmbl_cert_verify_sig(unk, root)$detail, "not verified here")
-})
+)
 
 test_that("a version 1 certificate and the policy extensions parse", {
   f <- x509_branch_fx("x509-fixtures.txt")
@@ -119,7 +172,10 @@ test_that("a version 1 certificate and the policy extensions parse", {
 
   pe <- certprs(f$chain_polext)
   expect_identical(pe$policies, "1.2.3.4.100")
-  expect_identical(pe$policy_mappings, list(list(issuer = "1.2.3.4.100", subject = "1.2.3.4.101")))
+  expect_identical(
+    pe$policy_mappings,
+    list(list(issuer = "1.2.3.4.100", subject = "1.2.3.4.101"))
+  )
   expect_identical(pe$require_explicit_policy, 0L)
   expect_identical(pe$inhibit_policy_mapping, 1L)
   expect_identical(pe$inhibit_any_policy, 2L)
@@ -130,52 +186,134 @@ test_that("a version 1 certificate and the policy extensions parse", {
   expect_identical(.rmbl_int_of(as.raw(c(1, 0))), 256L)
 })
 
-test_that("the DER helpers answer malformed input with NA, empty, or an error", {
-  expect_error(certprs(as.raw(c(0x30, 0x03, 0x02, 0x01, 0x05))), "not an X.509")
-  expect_error(certprs(as.raw(c(0x30, 0x08, 0x02, 0x01, 0x05, 0x02, 0x01, 0x05, 0x03, 0x00))), "no signature")
-  expect_true(is.na(.rmbl_oid_string(raw(0))))
-  expect_identical(.rmbl_key_usage_bits(as.raw(0x00)), character(0))
-  expect_identical(.rmbl_x509_sigalg_name("1.2.840.113549.1.1.12"), "RSA-SHA384")
-  expect_identical(.rmbl_x509_sigalg_name("1.2.840.113549.1.1.13"), "RSA-SHA512")
-  expect_identical(.rmbl_x509_sigalg_name("1.2.840.113549.1.1.5"), "RSA-SHA1")
-  expect_identical(.rmbl_x509_sigalg_name("1.2.840.10045.4.3.3"), "ECDSA-SHA384")
-  expect_identical(.rmbl_x509_sigalg_name("1.2.840.10045.4.3.4"), "ECDSA-SHA512")
-  expect_identical(.rmbl_x509_sigalg_name("1.2.3"), "1.2.3")
-  expect_null(.rmbl_ecdsa_rs(as.raw(c(0x30, 0x00))))
+test_that(
+  paste0(
+    "the DER helpers answer malformed ",
+    "input with NA, empty, or an error"
+  ),
+  {
+    expect_error(
+      certprs(as.raw(c(0x30, 0x03, 0x02, 0x01, 0x05))),
+      "not an X.509"
+    )
+    expect_error(
+      certprs(as.raw(c(
+        0x30,
+        0x08,
+        0x02,
+        0x01,
+        0x05,
+        0x02,
+        0x01,
+        0x05,
+        0x03,
+        0x00
+      ))),
+      "not an X.509 certificate: the tbsCertificate is not a SEQUENCE"
+    )
+    expect_error(.rmbl_x509_sig_bits(raw(0)), "no signature")
+    expect_true(is.na(.rmbl_oid_string(raw(0))))
+    expect_identical(.rmbl_key_usage_bits(as.raw(0x00)), character(0))
+    expect_identical(
+      .rmbl_x509_sigalg_name("1.2.840.113549.1.1.12"),
+      "RSA-SHA384"
+    )
+    expect_identical(
+      .rmbl_x509_sigalg_name("1.2.840.113549.1.1.13"),
+      "RSA-SHA512"
+    )
+    expect_identical(.rmbl_x509_sigalg_name("1.2.840.113549.1.1.5"), "RSA-SHA1")
+    expect_identical(
+      .rmbl_x509_sigalg_name("1.2.840.10045.4.3.3"),
+      "ECDSA-SHA384"
+    )
+    expect_identical(
+      .rmbl_x509_sigalg_name("1.2.840.10045.4.3.4"),
+      "ECDSA-SHA512"
+    )
+    expect_identical(.rmbl_x509_sigalg_name("1.2.3"), "1.2.3")
+    expect_null(.rmbl_ecdsa_rs(as.raw(c(0x30, 0x00))))
 
-  # keys: RSA bits that do not parse, a compressed EC point, an unknown algorithm
-  mk <- function(alg, bits) list(children = list(list(children = alg), list(value = bits)))
-  rsa_oid <- .rmbl_hex_to_raw("2a864886f70d010101")
-  ec_oid <- .rmbl_hex_to_raw("2a8648ce3d0201")
-  p256 <- .rmbl_hex_to_raw("2a8648ce3d030107")
-  expect_identical(.rmbl_x509_key(mk(list(list(value = rsa_oid)), as.raw(c(0x00, 0xff))))$type, "unknown")
-  comp <- .rmbl_x509_key(mk(list(list(value = ec_oid), list(value = p256)), as.raw(c(0x00, 0x02, 0x01))))
-  expect_identical(comp$type, "EC")
-  expect_identical(comp$bits, 0L)
-  expect_null(comp$x)
-  other <- .rmbl_x509_key(mk(list(list(value = as.raw(c(0x2a, 0x03)))), as.raw(c(0x00, 0x01))))
-  expect_identical(other$type, "1.2.3")
-  expect_identical(other$bits, 0L)
+    # keys: RSA bits that do not parse, a compressed EC point, an unknown
+    # algorithm
+    mk <- function(alg, bits) {
+      list(children = list(list(children = alg), list(value = bits)))
+    }
+    rsa_oid <- .rmbl_hex_to_raw("2a864886f70d010101")
+    ec_oid <- .rmbl_hex_to_raw("2a8648ce3d0201")
+    p256 <- .rmbl_hex_to_raw("2a8648ce3d030107")
+    expect_identical(
+      .rmbl_x509_key(mk(
+        list(list(value = rsa_oid)),
+        as.raw(c(0x00, 0xff))
+      ))$type,
+      "unknown"
+    )
+    comp <- .rmbl_x509_key(mk(
+      list(list(value = ec_oid), list(value = p256)),
+      as.raw(c(0x00, 0x02, 0x01))
+    ))
+    expect_identical(comp$type, "EC")
+    expect_identical(comp$bits, 0L)
+    expect_null(comp$x)
+    other <- .rmbl_x509_key(mk(
+      list(list(value = as.raw(c(0x2a, 0x03)))),
+      as.raw(c(0x00, 0x01))
+    ))
+    expect_identical(other$type, "1.2.3")
+    expect_identical(other$bits, 0L)
 
-  # a name whose attribute has no value, and extensions that are empty or do not parse
-  expect_identical(.rmbl_x509_name(list(children = list(list(children = list(list(children = list())))))), "")
-  bc <- .rmbl_hex_to_raw("551d13")
-  k <- list(list(class = 2L, tag = 3, children = list(list(children = list(
-    list(children = list()),
-    list(children = list(list(value = bc), list(value = as.raw(c(0x30, 0x05)))))
-  )))))
-  expect_false(.rmbl_x509_extensions(k)$is_ca)
-  expect_identical(.rmbl_x509_extensions(list())$policies, character(0))
-  # a policy mapping that is not a pair, and a policy constraint whose child is untagged
-  ext <- function(oidhex, val) list(children = list(list(value = .rmbl_hex_to_raw(oidhex)), list(value = val)))
-  k2 <- list(list(class = 2L, tag = 3, children = list(list(children = list(
-    ext("551d21", as.raw(c(0x30, 0x02, 0x30, 0x00))),
-    ext("551d24", as.raw(c(0x30, 0x03, 0x02, 0x01, 0x00)))
-  )))))
-  e2 <- .rmbl_x509_extensions(k2)
-  expect_identical(e2$policy_mappings, list())
-  expect_true(is.na(e2$require_explicit_policy))
-})
+    # a name whose attribute has no value, and extensions that are empty or do
+    # not parse
+    expect_identical(
+      .rmbl_x509_name(list(
+        children = list(list(children = list(list(children = list()))))
+      )),
+      ""
+    )
+    bc <- .rmbl_hex_to_raw("551d13")
+    k <- list(list(
+      class = 2L,
+      tag = 3,
+      children = list(list(
+        children = list(
+          list(children = list()),
+          list(
+            children = list(
+              list(value = bc),
+              list(value = as.raw(c(0x30, 0x05)))
+            )
+          )
+        )
+      ))
+    ))
+    expect_false(.rmbl_x509_extensions(k)$is_ca)
+    expect_identical(.rmbl_x509_extensions(list())$policies, character(0))
+    # a policy mapping that is not a pair, and a policy constraint whose child
+    # is untagged
+    ext <- function(oidhex, val) {
+      list(
+        children = list(
+          list(value = .rmbl_hex_to_raw(oidhex)),
+          list(value = val)
+        )
+      )
+    }
+    k2 <- list(list(
+      class = 2L,
+      tag = 3,
+      children = list(list(
+        children = list(
+          ext("551d21", as.raw(c(0x30, 0x02, 0x30, 0x00))),
+          ext("551d24", as.raw(c(0x30, 0x03, 0x02, 0x01, 0x00)))
+        )
+      ))
+    ))
+    e2 <- .rmbl_x509_extensions(k2)
+    expect_identical(e2$policy_mappings, list())
+    expect_true(is.na(e2$require_explicit_policy))
+  }
+)
 
 test_that("a timestamp token with a broken structure is reported, not thrown", {
   f <- x509_branch_fx("timestamp-token.txt")
@@ -185,10 +323,14 @@ test_that("a timestamp token with a broken structure is reported, not thrown", {
   expect_false(nd$checks$ok[nd$checks$check == "token_parses"])
   r <- tsvrf(as.raw(c(0x30, 0x00)), f$payload)
   expect_false(r$ok)
-  expect_match(r$checks$detail[r$checks$check == "token_structure"], "no CMS SignedData")
+  expect_match(
+    r$checks$detail[r$checks$check == "token_structure"],
+    "no CMS SignedData"
+  )
   expect_output(print(r), "<unknown>")
 
-  # with no anchor the printout says so, and an anchor that is not a certificate is reported
+  # with no anchor the printout says so, and an anchor that is not a certificate
+  # is reported
   bare <- tsvrf(tok, f$payload)
   expect_true(any(grepl("no anchor was given", format(bare), fixed = TRUE)))
   # other data than the token names, and a certificate handed in by the caller
@@ -196,16 +338,27 @@ test_that("a timestamp token with a broken structure is reported, not thrown", {
   expect_false(other$checks$ok[other$checks$check == "message_imprint"])
   given <- tsvrf(tok, f$payload, cert = f$rsa_cert, trust = f$ca)
   expect_true(given$ok)
-  expect_match(given$checks$detail[given$checks$check == "certificate_source"], "supplied by the caller")
+  expect_match(
+    given$checks$detail[given$checks$check == "certificate_source"],
+    "supplied by the caller"
+  )
   testthat::with_mocked_bindings(
-    .rmbl_ts_verify_sig = function(info, cert) stop("the verifier gave up", call. = FALSE),
+    .rmbl_ts_verify_sig = function(info, cert) {
+      stop("the verifier gave up", call. = FALSE)
+    },
     {
       thrown <- tsvrf(tok, f$payload)
-      expect_match(thrown$checks$detail[thrown$checks$check == "signature"], "gave up")
+      expect_match(
+        thrown$checks$detail[thrown$checks$check == "signature"],
+        "gave up"
+      )
     }
   )
   r <- tsvrf(tok, f$payload, trust = as.raw(c(0x30, 0x00)))
-  expect_match(r$checks$detail[r$checks$check == "certificate_trust"], "not an X.509")
+  expect_match(
+    r$checks$detail[r$checks$check == "certificate_trust"],
+    "not an X.509"
+  )
 
   real_extract <- .rmbl_ts_extract
   testthat::with_mocked_bindings(
@@ -216,7 +369,10 @@ test_that("a timestamp token with a broken structure is reported, not thrown", {
     },
     {
       r <- tsvrf(tok, f$payload)
-      expect_match(r$checks$detail[r$checks$check == "message_imprint"], "unsupported imprint")
+      expect_match(
+        r$checks$detail[r$checks$check == "message_imprint"],
+        "unsupported imprint"
+      )
     }
   )
   testthat::with_mocked_bindings(
@@ -227,101 +383,287 @@ test_that("a timestamp token with a broken structure is reported, not thrown", {
     },
     {
       r <- tsvrf(tok, f$payload)
-      expect_match(r$checks$detail[r$checks$check == "signature"], "no certificate supplied")
+      expect_match(
+        r$checks$detail[r$checks$check == "signature"],
+        "no certificate supplied"
+      )
     }
   )
 
   # each layer of the CMS structure missing in turn
   sd_oid <- der_oid("2a864886f70d010702")
   tst_oid <- der_oid("2a864886f70d0109100104")
-  expect_error(.rmbl_ts_extract(der_parse(der_seq()), raw(0)), "no CMS SignedData")
-  expect_error(.rmbl_ts_extract(der_parse(der_seq(sd_oid, der_ctx0(der_seq()))), raw(0)), "no TSTInfo")
-  empty <- der_seq(sd_oid, der_ctx0(der_seq(der_seq(tst_oid, der_ctx0()))))
-  expect_error(.rmbl_ts_extract(der_parse(empty), raw(0)), "TSTInfo content is empty")
-  tst <- der_seq(
-    der_tlv(0x02, as.raw(1)), der_oid("2a0304"),
-    der_seq(der_seq(der_oid("2b0e03021a")), der_tlv(0x04, as.raw(0))),
-    der_tlv(0x02, as.raw(7)), der_tlv(0x18, charToRaw("20240101120000Z"))
+  expect_error(
+    .rmbl_ts_extract(der_parse(der_seq()), raw(0)),
+    "no CMS SignedData"
   )
-  no_signer <- der_seq(sd_oid, der_ctx0(der_seq(der_seq(tst_oid, der_ctx0(der_tlv(0x04, tst))))))
-  expect_error(.rmbl_ts_extract(der_parse(no_signer), no_signer), "no SignerInfo")
+  expect_error(
+    .rmbl_ts_extract(der_parse(der_seq(sd_oid, der_ctx0(der_seq()))), raw(0)),
+    "no TSTInfo"
+  )
+  # digestAlgorithms: SHA-256 (an empty SET is refused before the content)
+  sd_head <- c(
+    der_tlv(0x02, as.raw(3)),
+    der_tlv(0x31, der_seq(der_oid("608648016503040201")))
+  )
+  empty <- der_seq(
+    sd_oid, der_ctx0(der_seq(sd_head, der_seq(tst_oid, der_ctx0())))
+  )
+  expect_error(
+    .rmbl_ts_extract(der_parse(empty), raw(0)),
+    "TSTInfo content is empty"
+  )
+  tst <- der_seq(
+    der_tlv(0x02, as.raw(1)),
+    der_oid("2a0304"),
+    der_seq(der_seq(der_oid("2b0e03021a")), der_tlv(0x04, as.raw(0))),
+    der_tlv(0x02, as.raw(7)),
+    der_tlv(0x18, charToRaw("20240101120000Z"))
+  )
+  no_signer <- der_seq(
+    sd_oid,
+    der_ctx0(der_seq(
+      sd_head, der_seq(tst_oid, der_ctx0(der_tlv(0x04, tst)))
+    ))
+  )
+  expect_error(
+    .rmbl_ts_extract(der_parse(no_signer), no_signer),
+    "no SignerInfo"
+  )
 
   # fractional seconds in GeneralizedTime
   g <- .rmbl_ts_gentime("20240101120000Z")
-  expect_equal(as.numeric(.rmbl_ts_gentime("20240101120000.5Z") - g, units = "secs"), 0.5)
+  expect_equal(
+    as.numeric(.rmbl_ts_gentime("20240101120000.5Z") - g, units = "secs"),
+    0.5
+  )
 })
 
-test_that("the signer helpers and the digest helpers cover every algorithm they name", {
-  f <- x509_branch_fx("timestamp-token.txt")
-  empty_signer <- list(children = list())
-  expect_true(is.na(.rmbl_ts_signer_sig_oid(empty_signer)))
-  expect_true(is.na(.rmbl_ts_signer_digest(empty_signer)))
-  expect_error(.rmbl_ts_signature(empty_signer), "no signature")
+test_that(
+  paste0(
+    "the signer helpers and the digest helpers cover every algorithm they ",
+    "name"
+  ),
+  {
+    f <- x509_branch_fx("timestamp-token.txt")
+    empty_signer <- list(children = list())
+    expect_true(is.na(.rmbl_ts_signer_sig_oid(empty_signer)))
+    expect_true(is.na(.rmbl_ts_signer_digest(empty_signer)))
+    expect_error(.rmbl_ts_signature(empty_signer), "no signature")
 
-  info <- .rmbl_ts_extract(der_parse(f$rsa_token), f$rsa_token)
-  bad <- info
-  bad$signer <- empty_signer
-  expect_error(.rmbl_ts_verify_sig(bad, f$rsa_cert), "no signed attributes")
-  testthat::with_mocked_bindings(
-    certprs = function(x) list(key = list(type = "DSA")),
-    expect_error(.rmbl_ts_verify_sig(info, f$rsa_cert), "carries a DSA key")
-  )
-
-  # an ECDSA signature that is not a DER pair
-  ei <- .rmbl_ts_extract(der_parse(f$ecdsa_token), f$ecdsa_token)
-  k <- ei$signer$children
-  idx <- which(vapply(k, function(nd) identical(nd$class, 0L) && identical(nd$tag, 4), logical(1)))
-  k[[max(idx)]]$value <- as.raw(c(0x30, 0x00))
-  ei$signer$children <- k
-  v <- .rmbl_ts_verify_sig(ei, f$ecdsa_cert)
-  expect_false(v$ok)
-  expect_match(v$detail, "malformed")
-  expect_true(v$content_ok)
-
-  expect_identical(.rmbl_ts_digest_name("2.16.840.1.101.3.4.2.2"), "sha384")
-  expect_identical(.rmbl_ts_digest_name("2.16.840.1.101.3.4.2.3"), "sha512")
-  expect_identical(.rmbl_ts_digest_name("1.3.14.3.2.26"), "sha1")
-  expect_true(is.na(.rmbl_ts_digest_name("9.9")))
-  expect_identical(
-    .rmbl_hexlify(.rmbl_ts_digest("sha512", charToRaw("abc"))),
-    paste0(
-      "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a",
-      "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+    info <- .rmbl_ts_extract(der_parse(f$rsa_token), f$rsa_token)
+    bad <- info
+    bad$signer <- empty_signer
+    expect_error(.rmbl_ts_verify_sig(bad, f$rsa_cert), "no signed attributes")
+    testthat::with_mocked_bindings(
+      certprs = function(x) list(key = list(type = "DSA")),
+      expect_error(.rmbl_ts_verify_sig(info, f$rsa_cert), "carries a DSA key")
     )
-  )
-  expect_identical(
-    .rmbl_hexlify(.rmbl_ts_digest("sha384", charToRaw("abc"))),
-    paste0(
-      "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43",
-      "ff5bed8086072ba1e7cc2358baeca134c825a7"
-    )
-  )
-  expect_error(.rmbl_ts_digest("sha1", raw(0)), "not available")
 
-  # PKCS#1 v1.5: every way the recovered block can be wrong
-  msg <- charToRaw("abc")
-  pad <- as.raw(c(0, 1, rep(0xff, 8), 0))
-  dinfo <- function(oidhex, digest) der_seq(der_seq(der_oid(oidhex), der_tlv(0x05, raw(0))), der_tlv(0x04, digest))
-  d256 <- .rmbl_ts_digest("sha256", msg)
-  expect_match(.rmbl_pkcs1_check(raw(12), NA_character_, msg)$detail, "unsupported")
-  expect_match(.rmbl_pkcs1_check(as.raw(c(0, 1, rep(0xff, 10))), "sha256", msg)$detail, "no separator")
-  expect_match(.rmbl_pkcs1_check(c(pad, as.raw(c(0x30, 0x09))), "sha256", msg)$detail, "not DigestInfo")
-  wrong_alg <- c(pad, dinfo("608648016503040203", .rmbl_ts_digest("sha512", msg)))
-  expect_match(.rmbl_pkcs1_check(wrong_alg, "sha256", msg)$detail, "not DigestInfo")
-  wrong_digest <- c(pad, dinfo("608648016503040201", rev(d256)))
-  expect_match(.rmbl_pkcs1_check(wrong_digest, "sha256", msg)$detail, "not DigestInfo")
-  expect_true(.rmbl_pkcs1_check(c(pad, dinfo("608648016503040201", d256)), "sha256", msg)$ok)
+    # an ECDSA signature that is not a DER pair
+    ei <- .rmbl_ts_extract(der_parse(f$ecdsa_token), f$ecdsa_token)
+    k <- ei$signer$children
+    idx <- which(vapply(
+      k,
+      function(nd) identical(nd$class, 0L) && identical(nd$tag, 4),
+      logical(1)
+    ))
+    k[[max(idx)]]$value <- as.raw(c(0x30, 0x00))
+    ei$signer$children <- k
+    v <- .rmbl_ts_verify_sig(ei, f$ecdsa_cert)
+    expect_false(v$ok)
+    expect_match(v$detail, "malformed")
+    expect_true(v$content_ok)
+
+    expect_identical(.rmbl_ts_digest_name("2.16.840.1.101.3.4.2.2"), "sha384")
+    expect_identical(.rmbl_ts_digest_name("2.16.840.1.101.3.4.2.3"), "sha512")
+    expect_identical(.rmbl_ts_digest_name("1.3.14.3.2.26"), "sha1")
+    expect_true(is.na(.rmbl_ts_digest_name("9.9")))
+    expect_identical(
+      .rmbl_hexlify(.rmbl_ts_digest("sha512", charToRaw("abc"))),
+      paste0(
+        "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a",
+        "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+      )
+    )
+    expect_identical(
+      .rmbl_hexlify(.rmbl_ts_digest("sha384", charToRaw("abc"))),
+      paste0(
+        "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43",
+        "ff5bed8086072ba1e7cc2358baeca134c825a7"
+      )
+    )
+    expect_error(.rmbl_ts_digest("sha1", raw(0)), "not available")
+
+    # PKCS#1 v1.5: every way the recovered block can be wrong
+    msg <- charToRaw("abc")
+    pad <- as.raw(c(0, 1, rep(0xff, 8), 0))
+    dinfo <- function(oidhex, digest) {
+      der_seq(
+        der_seq(der_oid(oidhex), der_tlv(0x05, raw(0))),
+        der_tlv(0x04, digest)
+      )
+    }
+    d256 <- .rmbl_ts_digest("sha256", msg)
+    expect_match(
+      .rmbl_pkcs1_check(raw(12), NA_character_, msg)$detail,
+      "unsupported"
+    )
+    expect_match(
+      .rmbl_pkcs1_check(as.raw(c(0, 1, rep(0xff, 10))), "sha256", msg)$detail,
+      "no separator"
+    )
+    expect_match(
+      .rmbl_pkcs1_check(c(pad, as.raw(c(0x30, 0x09))), "sha256", msg)$detail,
+      "not DigestInfo"
+    )
+    wrong_alg <- c(
+      pad,
+      dinfo("608648016503040203", .rmbl_ts_digest("sha512", msg))
+    )
+    expect_match(
+      .rmbl_pkcs1_check(wrong_alg, "sha256", msg)$detail,
+      "not DigestInfo"
+    )
+    wrong_digest <- c(pad, dinfo("608648016503040201", rev(d256)))
+    expect_match(
+      .rmbl_pkcs1_check(wrong_digest, "sha256", msg)$detail,
+      "not DigestInfo"
+    )
+    expect_true(
+      .rmbl_pkcs1_check(
+        c(pad, dinfo("608648016503040201", d256)),
+        "sha256",
+        msg
+      )$ok
+    )
+  }
+)
+
+test_that(
+  paste0(
+    "audit coverage: an RSA timestamp signature of the wrong length is not ",
+    "verified"
+  ),
+  {
+    f <- x509_branch_fx("timestamp-token.txt")
+    info <- .rmbl_ts_extract(der_parse(f$rsa_token), f$rsa_token)
+    k <- info$signer$children
+    idx <- which(vapply(
+      k,
+      function(nd) identical(nd$class, 0L) && identical(nd$tag, 4),
+      logical(1)
+    ))
+    k[[max(idx)]]$value <- as.raw(c(0x01, 0x02))
+    info$signer$children <- k
+    v <- .rmbl_ts_verify_sig(info, f$rsa_cert)
+    expect_false(v$ok)
+    expect_true(nzchar(v$detail))
+    expect_true(v$content_ok)
+  }
+)
+
+test_that("a fuzzed certificate is refused in words, never a raw error", {
+  f <- x509_branch_fx("x509-fixtures.txt")
+  for (nm in c("chain_leaf", "chain_ecleaf256")) {
+    der <- f[[nm]]
+    raw_err <- character()
+    for (i in seq_along(der)) {
+      for (b in c(0x01, 0x80)) {
+        m <- der
+        m[i] <- xor(m[i], as.raw(b))
+        e <- tryCatch({
+          certprs(m)
+          NULL
+        }, error = function(e) e)
+        # the package's refusals carry no call; R's own errors do
+        if (!is.null(e) && !is.null(conditionCall(e))) {
+          raw_err <- c(raw_err, sprintf("%d %s", i, conditionMessage(e)))
+        }
+      }
+    }
+    expect_identical(raw_err, character(), info = nm)
+  }
 })
 
-test_that("audit coverage: an RSA timestamp signature of the wrong length is not verified", {
-  f <- x509_branch_fx("timestamp-token.txt")
-  info <- .rmbl_ts_extract(der_parse(f$rsa_token), f$rsa_token)
-  k <- info$signer$children
-  idx <- which(vapply(k, function(nd) identical(nd$class, 0L) && identical(nd$tag, 4), logical(1)))
-  k[[max(idx)]]$value <- as.raw(c(0x01, 0x02))
-  info$signer$children <- k
-  v <- .rmbl_ts_verify_sig(info, f$rsa_cert)
-  expect_false(v$ok)
-  expect_true(nzchar(v$detail))
-  expect_true(v$content_ok)
+test_that("a certificate time with letters, or no date, is refused", {
+  t <- function(tag, s) list(tag = tag, value = charToRaw(s))
+  expect_error(.rmbl_x509_time(t(23, "26A101000000Z")), "not the UTCTime")
+  expect_error(.rmbl_x509_time(t(23, "2601010000Z")), "not the UTCTime")
+  expect_error(.rmbl_x509_time(t(24, "20261301000000Z")), "not a date")
+  expect_error(.rmbl_x509_time(t(4, "260101000000Z")), "not the UTCTime")
+  expect_identical(
+    .rmbl_x509_time(t(23, "490101000000Z")),
+    as.POSIXct("2049-01-01", tz = "UTC")
+  )
+})
+
+test_that("the outer signatureAlgorithm must be the one signed", {
+  f <- x509_branch_fx("x509-fixtures.txt")
+  der <- f$chain_leaf
+  top <- .Call(C_rmbl_der_parse, der)
+  alg <- top$children[[2L]]
+  end <- alg$offset + alg$length
+  # an RSA AlgorithmIdentifier ends in its NULL parameters, 05 00
+  expect_identical(der[(end - 1L):end], as.raw(c(0x05, 0x00)))
+  m <- der
+  m[end - 1L] <- as.raw(0x04)
+  expect_error(certprs(m), "not an X.509 certificate")
+  # same form, other bytes: sha384WithRSA in place of the signed algorithm
+  oid <- alg$children[[1L]]
+  m <- der
+  last <- oid$offset + oid$length
+  m[last] <- xor(m[last], as.raw(0x03))
+  expect_error(certprs(m), "is not the one signed")
+  # the parts it is made of, each refused alone
+  bad <- function(w) stop(w, call. = FALSE)
+  nd <- function(cl, tag, cons, kids = list(), v = raw(0)) {
+    list(class = cl, tag = tag, constructed = cons, children = kids, value = v)
+  }
+  oidn <- nd(0L, 6, FALSE, v = as.raw(1))
+  expect_error(
+    .rmbl_x509_alg_shape(nd(0L, 16, TRUE, list(oidn, nd(0L, 4, FALSE))),
+                         "x", bad),
+    "parameters of no form"
+  )
+  expect_error(.rmbl_x509_name_shape(nd(0L, 17, TRUE), "issuer", bad),
+               "issuer is not a Name")
+  ext <- nd(0L, 16, TRUE, list(oidn, nd(0L, 4, FALSE)))
+  expect_error(.rmbl_x509_ext_shape(nd(0L, 16, TRUE, list(ext, ext)), bad),
+               "appears twice")
+  flag0 <- nd(0L, 16, TRUE, list(oidn, nd(0L, 1, FALSE, v = as.raw(0)),
+                                 nd(0L, 4, FALSE)))
+  expect_error(.rmbl_x509_ext_shape(nd(0L, 16, TRUE, list(flag0)), bad),
+               "an extension is not")
+  expect_error(.rmbl_x509_tail_shape(list(nd(2L, 3, TRUE), nd(2L, 1, FALSE)),
+                                     bad), "does not define")
+  expect_error(.rmbl_x509_tail_shape(list(nd(2L, 1, TRUE)), bad),
+               "unique identifier")
+  expect_error(.rmbl_x509_tail_shape(list(nd(2L, 3, FALSE)), bad),
+               "not one SEQUENCE")
+})
+
+test_that("an OCSP answer short of fields is not verified, not an error", {
+  r <- .rmbl_ocsp_verify_sig(list(children = list(list())), list(), raw(0))
+  expect_false(r$ok)
+  expect_match(r$detail, "not a BasicOCSPResponse")
+})
+
+test_that("a name that is not UTF-8 is shown by its bytes, never an error", {
+  f <- x509_fx()
+  m <- f$chain_leaf
+  i <- grepRaw(charToRaw("Chain Leaf"), m, all = TRUE)
+  # "L" with its top bit set: the byte 0xcc then "eaf", not UTF-8
+  m[i[length(i)] + 6L] <- xor(m[i[length(i)] + 6L], as.raw(0x80))
+  leaf <- certprs(m)
+  expect_true(validUTF8(leaf$subject))
+  expect_match(leaf$subject, "Chain <cc>eaf", fixed = TRUE)
+  r <- certchnvrf(m, trust = f$chain_root, inter = list(f$chain_inter),
+                  attm = as.POSIXct("2027-01-01", tz = "UTC"))
+  expect_false(r$ok)
+  expect_match(paste(unlist(r$checks), collapse = " "), "CN=Chain <c",
+               fixed = TRUE)
+  # the same bytes in a name constraint or a CRL field
+  expect_identical(.rmbl_raw_text(as.raw(c(0x41, 0xc3, 0x28))), "A<c3>(")
+  expect_identical(tolower(.rmbl_raw_text(as.raw(c(0x41, 0xc3)))), "a<c3>")
 })

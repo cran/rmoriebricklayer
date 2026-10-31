@@ -25,40 +25,6 @@
 # And one thing is deliberately not offered: a per-capita rate by region.
 # See rgncov().
 
-#' Trims a character argument and refuses it when it is empty or has a missing or empty value.
-#' @param x The value passed by the user.
-#' @param arg The argument name, used in the error message.
-#' @return The trimmed character vector.
-#' @noRd
-.rmbl_rm_chr <- function(x, arg) {
-  x <- trimws(as.character(x))
-  if (!length(x)) stop(.rmbl_fn(), sprintf("`%s` must not be empty", arg), call. = FALSE)
-  if (anyNA(x) || !all(nzchar(x))) {
-    stop(sprintf("`%s` must not contain missing or empty values", arg),
-      call. = FALSE
-    )
-  }
-  x
-}
-
-#' Returns one named column of a data frame, refusing a missing frame or column.
-#' @param d The data frame.
-#' @param nm The column name.
-#' @param arg The argument name, used in the error message.
-#' @return The column.
-#' @noRd
-.rmbl_rm_col <- function(d, nm, arg) {
-  if (!is.data.frame(d)) {
-    stop(sprintf("`%s` must be a data frame", arg),
-      call. = FALSE
-    )
-  }
-  if (length(nm) != 1L || !nm %in% names(d)) {
-    stop(sprintf("`%s` has no column `%s`", arg, nm), call. = FALSE)
-  }
-  d[[nm]]
-}
-
 #' Population of the regions that contain a unit, and of those that do not
 #'
 #' Summarises where a set of point-located units (jails, courthouses,
@@ -143,27 +109,16 @@
 #' try(rgncov(c("A", "A"), c(10, 20), c(1, 0)))
 #' @export
 rgncov <- function(reg, pop, units) {
-  .rmbl_no_fn(region = reg)
+  .rmbl_no_fn(reg = reg)
   reg <- .rmbl_rm_chr(reg, "reg")
   pop <- .rmbl_num(pop, "pop")
   units <- .rmbl_num(units, "units")
-  if (length(pop) != length(reg) || length(units) != length(reg)) {
-    stop("`reg`, `pop` and `units` must be the same length",
-      call. = FALSE
-    )
-  }
-  if (anyDuplicated(reg)) {
-    stop("`reg` must not repeat: one row per region", call. = FALSE)
-  }
-  if (anyNA(pop) || any(pop < 0)) {
-    stop("`pop` must be complete and non-negative", call. = FALSE)
-  }
-  if (anyNA(units) || any(units < 0) || any(units != round(units))) {
-    stop("`units` must be complete, non-negative whole numbers", call. = FALSE)
-  }
+  .rmbl_rgncov_check(reg, pop, units)
   tot <- sum(pop)
   out <- data.frame(
-    region = reg, population = pop, units = units,
+    region = reg,
+    population = pop,
+    units = units,
     hasunit = units > 0,
     popshr = if (tot > 0) 100 * pop / tot else NA_real_,
     stringsAsFactors = FALSE
@@ -171,7 +126,8 @@ rgncov <- function(reg, pop, units) {
   out <- out[order(-out$units, -out$population), ]
   row.names(out) <- NULL
   cov <- sum(pop[units > 0])
-  structure(out,
+  structure(
+    out,
     class = c("rmbl_region_coverage", "data.frame"),
     coverage = list(
       regions = length(reg),
@@ -181,44 +137,56 @@ rgncov <- function(reg, pop, units) {
       totalpop = tot,
       covpop = cov,
       uncpop = tot - cov,
-      covshr =
-        if (tot > 0) 100 * cov / tot else NA_real_
+      covshr = if (tot > 0) 100 * cov / tot else NA_real_
     )
   )
 }
 
 #' @export
 print.rmbl_region_coverage <- function(x, n = 10L, ...) {
+  .rmbl_cat(format(x, n = n, ...), x)
+  invisible(x)
+}
+
+#' @export
+format.rmbl_region_coverage <- function(x, n = 10L, ...) {
   a <- attr(x, "coverage")
   fm <- function(v) format(round(v), big.mark = ",", trim = TRUE)
   n <- min(as.integer(n)[1L], nrow(x))
-  footer <- c(
-    if (nrow(x) > n) sprintf("... %d more regions", nrow(x) - n),
-    "The covered share is context, not a denominator: units serve",
-    "catchments, so a rate over these regions alone would take its",
-    "numerator from the whole territory and is inflated."
-  )
-  .rmbl_print_table(
+  d <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
+  attr(d, "coverage") <- NULL
+  if (is.null(a)) {
+    return(utils::capture.output(print(d)))
+  }
+  .rmbl_stat_block(
     sprintf(
-      "%s units in %s of %s regions", fm(a$units), fm(a$withunit),
+      "%s units in %s of %s regions",
+      fm(a$units),
+      fm(a$withunit),
       fm(a$regions)
     ),
-    x[seq_len(n), , drop = FALSE],
-    notes = c(
-      sprintf(
+    facts = list(
+      Covered = sprintf(
         "those regions hold %s of %s residents (%.1f%%)",
-        fm(a$covpop), fm(a$totalpop),
+        fm(a$covpop),
+        fm(a$totalpop),
         a$covshr
       ),
-      sprintf(
+      Uncovered = sprintf(
         "%s regions hold none; %s residents (%.1f%%) live there",
-        fm(a$witunit), fm(a$uncpop),
+        fm(a$witunit),
+        fm(a$uncpop),
         100 - a$covshr
       )
     ),
-    footer = footer, ...
+    table = d[seq_len(n), , drop = FALSE],
+    reading = c(
+      "The covered share is context, not a denominator: units serve",
+      "catchments, so a rate over these regions alone would take its",
+      "numerator from the whole territory and is inflated."
+    ),
+    notes = if (nrow(x) > n) sprintf("... %d more regions", nrow(x) - n)
   )
-  invisible(x)
 }
 
 #' Internal soundness of a region map
@@ -250,13 +218,13 @@ print.rmbl_region_coverage <- function(x, n = 10L, ...) {
 #' the geometry, so they run with nothing installed.
 #'
 #' The checks as computed: \dQuote{units assigned more than one region} counts
-#' rows whose (non-blank) unit identifier repeats an earlier row's, whether
-#' or not the region differs, so an exact duplicate row also fails;
-#' \dQuote{units assigned no region} counts rows whose region is \code{NA} or blank;
+#' rows whose (non-blank) unit identifier repeats an earlier row's, whether or
+#' not the region differs, so an exact duplicate row also fails; \dQuote{units
+#' assigned no region} counts rows whose region is \code{NA} or blank;
 #' \dQuote{region codes not in the reference geography} counts non-blank region
-#' codes not in \code{regs}, comparing the codes as text after trimming
-#' spaces (so \code{"3506"} and \code{3506} match, but \code{"03506"} does
-#' not). Errors: \code{map} not a data frame, or without the named columns.
+#' codes not in \code{regs}, comparing the codes as text after trimming spaces
+#' (so \code{"3506"} and \code{3506} match, but \code{"03506"} does not).
+#' Errors: \code{map} not a data frame, or without the named columns.
 #'
 #' @seealso [rgnmapcmp()],
 #'   [rgnmapalt()],
@@ -275,14 +243,17 @@ print.rmbl_region_coverage <- function(x, n = 10L, ...) {
 #' rgnmapintg(cw, "inst", "cd", regs = c("3557", "3520", "3506"))
 #'
 #' # a unit listed twice and a unit with no region, without a reference list
-#' cw2 <- rbind(cw, data.frame(inst = c("North Jail", "West Jail"), cd = c("3560", "")))
+#' cw2 <- rbind(
+#'   cw,
+#'   data.frame(inst = c("North Jail", "West Jail"), cd = c("3560", ""))
+#' )
 #' rgnmapintg(cw2, "inst", "cd")
 #'
 #' # the columns must exist
 #' try(rgnmapintg(cw, "institution", "cd"))
 #' @export
 rgnmapintg <- function(map, unit, reg, regs = NULL) {
-  .rmbl_no_fn(unit = unit, region = reg, regions = regs)
+  .rmbl_no_fn(unit = unit, reg = reg, regs = regs)
   u <- as.character(.rmbl_rm_col(map, unit, "map"))
   r <- as.character(.rmbl_rm_col(map, reg, "map"))
   blank <- function(v) is.na(v) | !nzchar(trimws(ifelse(is.na(v), "", v)))
@@ -302,12 +273,15 @@ rgnmapintg <- function(map, unit, reg, regs = NULL) {
   out <- data.frame(
     check = vapply(rows, `[`, character(1), 1L),
     observed = as.numeric(vapply(rows, `[`, character(1), 2L)),
-    expected = 0, stringsAsFactors = FALSE
+    expected = 0,
+    stringsAsFactors = FALSE
   )
-  if (is.null(regs)) out <- out[out$check != rows[[3]][1], , drop = FALSE]
+  if (is.null(regs)) {
+    out <- out[out$check != rows[[3]][1], , drop = FALSE]
+  }
   out$pass <- out$observed == out$expected
   row.names(out) <- NULL
-  out
+  .rmbl_cls(out, "rmbl_map_integrity")
 }
 
 #' Compare a recomputed region map against a published one
@@ -358,7 +332,8 @@ rgnmapintg <- function(map, unit, reg, regs = NULL) {
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' pub <- data.frame(
 #'   inst = c("North Jail", "South Jail"),
-#'   cd = c("3557", "3520"), stringsAsFactors = FALSE
+#'   cd = c("3557", "3520"),
+#'   stringsAsFactors = FALSE
 #' )
 #' obs <- pub
 #' rgnmapcmp(pub, obs, "inst")
@@ -369,8 +344,11 @@ rgnmapintg <- function(map, unit, reg, regs = NULL) {
 #'
 #' # a unit on one side only, and a coordinate that only moved by rounding noise
 #' pub$lat <- c(44.39, 43.65)
-#' obs2 <- data.frame(inst = c("North Jail", "Hill Jail"), cd = c("3557", "3506"),
-#'                    lat = c(44.39 + 1e-12, 45.1))
+#' obs2 <- data.frame(
+#'   inst = c("North Jail", "Hill Jail"),
+#'   cd = c("3557", "3506"),
+#'   lat = c(44.39 + 1e-12, 45.1)
+#' )
 #' rgnmapcmp(pub, obs2, "inst", cols = c("cd", "lat"))
 #'
 #' # a compared column must be in both maps
@@ -386,8 +364,9 @@ rgnmapcmp <- function(pub, obs, unit, cols = NULL) {
   cols <- as.character(cols)
   missing_cols <- setdiff(cols, intersect(names(pub), names(obs)))
   if (length(missing_cols)) {
-    stop("both frames need the compared columns; missing: ",
-      paste(missing_cols, collapse = ", "),
+    stop(
+      "both frames need the compared columns; missing: ",
+      toString(missing_cols),
       call. = FALSE
     )
   }
@@ -396,44 +375,77 @@ rgnmapcmp <- function(pub, obs, unit, cols = NULL) {
   shared <- intersect(pu, ou)
   ip <- match(shared, pu)
   io <- match(shared, ou)
-  res <- list(data.frame(
-    column = "rows", cells = length(unique(c(pu, ou))),
-    mismatched = length(only_pub) + length(only_obs),
-    first = if (length(only_pub)) {
-      paste0("published only: ", only_pub[1])
-    } else if (length(only_obs)) {
-      paste0("recomputed only: ", only_obs[1])
-    } else {
-      ""
-    }, stringsAsFactors = FALSE
-  ))
+  res <- list(.rmbl_rm_cmp_rows(pu, ou, only_pub, only_obs))
   for (cl in cols) {
-    a <- pub[[cl]][ip]
-    b <- obs[[cl]][io]
-    same <- if (is.numeric(a) && is.numeric(b)) {
-      vapply(seq_along(a), function(i) {
-        isTRUE(all.equal(a[i], b[i]))
-      }, logical(1))
-    } else {
-      trimws(as.character(a)) == trimws(as.character(b))
-    }
-    same[is.na(same)] <- is.na(a[is.na(same)]) & is.na(b[is.na(same)])
-    bad <- which(!same)
-    res[[length(res) + 1L]] <- data.frame(
-      column = cl, cells = length(shared), mismatched = length(bad),
-      first = if (length(bad)) {
-        sprintf(
-          "%s: published %s, recomputed %s",
-          shared[bad[1]], a[bad[1]], b[bad[1]]
-        )
-      } else {
-        ""
-      }, stringsAsFactors = FALSE
+    res[[length(res) + 1L]] <- .rmbl_rm_cmp_col(
+      cl,
+      pub[[cl]][ip],
+      obs[[cl]][io],
+      shared
     )
   }
   out <- do.call(rbind, res)
   row.names(out) <- NULL
-  out
+  .rmbl_cls(out, "rmbl_map_compare")
+}
+
+#' @export
+format.rmbl_map_integrity <- function(x, digits = 4L, ...) {
+  title <- "Region map integrity"
+  need <- c("check", "observed", "expected", "pass")
+  fb <- .rmbl_df_fallback(x, title, need, digits)
+  if (!is.null(fb)) {
+    return(fb)
+  }
+  d <- .rmbl_plain(x)
+  bad <- sum(!d$pass)
+  tb <- d[c("check", "observed", "expected")]
+  tb$result <- ifelse(d$pass, "pass", "FAIL")
+  .rmbl_res_block(
+    title,
+    facts = list(
+      Checks = nrow(d),
+      Verdict = if (bad) {
+        sprintf("%d of %d checks failed", bad, nrow(d))
+      } else {
+        "every check passed"
+      }
+    ),
+    tables = list(tb),
+    reading = paste(
+      "A sound map gives each unit exactly one region, and only regions",
+      "of the reference geography; each check counts the units that break",
+      "that, and 0 passes."
+    ),
+    digits = digits
+  )
+}
+
+#' @export
+format.rmbl_map_compare <- function(x, digits = 4L, ...) {
+  title <- "Published and rebuilt region maps compared"
+  need <- c("column", "cells", "mismatched", "first")
+  fb <- .rmbl_df_fallback(x, title, need, digits)
+  if (!is.null(fb)) {
+    return(fb)
+  }
+  d <- .rmbl_plain(x)
+  bad <- sum(d$mismatched, na.rm = TRUE)
+  .rmbl_res_block(
+    title,
+    facts = list(
+      `Columns compared` = sum(d$column != "rows"),
+      `Mismatched cells` = bad,
+      Verdict = if (bad) "the maps disagree" else "the maps agree"
+    ),
+    tables = list(d),
+    reading = paste(
+      "The rows line counts units present on one side only; each other",
+      "line compares one column over the shared units. first writes out",
+      "the first disagreement, and 0 mismatched throughout is agreement."
+    ),
+    digits = digits
+  )
 }
 
 #' Check a region map against an independently derived assignment
@@ -443,7 +455,6 @@ rgnmapcmp <- function(pub, obs, unit, cols = NULL) {
 #' and explained. Use it to catch errors in the method that built the map,
 #' which re-running that same method can never find.
 #'
-#' @param map Data frame, one row per unit.
 #' @param unit Name of the unit identifier column (a string).
 #' @param reg Name of the assigned region column (a string).
 #' @param route Named character vector (names are units, values regions),
@@ -493,7 +504,8 @@ rgnmapcmp <- function(pub, obs, unit, cols = NULL) {
 #'
 #' # a name-based route that is known to mis-place one unit
 #' route <- c(
-#'   "North Jail" = "3557", "South Jail" = "3520",
+#'   "North Jail" = "3557",
+#'   "South Jail" = "3520",
 #'   "Hill Jail" = "3519"
 #' )
 #' rgnmapalt(cw, "inst", "cd", route, known = "Hill Jail")
@@ -504,15 +516,18 @@ rgnmapcmp <- function(pub, obs, unit, cols = NULL) {
 #' sum(!d$known)
 #'
 #' # the route as a data frame with the same column names
-#' routedf <- data.frame(inst = c("North Jail", "Hill Jail"), cd = c("3557", "3506"))
+#' routedf <- data.frame(
+#'   inst = c("North Jail", "Hill Jail"),
+#'   cd = c("3557", "3506")
+#' )
 #' nrow(rgnmapalt(cw, "inst", "cd", routedf))
 #'
 #' # an unnamed vector cannot be matched to units
 #' try(rgnmapalt(cw, "inst", "cd", c("3557", "3520")))
 #' @export
-rgnmapalt <- function(map, unit, reg, route,
-                                    known = character()) {
-  .rmbl_no_fn(unit = unit, region = reg, route = route, known = known)
+#' @inheritParams rgnmapintg
+rgnmapalt <- function(map, unit, reg, route, known = character()) {
+  .rmbl_no_fn(unit = unit, reg = reg, route = route, known = known)
   u <- trimws(as.character(.rmbl_rm_col(map, unit, "map")))
   r <- trimws(as.character(.rmbl_rm_col(map, reg, "map")))
   if (is.data.frame(route)) {
@@ -531,9 +546,11 @@ rgnmapalt <- function(map, unit, reg, route,
   second <- trimws(as.character(route[u[i]]))
   bad <- i[second != r[i]]
   out <- data.frame(
-    unit = u[bad], primary = r[bad],
+    unit = u[bad],
+    primary = r[bad],
     second = trimws(as.character(route[u[bad]])),
-    known = u[bad] %in% known, stringsAsFactors = FALSE
+    known = u[bad] %in% known,
+    stringsAsFactors = FALSE
   )
   out <- out[order(out$known, out$unit), ]
   row.names(out) <- NULL
@@ -601,19 +618,28 @@ rgnmapalt <- function(map, unit, reg, route,
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # Two square regions as a small GeoJSON boundary file.
 #' gj <- tempfile(fileext = ".geojson")
-#' writeLines(paste0(
-#'   '{"type":"FeatureCollection","features":[',
-#'   '{"type":"Feature","properties":{"CDUID":"A","CDNAME":"West"},"geometry":',
-#'   '{"type":"Polygon","coordinates":[[[-80,43],[-79,43],[-79,44],[-80,44],[-80,43]]]}},',
-#'   '{"type":"Feature","properties":{"CDUID":"B","CDNAME":"East"},"geometry":',
-#'   '{"type":"Polygon","coordinates":[[[-79,43],[-78,43],[-78,44],[-79,44],[-79,43]]]}}]}'
-#' ), gj)
+#' writeLines(
+#'   paste0(
+#'     '{"type":"FeatureCollection","features":[',
+#'     '{"type":"Feature","properties":{"CDUID":"A","CDNAME":"West"},"geo',
+#'     'metry":',
+#'     '{"type":"Polygon","coordinates":[[[-80,43],[-79,43],[-79,44],[-80',
+#'     ',44],[-80,43]]]}},',
+#'     '{"type":"Feature","properties":{"CDUID":"B","CDNAME":"East"},"geo',
+#'     'metry":',
+#'     '{"type":"Polygon","coordinates":[[[-79,43],[-78,43],[-78,44],[-79',
+#'     ',44],[-79,43]]]}}]}'
+#'   ),
+#'   gj
+#' )
 #'
 #' if (requireNamespace("sf", quietly = TRUE)) {
 #'   obs <- rgnmappts(
-#'     x = c(-79.5, -78.5, -70), y = c(43.5, 43.5, 43.5),
+#'     x = c(-79.5, -78.5, -70),
+#'     y = c(43.5, 43.5, 43.5),
 #'     unit = c("North Jail", "South Jail", "Far Jail"),
-#'     bounds = gj, fields = c("CDUID", "CDNAME")
+#'     bounds = gj,
+#'     fields = c("CDUID", "CDNAME")
 #'   )
 #'   print(obs)
 #'   # the point outside both regions is reported, not dropped
@@ -624,61 +650,233 @@ rgnmapalt <- function(map, unit, reg, route,
 #' }
 #'
 #' # no boundary file: NULL, so a script can record the check as unavailable
-#' rgnmappts(-79.5, 43.5, "North Jail",
-#'                        bounds = file.path(tempdir(), "missing.shp"), fields = "CDUID")
+#' rgnmappts(
+#'   -79.5,
+#'   43.5,
+#'   "North Jail",
+#'   bounds = file.path(tempdir(), "missing.shp"),
+#'   fields = "CDUID"
+#' )
 #' unlink(gj)
 #' @export
-rgnmappts <- function(x, y, unit, bounds, fields,
-                                   crs = 4326) {
+rgnmappts <- function(x, y, unit, bounds, fields, crs = 4326) {
   if (!requireNamespace("sf", quietly = TRUE)) {
     return(NULL)
   }
-  if (!is.character(bounds) || length(bounds) != 1L || is.na(bounds)) {
-    stop("`bounds` must be the path of one boundary file", call. = FALSE)
-  }
-  if (!is.character(unit) || length(unit) != length(x) || anyNA(unit) || !all(nzchar(unit))) {
-    stop("`unit` must be one non-empty name per point", call. = FALSE)
-  }
-  if (!is.character(fields) || !length(fields) || anyNA(fields)) {
-    stop("`fields` must name columns of the boundary file", call. = FALSE)
-  }
-  if (!(is.numeric(crs) || is.character(crs)) || length(crs) != 1L || is.na(crs)) {
-    stop("`crs` must be one EPSG code or coordinate reference string", call. = FALSE)
-  }
+  .rgn_check_args(x, unit, bounds, fields, crs)
   if (!file.exists(bounds)) {
     return(NULL)
   }
   unit <- .rmbl_rm_chr(unit, "unit")
-  x <- .rmbl_num(x, "x")
-  y <- .rmbl_num(y, "y")
-  if (length(x) != length(unit) || length(y) != length(unit)) {
-    stop("`x`, `y` and `unit` must be the same length", call. = FALSE)
-  }
-  if (anyNA(x) || anyNA(y)) {
-    stop("`x` and `y` must be complete: a point with no coordinate ",
-      "cannot be matched",
-      call. = FALSE
-    )
-  }
+  xy <- .rmbl_rm_xy(x, y, unit)
   poly <- sf::st_read(bounds, quiet = TRUE)
   fields <- as.character(fields)
   miss <- setdiff(fields, names(poly))
   if (length(miss)) {
-    stop("boundary file has no column(s): ", paste(miss, collapse = ", "),
+    stop(
+      "boundary file has no column(s): ",
+      toString(miss),
       call. = FALSE
     )
   }
-  pts <- sf::st_as_sf(data.frame(.x = x, .y = y),
+  pts <- sf::st_as_sf(
+    data.frame(.x = xy$x, .y = xy$y),
     coords = c(".x", ".y"),
     crs = crs
   )
   ## onto the boundary file's CRS, not the reverse: reprojecting the
   ## polygons would move their edges
   pts <- sf::st_transform(pts, sf::st_crs(poly))
-  hit <- sf::st_within(pts, poly)
+  .rmbl_rm_join(sf::st_within(pts, poly), poly, unit, fields)
+}
+
+#' Trims a character argument and refuses it when it is empty or has a missing
+#' or empty value.
+#' @param x The character argument to trim and check.
+#' @param arg The argument's name, quoted when a value is missing or empty.
+#' @return The trimmed character vector.
+#' @noRd
+.rmbl_rm_chr <- function(x, arg) {
+  x <- trimws(as.character(x))
+  if (!length(x)) {
+    stop(.rmbl_fn(), sprintf("`%s` must not be empty", arg), call. = FALSE)
+  }
+  if (anyNA(x) || !all(nzchar(x))) {
+    stop(
+      sprintf("`%s` must not contain missing or empty values", arg),
+      call. = FALSE
+    )
+  }
+  x
+}
+
+#' Returns one named column of a data frame, refusing a missing frame or column.
+#' @param d The data frame the column is taken from.
+#' @param nm The name of the column to return.
+#' @param arg The data frame's argument name, quoted when the column is missing.
+#' @return The column.
+#' @noRd
+.rmbl_rm_col <- function(d, nm, arg) {
+  if (!is.data.frame(d)) {
+    stop(sprintf("`%s` must be a data frame", arg), call. = FALSE)
+  }
+  if (length(nm) != 1L || !nm %in% names(d)) {
+    stop(sprintf("`%s` has no column `%s`", arg, nm), call. = FALSE)
+  }
+  d[[nm]]
+}
+
+#' rgnmappts()'s boundary file, units, fields and coordinate reference,
+#' checked.
+#' @param x,unit,bounds,fields,crs As for rgnmappts().
+#' @noRd
+.rgn_check_args <- function(x, unit, bounds, fields, crs) {
+  if (!is.character(bounds) || length(bounds) != 1L || is.na(bounds)) {
+    stop("`bounds` must be the path of one boundary file", call. = FALSE)
+  }
+  if (
+    !is.character(unit) ||
+      length(unit) != length(x) ||
+      anyNA(unit) ||
+      !all(nzchar(unit))
+  ) {
+    stop("`unit` must be one non-empty name per point", call. = FALSE)
+  }
+  .rgn_check_spec(fields, crs)
+}
+
+#' rgnmappts()'s fields and coordinate reference, checked.
+#' @param fields,crs As for rgnmappts().
+#' @noRd
+.rgn_check_spec <- function(fields, crs) {
+  if (!is.character(fields) || !length(fields) || anyNA(fields)) {
+    stop("`fields` must name columns of the boundary file", call. = FALSE)
+  }
+  if (
+    !(is.numeric(crs) || is.character(crs)) || length(crs) != 1L || is.na(crs)
+  ) {
+    stop(
+      "`crs` must be one EPSG code or coordinate reference string",
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
+#' rgncov()'s regions, populations and unit counts, checked.
+#' @param reg The trimmed region names.
+#' @param pop,units The numeric populations and unit counts.
+#' @return `NULL`, invisibly; errors on a bad input.
+#' @noRd
+.rmbl_rgncov_check <- function(reg, pop, units) {
+  if (length(pop) != length(reg) || length(units) != length(reg)) {
+    stop("`reg`, `pop` and `units` must be the same length", call. = FALSE)
+  }
+  if (anyDuplicated(reg)) {
+    stop("`reg` must not repeat: one row per region", call. = FALSE)
+  }
+  if (anyNA(pop) || any(pop < 0)) {
+    stop("`pop` must be complete and non-negative", call. = FALSE)
+  }
+  if (anyNA(units) || any(units < 0) || any(units != round(units))) {
+    stop("`units` must be complete, non-negative whole numbers", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+#' The "rows" line of rgnmapcmp(): units in one map only.
+#' @param pu,ou The unit names of the published and the recomputed map.
+#' @param only_pub,only_obs The units found in one map only.
+#' @return A one-row data frame.
+#' @noRd
+.rmbl_rm_cmp_rows <- function(pu, ou, only_pub, only_obs) {
+  data.frame(
+    column = "rows",
+    cells = length(unique(c(pu, ou))),
+    mismatched = length(only_pub) + length(only_obs),
+    first = if (length(only_pub)) {
+      paste0("published only: ", only_pub[1])
+    } else if (length(only_obs)) {
+      paste0("recomputed only: ", only_obs[1])
+    } else {
+      ""
+    },
+    stringsAsFactors = FALSE
+  )
+}
+
+#' One compared column of rgnmapcmp(), over the shared units.
+#' @param cl The column name.
+#' @param a,b The column's values in the published and the recomputed map,
+#'   in the order of `shared`.
+#' @param shared The units in both maps.
+#' @return A one-row data frame.
+#' @noRd
+.rmbl_rm_cmp_col <- function(cl, a, b, shared) {
+  same <- if (is.numeric(a) && is.numeric(b)) {
+    vapply(
+      seq_along(a),
+      function(i) {
+        isTRUE(all.equal(a[i], b[i]))
+      },
+      logical(1)
+    )
+  } else {
+    trimws(as.character(a)) == trimws(as.character(b))
+  }
+  same[is.na(same)] <- is.na(a[is.na(same)]) & is.na(b[is.na(same)])
+  bad <- which(!same)
+  data.frame(
+    column = cl,
+    cells = length(shared),
+    mismatched = length(bad),
+    first = if (length(bad)) {
+      sprintf(
+        "%s: published %s, recomputed %s",
+        shared[bad[1]],
+        a[bad[1]],
+        b[bad[1]]
+      )
+    } else {
+      ""
+    },
+    stringsAsFactors = FALSE
+  )
+}
+
+#' rgnmappts()'s coordinates, checked against the units.
+#' @param x,y As for rgnmappts().
+#' @param unit The checked unit names.
+#' @return A list with the numeric `x` and `y`.
+#' @noRd
+.rmbl_rm_xy <- function(x, y, unit) {
+  x <- .rmbl_num(x, "x")
+  y <- .rmbl_num(y, "y")
+  if (length(x) != length(unit) || length(y) != length(unit)) {
+    stop("`x`, `y` and `unit` must be the same length", call. = FALSE)
+  }
+  if (anyNA(x) || anyNA(y)) {
+    stop(
+      "`x` and `y` must be complete: a point with no coordinate ",
+      "cannot be matched",
+      call. = FALSE
+    )
+  }
+  list(x = x, y = y)
+}
+
+#' rgnmappts()'s result: each point's first region and its region count.
+#' @param hit The `sf::st_within()` result, one element per point.
+#' @param poly The boundary polygons.
+#' @param unit The unit names.
+#' @param fields The boundary columns to return.
+#' @return A data frame with `unit`, the `fields` and `nreg`.
+#' @noRd
+.rmbl_rm_join <- function(hit, poly, unit, fields) {
   n <- lengths(hit)
   first <- vapply(
-    hit, function(h) if (length(h)) h[1] else NA_integer_,
+    hit,
+    function(h) if (length(h)) h[1] else NA_integer_,
     integer(1)
   )
   out <- data.frame(unit = unit, stringsAsFactors = FALSE)

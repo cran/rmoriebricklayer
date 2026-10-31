@@ -24,13 +24,22 @@ whatever form the limits take. Here, a table with three measures per cell, and l
 their measure only in part:
 
 ```{r tables-statcan}
-pyll <- data.frame(GEO = rep(c("Inuit Nunangat", "Rest of Canada"), each = 5),
-                   Characteristics = rep(c("Number of potential years of life lost",
-                                           "Crude rate of potential years of life lost",
-                                           "Age-standardized rate of potential years of life lost",
-                                           "Low 95% confidence interval, potential years of life lost",
-                                           "High 95% confidence interval, potential years of life lost"), 2),
-                   VALUE = c(5000, 900, 1100, 1000, 1200, 7000, 800, 950, 870, 1030), STATUS = "")
+pyll <- data.frame(
+  GEO = rep(c("Inuit Nunangat", "Rest of Canada"), each = 5),
+  Characteristics = rep(
+    c(
+      "Number of potential years of life lost",
+      "Crude rate of potential years of life lost",
+      "Age-standardized rate of potential years of life lost",
+      "Low 95% confidence interval, potential years of life lost",
+      "High 95% confidence interval, potential years of life lost"
+    ),
+    2
+  ),
+  VALUE = c(5000, 900, 1100, 1000, 1200, 7000, 800, 950, 870, 1030),
+  STATUS = "",
+  stringsAsFactors = FALSE
+)
 scests(pyll)[, c("GEO", "measure", "estimate", "lower", "upper")]
 ```
 

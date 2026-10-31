@@ -61,7 +61,7 @@
 #' so small that \eqn{1/(n+1) > \alpha}, so that nothing could ever be
 #' detected.
 #'
-#' @param data A data frame.
+#' @param data A data frame, passed to \code{stat} and \code{inject}.
 #' @param stat A function of one data frame returning
 #'   a single finite number (for example a correlation or a difference in
 #'   means).
@@ -84,16 +84,14 @@
 #'   detection (default 0.05).
 #' @param seed Optional integer seed; \code{NULL} (the default) uses the
 #'   session's random number state.
-#' @return A list of class \code{c("bricklayer_power", "list")}:
-#'   \describe{
-#'     \item{\code{curve}}{data frame with one row per size: \code{size},
-#'       \code{detected} (integer), \code{reps} (integer, the usable repetitions)
-#'       and \code{rate} (\code{detected / reps}, \code{NA} when none was usable).}
-#'     \item{\code{alpha}, \code{n}, \code{reps}, \code{treatment}}{the settings used.}
-#'     \item{\code{smadet}}{the smallest positive size found at a rate of
-#'       at least 0.8, or \code{NA} when no size reached it.}
-#'     \item{\code{false_positive_rate}}{the rate at size 0.}
-#'   }
+#' @return A list of class \code{c("bricklayer_power", "list")}: \describe{
+#'   \item{\code{curve}}{data frame with one row per size: \code{size},
+#'   \code{detected} (integer), \code{reps} (integer, the usable repetitions)
+#'   and \code{rate} (\code{detected / reps}, \code{NA} when none was usable).}
+#'   \item{\code{alpha}, \code{n}, \code{reps}, \code{treatment}}{the settings
+#'   used.} \item{\code{smadet}}{the smallest positive size found at a rate of
+#'   at least 0.8, or \code{NA} when no size reached it.}
+#'   \item{\code{false_positive_rate}}{the rate at size 0.} }
 #' @seealso [cpsfals()] for the
 #' negative controls.
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
@@ -128,110 +126,228 @@
 #' # too few permutations to ever reach alpha = 0.05
 #' try(cpspwr(d, function(z) cor(z$x, z$y), inj, trt = "x", n = 9))
 #' @export
-cpspwr <- function(data, stat, inject, sizes = c(0, 0.2, 0.5),
-                          trt = NULL, n = 99L, reps = 10L,
-                          alpha = 0.05, seed = NULL) {
-  .rmbl_no_fn(treatment = trt)
-  if (!is.data.frame(data) || nrow(data) < 4L) {
-    stop("cpspwr: `data` must be a data frame with at least 4 rows", call. = FALSE)
+cpspwr <- function(
+  data,
+  stat,
+  inject,
+  sizes = c(0, 0.2, 0.5),
+  trt = NULL,
+  n = 99L,
+  reps = 10L,
+  alpha = 0.05,
+  seed = NULL
+) {
+  .rmbl_no_fn(trt = trt)
+  trt <- .pwr_check_inputs(data, stat, inject, trt)
+  sizes <- .pwr_sizes(sizes)
+  ck <- .pwr_check_counts(n, reps, alpha)
+  n <- ck$n
+  reps <- ck$reps
+  alpha <- ck$alpha
+  if (!is.null(seed)) {
+    seed <- .rmbl_r_seed(seed)
   }
-  if (!is.function(stat) || !is.function(inject)) {
-    stop("`stat` and `inject` must both be functions", call. = FALSE)
+  if (!is.null(seed)) {
+    .rmbl_local_seed(seed)
   }
-  if (is.null(trt)) {
-    stop("`trt` is required: the permutation null is built by ",
-         "shuffling it, and without one there is nothing to detect ",
-         "against", call. = FALSE)
-  }
-  trt <- as.character(trt)[1L]
-  if (!trt %in% names(data)) {
-    stop("cpspwr: `trt` is not a column of `data`", call. = FALSE)
-  }
-  sizes <- sort(unique(c(0, .rmbl_num(sizes, "sizes"))))
-  n <- .rmbl_num(n, "n", integer = TRUE)[1L]
-  reps <- .rmbl_num(reps, "reps", integer = TRUE)[1L]
-  if (is.na(n) || n < 9L) stop("`n` must be at least 9", call. = FALSE)
-  alpha <- .rmbl_conf_level(alpha, "alpha")
-  if (is.na(reps) || reps < 1L) stop("`reps` must be at least 1",
-                                     call. = FALSE)
-  if (1 / (n + 1) > alpha) {
-    stop(sprintf(paste0("with %d permutations the smallest p-value is ",
-                        "%.4g, which is above alpha = %.4g: no size ",
-                        "could ever be detected"),
-                 n, 1 / (n + 1), alpha), call. = FALSE)
-  }
-  if (!is.null(seed)) seed <- .rmbl_r_seed(seed)
-  if (!is.null(seed)) .rmbl_local_seed(seed)
 
   pg <- blprog("power curve", length(sizes) * reps)
   on.exit(pg$done(), add = TRUE)
-  rows <- lapply(seq_along(sizes), function(si) {
-    sz <- sizes[[si]]
-    hits <- 0L
-    usable <- 0L
-    for (r in seq_len(reps)) {
-      pg$update((si - 1L) * reps + r - 1L, sprintf("size %s, rep %d/%d", format(sz), r, reps))
-      d <- tryCatch(inject(data, sz), error = .rmbl_or(NULL))
-      if (!is.data.frame(d)) next
-      obs <- tryCatch(as.numeric(stat(d))[1L],
-                      error = .rmbl_or(NA_real_))
-      if (!is.finite(obs)) next
-      null <- vapply(seq_len(n), function(i) {
-        z <- d
-        z[[trt]] <- sample(z[[trt]])
-        tryCatch(as.numeric(stat(z))[1L], error = .rmbl_or(NA_real_))
-      }, numeric(1))
-      ok <- is.finite(null)
-      if (!any(ok)) next
-      p <- (1 + sum(abs(null[ok]) >= abs(obs))) / (1 + sum(ok))
-      usable <- usable + 1L
-      if (p <= alpha) hits <- hits + 1L
-    }
-    data.frame(size = sz, detected = hits, reps = usable,
-               rate = if (usable > 0L) hits / usable else NA_real_,
-               stringsAsFactors = FALSE)
-  })
+  rows <- lapply(
+    seq_along(sizes),
+    .pwr_size,
+    sizes = sizes,
+    data = data,
+    stat = stat,
+    inject = inject,
+    trt = trt,
+    n = n,
+    reps = reps,
+    alpha = alpha,
+    pg = pg
+  )
   curve <- do.call(rbind, rows)
   rownames(curve) <- NULL
   pos <- curve[curve$size > 0 & !is.na(curve$rate) & curve$rate >= 0.8, ]
-  out <- list(curve = curve, alpha = alpha, n = n, reps = reps,
-              treatment = trt,
-              smadet = if (nrow(pos)) min(pos$size) else
-                NA_real_,
-              false_positive_rate =
-                curve$rate[curve$size == 0][1L])
+  out <- list(
+    curve = curve,
+    alpha = alpha,
+    n = n,
+    reps = reps,
+    treatment = trt,
+    smadet = if (nrow(pos)) {
+      min(pos$size)
+    } else {
+      NA_real_
+    },
+    false_positive_rate = curve$rate[curve$size == 0][1L]
+  )
   class(out) <- c("bricklayer_power", "list")
   out
 }
 
 #' @export
 format.bricklayer_power <- function(x, ...) {
-  c(.rmbl_rule("Positive controls: an injected effect of known size"),
-    sprintf("  %d permutations, %d repetition(s) per size, alpha %.3g",
-            x$n, x$reps, x$alpha),
-    .rmbl_rule(),
-    sprintf("  size %-10.4g detected %2d/%-2d  rate %s", x$curve$size,
-            x$curve$detected, x$curve$reps,
-            ifelse(is.na(x$curve$rate), "  --",
-                   sprintf("%.2f", x$curve$rate))),
-    .rmbl_rule(),
-    if (is.na(x$smadet))
-      "  no size was detected at a rate of 0.8: this analysis could not"
-    else
-      sprintf("  smallest size detected at a rate of 0.8: %.4g",
-              x$smadet),
-    if (is.na(x$smadet))
-      "  have seen any of the effects tried, so a null result from it"
-    else
-      "  a null result is informative only about effects at least this",
-    if (is.na(x$smadet))
-      "  says nothing about whether an effect is there"
-    else
-      "  large; smaller ones would have been missed",
-    .rmbl_rule())
+  cv <- x$curve
+  .rmbl_stat_block(
+    "Positive controls: an injected effect of known size",
+    facts = list(
+      Permutations = x$n,
+      `Repetitions per size` = x$reps,
+      Alpha = x$alpha,
+      Treatment = x$treatment,
+      `False positive rate` = x$false_positive_rate,
+      `Smallest detected` = if (!is.na(x$smadet)) x$smadet
+    ),
+    table = data.frame(
+      size = cv$size,
+      detected = sprintf("%d/%d", cv$detected, cv$reps),
+      rate = cv$rate,
+      stringsAsFactors = FALSE
+    ),
+    reading = if (is.na(x$smadet)) {
+      c(
+        "no size was detected at a rate of 0.8: this analysis could not",
+        "have seen any of the effects tried, so a null result from it",
+        "says nothing about whether an effect is there."
+      )
+    } else {
+      c(
+        sprintf("smallest size detected at a rate of 0.8: %.4g;", x$smadet),
+        "a null result is informative only about effects at least this",
+        "large; smaller ones would have been missed."
+      )
+    }
+  )
 }
 
-#' @rdname printmeth
-#' @export
-#' @method print bricklayer_power
-print.bricklayer_power <- .rmbl_print_via_format
+#' cpspwr()'s data, functions and treatment column, checked.
+#' @param data,stat,inject,trt As for cpspwr().
+#' @return The treatment column's name.
+#' @noRd
+.pwr_check_inputs <- function(data, stat, inject, trt) {
+  if (!is.data.frame(data) || nrow(data) < 4L) {
+    stop(
+      "cpspwr: `data` must be a data frame with at least 4 rows",
+      call. = FALSE
+    )
+  }
+  if (!is.function(stat) || !is.function(inject)) {
+    stop("`stat` and `inject` must both be functions", call. = FALSE)
+  }
+  if (is.null(trt)) {
+    stop(
+      "`trt` is required: the permutation null is built by ",
+      "shuffling it, and without one there is nothing to detect ",
+      "against",
+      call. = FALSE
+    )
+  }
+  trt <- as.character(trt)[1L]
+  if (!trt %in% names(data)) {
+    stop("cpspwr: `trt` is not a column of `data`", call. = FALSE)
+  }
+  trt
+}
+
+#' cpspwr()'s permutation count, repetitions and alpha, checked.
+#' @param n,reps,alpha As for cpspwr().
+#' @return A list: n, reps and alpha.
+#' @noRd
+.pwr_check_counts <- function(n, reps, alpha) {
+  n <- .rmbl_num(n, "n", integer = TRUE)[1L]
+  reps <- .rmbl_num(reps, "reps", integer = TRUE)[1L]
+  if (is.na(n) || n < 9L) {
+    stop("`n` must be at least 9", call. = FALSE)
+  }
+  alpha <- .rmbl_conf_level(alpha, "alpha")
+  if (is.na(reps) || reps < 1L) {
+    stop("`reps` must be at least 1", call. = FALSE)
+  }
+  if (1 / (n + 1) > alpha) {
+    stop(
+      sprintf(
+        paste0(
+          "with %d permutations the smallest p-value is ",
+          "%.4g, which is above alpha = %.4g: no size ",
+          "could ever be detected"
+        ),
+        n,
+        1 / (n + 1),
+        alpha
+      ),
+      call. = FALSE
+    )
+  }
+  list(n = n, reps = reps, alpha = alpha)
+}
+
+#' cpspwr()'s effect sizes: finite numbers, at least one, with 0 added.
+#'
+#' NA and NaN were dropped by unique() and sort() without a word, and an empty
+#' vector gave the curve at 0 alone.
+#' @param sizes The sizes passed by the user.
+#' @return The sizes, 0 added, unique and sorted.
+#' @noRd
+.pwr_sizes <- function(sizes) {
+  sizes <- .rmbl_num(sizes, "sizes")
+  if (!length(sizes) || !all(is.finite(sizes))) {
+    stop(
+      .rmbl_fn(),
+      "`sizes` must be finite numbers (no NA, NaN or Inf), at least one",
+      call. = FALSE
+    )
+  }
+  sort(unique(c(0, sizes)))
+}
+
+#' The share of injected effects of one size that the permutation test
+#' detects.
+#' @param si The size's place.
+#' @param sizes The sizes.
+#' @param data,stat,inject,trt,n,reps,alpha As for cpspwr().
+#' @param pg The progress bar, updated once per repetition.
+#' @return A one-row data frame.
+#' @noRd
+.pwr_size <- function(si, sizes, data, stat, inject, trt, n, reps, alpha, pg) {
+  sz <- sizes[[si]]
+  hits <- 0L
+  usable <- 0L
+  for (r in seq_len(reps)) {
+    pg$update(
+      (si - 1L) * reps + r - 1L,
+      sprintf("size %s, rep %d/%d", format(sz), r, reps)
+    )
+    d <- tryCatch(inject(data, sz), error = .rmbl_or(NULL))
+    if (!is.data.frame(d)) {
+      next
+    }
+    obs <- tryCatch(as.numeric(stat(d))[1L], error = .rmbl_or(NA_real_))
+    if (!is.finite(obs)) {
+      next
+    }
+    null <- vapply(
+      seq_len(n),
+      function(i) {
+        z <- d
+        z[[trt]] <- sample(z[[trt]])
+        tryCatch(as.numeric(stat(z))[1L], error = .rmbl_or(NA_real_))
+      },
+      numeric(1)
+    )
+    ok <- is.finite(null)
+    if (!any(ok)) {
+      next
+    }
+    p <- (1 + sum(abs(null[ok]) >= abs(obs))) / (1 + sum(ok))
+    usable <- usable + 1L
+    if (p <= alpha) hits <- hits + 1L
+  }
+  data.frame(
+    size = sz,
+    detected = hits,
+    reps = usable,
+    rate = if (usable > 0L) hits / usable else NA_real_,
+    stringsAsFactors = FALSE
+  )
+}

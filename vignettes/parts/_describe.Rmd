@@ -276,13 +276,21 @@ op <- par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
 for (nm in names(messy)) {
   x <- messy[[nm]]
   if (nm == "skewed") {
-    hist(log10(x), breaks = 30, col = blpal()[2], main = "skewed (log10 scale)", xlab = "log10(value)")
+    hist(
+      log10(x),
+      breaks = 30,
+      col = blpal()[2],
+      main = "skewed (log10 scale)",
+      xlab = "log10(value)"
+    )
   } else {
     hist(x, breaks = 30, col = blpal()[2], main = nm, xlab = "value")
   }
 }
 par(op)
-plotecdf(c(reference$score, fresh$score),
-         rep(c("reference", "fresh"), c(nrow(reference), nrow(fresh))),
-         main = "Fresh scores against the reference")
+plotecdf(
+  c(reference$score, fresh$score),
+  rep(c("reference", "fresh"), c(nrow(reference), nrow(fresh))),
+  main = "Fresh scores against the reference"
+)
 ```

@@ -75,11 +75,32 @@ cases <- list(
     r <- run("archive", "save", "https://example.org/", "--reason", "x", "--also", "dropbox")
     check(r$status == 2L && grepl("--also takes one value", r$text, fixed = TRUE), r$text)
     r <- run("archive", "get", "https://example.org/"); check(r$status == 2L && grepl("-o FILE", r$text, fixed = TRUE), r$text)
+    # push: a capture kept here, sent on later; checked offline, nothing sent
+    r <- run("archive", "help"); check(grepl("archive push DIR", r$text, fixed = TRUE), r$text)
+    r <- run("archive", "push", home); check(r$status == 2L && grepl("--reason", r$text, fixed = TRUE), r$text)
+    r <- run("archive", "push", home, "--reason", "Tables cited in the smoke study")
+    check(r$status == 1L && grepl("manifest.json is missing", r$text, fixed = TRUE), r$text)
     a <- Sys.getenv("MORIE_SMOKE_ARCHIVE")
     if (!nzchar(a)) return(message("  archive find: SKIP (no MORIE_SMOKE_ARCHIVE)"))
     Sys.setenv(MORIE_ARCHIVE_URL = a)
     r <- run("archive", "find", "https://cran.r-project.org/web/packages/rmoriebricklayer/index.html", "--json")
     check(r$status %in% c(0L, 1L) && startsWith(trimws(r$text), "["), substr(r$text, 1, 300))
+  },
+  pack = function() {
+    # a starter project, then its zip, in the empty HOME
+    d <- file.path(home, "packproj")
+    r <- run("pack", "--new", d, "--title", "Smoke study"); check(r$status == 0L && file.exists(file.path(d, "analysis.R")), r$text)
+    r <- run("pack", d, "--dest", home); check(r$status == 0L && file.exists(file.path(home, "packproj_v1.zip")), r$text)
+    # the zip run as a recipient's copy, offline on synthetic data, and checked
+    r <- run("pack", "--check", file.path(home, "packproj_v1.zip"), "--synthetic")
+    if (identical(Sys.info()[["sysname"]], "Darwin")) {
+      # macOS cannot see a process that leaves the run: without a container the check fails closed (by design)
+      check(r$status == 1L && grepl("cannot detect escaped processes", r$text, fixed = TRUE) && grepl("1 of 7 checks failed", r$text, fixed = TRUE), r$text)
+    } else {
+      check(r$status == 0L && grepl("Bundle audit: VERIFIED", r$text, fixed = TRUE), r$text)
+    }
+    r <- run("pack", "--check", file.path(home, "none.zip")); check(r$status == 1L && grepl("not an existing .zip", r$text, fixed = TRUE), r$text)
+    r <- run("pack"); check(r$status == 2L && grepl("pack DIR", r$text, fixed = TRUE), r$text)
   },
   config = function() {
     r <- run("config"); check(r$status == 0 && grepl("route", r$text, fixed = TRUE), r$text)

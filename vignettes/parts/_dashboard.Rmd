@@ -1,7 +1,13 @@
 # The analysis dashboard
 
 ```{r dashboard-setup, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4, dpi = 72)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 4,
+  dpi = 72
+)
 library(rmoriebricklayer)
 ```
 
@@ -132,7 +138,11 @@ plot(fit, which = "qq", fams = c("gamma", "weibull"))
 And what the Proof ledger tab runs on the sample ledger:
 
 ```{r}
-led <- ldgrread(system.file("extdata", "ledger_sample.json", package = "rmoriebricklayer"))
+led <- ldgrread(system.file(
+  "extdata",
+  "ledger_sample.json",
+  package = "rmoriebricklayer"
+))
 led
 ldgrchk(led)[, c("check", "ok", "severity")]
 ```

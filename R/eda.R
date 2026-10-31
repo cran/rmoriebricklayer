@@ -6,40 +6,6 @@
 # shape of every column, where the gaps are, which values dominate, and
 # which rows do not belong.
 
-#' Draws a one-line histogram.
-#'
-#' A one-line histogram from block-drawing characters, or ASCII where the
-#' console cannot render them. Eight levels is what the Unicode blocks
-#' give; the ASCII fallback has five and says less, but says it legibly.
-#' @param x The values.
-#' @param bins The number of bins, one character each.
-#' @return One string.
-#' @noRd
-.rmbl_sparkline <- function(x, bins = 10L) {
-  x <- .rmbl_num(x, "x")
-  x <- x[is.finite(x)]
-  if (length(x) == 0L) return(strrep(" ", bins))
-  rng <- range(x)
-  if (!is.finite(rng[1L]) || rng[1L] == rng[2L]) {
-    # no spread to show: one full bar says "all the same value"
-    ticks <- if (.rmbl_unicode_ok()) "\u2588" else "#"
-    return(paste0(strrep(" ", bins %/% 2L), ticks,
-                  strrep(" ", bins - bins %/% 2L - 1L)))
-  }
-  breaks <- seq(rng[1L], rng[2L], length.out = bins + 1L)
-  counts <- graphics::hist(x, breaks = breaks, plot = FALSE)$counts
-  levels <- if (.rmbl_unicode_ok()) {
-    c("\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586",
-      "\u2587", "\u2588")
-  } else {
-    c(".", ":", "-", "=", "#")
-  }
-  mx <- max(counts)
-  idx <- ifelse(counts == 0L, 0L,
-                pmax(1L, ceiling(counts / mx * length(levels))))
-  paste(ifelse(idx == 0L, " ", levels[pmax(1L, idx)]), collapse = "")
-}
-
 #' Inline histogram for a numeric vector
 #'
 #' Draws a one-line sketch of a column's distribution, as block characters
@@ -62,7 +28,7 @@
 #' Errors: \code{x} that is not numeric; \code{bins} that is not one
 #' positive whole number.
 #'
-#' @param x Numeric vector.
+#' @param x Numeric vector drawn as an inline histogram.
 #' @param bins Number of bins, and so of characters, one positive whole
 #'   number (default 10).
 #' @return A length-1 character vector of \code{bins} characters.
@@ -163,85 +129,87 @@ inlhist <- function(x, bins = 10L) {
 #' # a data frame needs a column name
 #' try(freqtbl(df))
 #' @export
-freqtbl <- function(data, col = NULL, maxlvl = 25L,
-                            sort = TRUE) {
-  .rmbl_no_fn(data = data, column = col)
-  v <- if (is.data.frame(data)) {
-    if (is.null(col)) {
-      stop("`col` is required when `data` is a data frame", call. = FALSE)
-    }
-    col <- as.character(col)[1L]
-    if (!col %in% names(data)) {
-      stop(sprintf("no such column: %s", col), call. = FALSE)
-    }
-    data[[col]]
-  } else {
-    data
-  }
+freqtbl <- function(data, col = NULL, maxlvl = 25L, sort = TRUE) {
+  .rmbl_no_fn(data = data, col = col)
+  .rmbl_flag1(sort, "sort")
+  v <- .rmbl_freq_values(data, col)
   maxlvl <- .rmbl_num(maxlvl, "maxlvl", integer = TRUE)
   if (length(maxlvl) != 1L || is.na(maxlvl) || maxlvl < 1L) {
     stop("freqtbl: `maxlvl` must be a single positive integer", call. = FALSE)
   }
   n_all <- length(v)
   if (n_all == 0L) {
-    out <- data.frame(value = character(0), n = integer(0),
-                      pct = numeric(0), pctvalid = numeric(0),
-                      stringsAsFactors = FALSE)
+    out <- data.frame(
+      value = character(0),
+      n = integer(0),
+      pct = numeric(0),
+      pctvalid = numeric(0),
+      stringsAsFactors = FALSE
+    )
     class(out) <- c("bricklayer_freq", "data.frame")
     return(out)
   }
   n_na <- sum(is.na(v))
   n_valid <- n_all - n_na
   tab <- table(as.character(v[!is.na(v)]))
-  if (isTRUE(sort)) tab <- base::sort(tab, decreasing = TRUE)
+  if (sort) {
+    tab <- base::sort(tab, decreasing = TRUE)
+  }
 
-  vals <- names(tab)
-  counts <- as.integer(tab)
-  if (length(vals) > maxlvl) {
-    keep <- seq_len(maxlvl)
-    other <- sum(counts[-keep])
-    vals <- c(vals[keep], "(other)")
-    counts <- c(counts[keep], other)
-  }
-  if (n_na > 0L) {
-    vals <- c(vals, NA_character_)
-    counts <- c(counts, n_na)
-  }
+  lv <- .rmbl_freq_levels(tab, maxlvl, n_na)
+  vals <- lv$vals
+  counts <- lv$counts
   out <- data.frame(
-    value = vals, n = as.integer(counts),
+    value = vals,
+    n = as.integer(counts),
     pct = 100 * counts / n_all,
     # the missing row has no share of the valid values, by definition
-    pctvalid = ifelse(is.na(vals), NA_real_,
-                       if (n_valid > 0L) 100 * counts / n_valid else NA_real_),
-    stringsAsFactors = FALSE)
+    pctvalid = ifelse(
+      is.na(vals),
+      NA_real_,
+      if (n_valid > 0L) 100 * counts / n_valid else NA_real_
+    ),
+    stringsAsFactors = FALSE
+  )
   rownames(out) <- NULL
   class(out) <- c("bricklayer_freq", "data.frame")
   out
 }
 
 #' @export
-print.bricklayer_freq <- function(x, ...) {
-  if (.rmbl_needs_cols(x, c("value", "n", "pct", "pctvalid"))) {
-    return(invisible(x))
+format.bricklayer_freq <- function(x, digits = 4L, ...) {
+  title <- "Frequency table"
+  need <- c("value", "n", "pct", "pctvalid")
+  fb <- .rmbl_df_fallback(x, title, need, digits)
+  if (!is.null(fb)) {
+    return(fb)
   }
-  cat(.rmbl_rule("Frequency table"), "\n")
-  df <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
-  if (nrow(df) == 0L) {
-    cat("  (no values)\n")
-    cat(.rmbl_rule(), "\n")
-    return(invisible(x))
-  }
-  g <- .rmbl_glyphs()
-  df$value <- ifelse(is.na(df$value), paste0(g$dash, " (missing)"), df$value)
-  df$pct <- formatC(df$pct, format = "f", digits = 1)
-  df$pctvalid <- ifelse(is.na(df$pctvalid), g$dash,
-                         formatC(df$pctvalid, format = "f", digits = 1))
-  df$bar <- vapply(x$n, function(k) {
-    strrep("#", as.integer(round(20 * k / max(x$n))))
-  }, character(1))
-  print(df, row.names = FALSE)
-  cat(.rmbl_rule(), "\n")
-  invisible(x)
+  df <- .rmbl_plain(x, need)
+  miss <- is.na(df$value)
+  df$value <- ifelse(miss, paste0(.rmbl_glyphs()$dash, " (missing)"), df$value)
+  df$pct <- round(df$pct, 1L)
+  df$pctvalid <- round(df$pctvalid, 1L)
+  top <- max(c(1, x$n))
+  df$bar <- strrep("#", as.integer(round(20 * df$n / top)))
+  .rmbl_res_block(
+    title,
+    facts = list(
+      Values = sum(x$n),
+      `Levels shown` = sum(!miss),
+      Missing = if (any(miss)) sum(x$n[miss]) else 0L
+    ),
+    tables = if (nrow(df)) df,
+    reading = if (nrow(df)) {
+      paste(
+        "pct is the share of all values, pctvalid the share of the",
+        "non-missing ones; the bar is scaled to the commonest level."
+      )
+    } else {
+      "(no values)"
+    },
+    digits = digits,
+    maxrows = 40L
+  )
 }
 
 #' Full pairwise correlation table
@@ -267,7 +235,7 @@ print.bricklayer_freq <- function(x, ...) {
 #' \code{minprs} not a whole number of at least 2; an invalid
 #' \code{meth}.
 #'
-#' @param data A data frame; non-numeric columns are ignored.
+#' @param data A data frame; its numeric columns are correlated in pairs.
 #' @param meth \code{"spearman"} (default) or \code{"pearson"}. See
 #'   [topcors()] for why the rank correlation is
 #'   the default.
@@ -306,14 +274,18 @@ print.bricklayer_freq <- function(x, ...) {
 #' # one numeric column cannot be correlated
 #' try(cortbl(data.frame(a = 1:5, b = letters[1:5])))
 #' @export
-cortbl <- function(data, meth = c("spearman", "pearson"),
-                              minprs = 3L) {
+cortbl <- function(data, meth = c("spearman", "pearson"), minprs = 3L) {
   meth <- .rmbl_arg(meth)
-  if (!is.data.frame(data)) stop("cortbl: `data` must be a data frame", call. = FALSE)
+  if (!is.data.frame(data)) {
+    stop("cortbl: `data` must be a data frame", call. = FALSE)
+  }
   .rmbl_df_names(data)
   num <- names(data)[vapply(data, is.numeric, logical(1))]
   if (length(num) < 2L) {
-    stop("cortbl: need at least two numeric columns to correlate", call. = FALSE)
+    stop(
+      "cortbl: need at least two numeric columns to correlate",
+      call. = FALSE
+    )
   }
   minprs <- .rmbl_num(minprs, "minprs", integer = TRUE)
   if (length(minprs) != 1L || is.na(minprs) || minprs < 2L) {
@@ -328,13 +300,20 @@ cortbl <- function(data, meth = c("spearman", "pearson"),
     b <- data[[pairs[2L, j]]]
     ok <- !is.na(a) & !is.na(b)
     np <- sum(ok)
-    val <- if (np < minprs) NA_real_ else if (identical(meth, "spearman")) {
+    val <- if (np < minprs) {
+      NA_real_
+    } else if (identical(meth, "spearman")) {
       cspr(a[ok], b[ok])
     } else {
       ccorr(a[ok], b[ok])
     }
-    data.frame(x = pairs[1L, j], y = pairs[2L, j], correlation = val,
-               nprs = np, stringsAsFactors = FALSE)
+    data.frame(
+      x = pairs[1L, j],
+      y = pairs[2L, j],
+      correlation = val,
+      nprs = np,
+      stringsAsFactors = FALSE
+    )
   })
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
@@ -344,28 +323,44 @@ cortbl <- function(data, meth = c("spearman", "pearson"),
 }
 
 #' @export
-print.bricklayer_cortable <- function(x, ...) {
-  if (.rmbl_needs_cols(x, c("x", "y", "correlation", "nprs"))) {
-    return(invisible(x))
+format.bricklayer_cortable <- function(x, digits = 3L, ...) {
+  meth <- attr(x, "method")
+  title <- paste0("Correlations (", meth %||% "?", ")")
+  need <- c("x", "y", "correlation", "nprs")
+  fb <- .rmbl_df_fallback(x, title, need, digits)
+  if (!is.null(fb)) {
+    return(fb)
   }
-  cat(.rmbl_rule(paste0("Correlations (", attr(x, "method"), ")")), "\n")
-  df <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
-  attr(df, "method") <- NULL
-  df$correlation <- ifelse(is.na(df$correlation), .rmbl_glyphs()$dash,
-                           formatC(df$correlation, format = "f", digits = 3))
-  print(df, row.names = FALSE)
-  cat(.rmbl_rule(), "\n")
-  invisible(x)
+  ok <- is.finite(x$correlation)
+  .rmbl_res_block(
+    title,
+    facts = list(
+      Method = if (identical(meth, "spearman")) {
+        "Spearman (rank)"
+      } else {
+        meth
+      },
+      Pairs = nrow(x),
+      `Strongest |r|` = if (any(ok)) max(abs(x$correlation[ok]))
+    ),
+    tables = .rmbl_plain(x, need),
+    reading = paste(
+      "Each row is one pair of numeric columns, over the rows where both",
+      "are present (nprs); a correlation is blank when too few pairs remain."
+    ),
+    digits = digits,
+    maxrows = 40L
+  )
 }
 
 #' Drop empty or constant columns and rows
 #'
 #' \code{drpempty()} removes rows or columns that are entirely missing.
-#' \code{drpconst()} removes columns that hold a single distinct
-#' value. They are the counterparts of the janitor functions
-#' \code{remove_empty()} and \code{remove_constant()}. Use them after reading a spreadsheet
-#' export, which often carries blank padding rows, empty columns and
-#' columns that repeat one value (a year, a jurisdiction) on every row.
+#' \code{drpconst()} removes columns that hold a single distinct value. They are
+#' the counterparts of the janitor functions \code{remove_empty()} and
+#' \code{remove_constant()}. Use them after reading a spreadsheet export, which
+#' often carries blank padding rows, empty columns and columns that repeat one
+#' value (a year, a jurisdiction) on every row.
 #'
 #' @details
 #' A constant column carries no information and breaks anything that scales
@@ -385,12 +380,15 @@ print.bricklayer_cortable <- function(x, ...) {
 #' Errors: \code{data} not a data frame (or with missing or duplicated names);
 #' \code{which} other than \code{"rows"} and/or \code{"cols"}.
 #'
-#' @param data A data frame.
+#' @param data A data frame whose empty rows or columns are dropped.
 #' @param which \code{"rows"}, \code{"cols"}, or both (the
 #'   default, \code{c("rows", "cols")}).
 #' @param naasval Logical: treat \code{NA} as a distinct
 #'   value, so a column of \code{NA}s plus one real value counts as two
 #'   (default \code{FALSE}).
+#' @param quiet Logical: \code{TRUE} skips the boxed summary of what was
+#'   dropped (rows and columns before and after, the columns removed), which is
+#'   otherwise sent through \code{message()}; default \code{FALSE}.
 #' @return The data frame, with the offending rows or columns removed. The
 #'   names of the columns that were dropped are attached as the
 #'   \code{"dropped"} attribute (a character vector, empty when none); dropped
@@ -425,10 +423,14 @@ print.bricklayer_cortable <- function(x, ...) {
 #' try(drpempty(c(1, NA)))
 #' @name drp
 #' @export
-drpempty <- function(data, which = c("rows", "cols")) {
-  if (!is.data.frame(data)) stop("drpempty: `data` must be a data frame", call. = FALSE)
+drpempty <- function(data, which = c("rows", "cols"), quiet = FALSE) {
+  if (!is.data.frame(data)) {
+    stop("drpempty: `data` must be a data frame", call. = FALSE)
+  }
   .rmbl_df_names(data)
   which <- .rmbl_arg(which, c("rows", "cols"), several = TRUE)
+  quiet <- .rmbl_flag1(quiet, "quiet")
+  before <- dim(data)
   dropped <- character(0)
   if ("cols" %in% which && ncol(data) > 0L) {
     empty <- vapply(data, function(v) all(is.na(v)), logical(1))
@@ -441,25 +443,48 @@ drpempty <- function(data, which = c("rows", "cols")) {
     rownames(data) <- NULL
   }
   attr(data, "dropped") <- dropped
+  if (!quiet) {
+    .rmbl_note_box(.rmbl_clean_box(
+      "Empty rows and columns dropped",
+      before,
+      dim(data),
+      list(`Columns dropped (all missing)` = dropped)
+    ))
+  }
   data
 }
 
 #' @rdname drp
 #' @export
-drpconst <- function(data, naasval = FALSE) {
-  if (!is.data.frame(data)) stop("drpconst: `data` must be a data frame", call. = FALSE)
+drpconst <- function(data, naasval = FALSE, quiet = FALSE) {
+  if (!is.data.frame(data)) {
+    stop("drpconst: `data` must be a data frame", call. = FALSE)
+  }
   .rmbl_df_names(data)
+  quiet <- .rmbl_flag1(quiet, "quiet")
   if (ncol(data) == 0L) {
     attr(data, "dropped") <- character(0)
     return(data)
   }
-  const <- vapply(data, function(v) {
-    u <- if (isTRUE(naasval)) unique(v) else unique(v[!is.na(v)])
-    length(u) <= 1L
-  }, logical(1))
+  const <- vapply(
+    data,
+    function(v) {
+      u <- if (isTRUE(naasval)) unique(v) else unique(v[!is.na(v)])
+      length(u) <= 1L
+    },
+    logical(1)
+  )
   dropped <- names(data)[const]
   out <- data[, !const, drop = FALSE]
   attr(out, "dropped") <- dropped
+  if (!quiet) {
+    .rmbl_note_box(.rmbl_clean_box(
+      "Constant columns dropped",
+      dim(data),
+      dim(out),
+      list(`Columns dropped (one value)` = dropped)
+    ))
+  }
   out
 }
 
@@ -503,6 +528,9 @@ drpconst <- function(data, naasval = FALSE) {
 #' @param sep Separator, a string, used between words for \code{"snake"},
 #'   \code{"screaming_snake"} and \code{"none"}, and before the number that
 #'   disambiguates a duplicate in every case (default \code{"_"}).
+#' @param quiet Logical: \code{TRUE} skips the boxed list of the names that
+#'   changed, which is otherwise sent through \code{message()} (so
+#'   \code{suppressMessages()} also silences it); default \code{FALSE}.
 #' @return For a data frame, the data frame with new names and an
 #'   \code{"orignms"} attribute (character, the names before cleaning);
 #'   for a character vector, the cleaned character vector.
@@ -528,20 +556,152 @@ drpconst <- function(data, naasval = FALSE) {
 #' # an unknown case is an error
 #' try(clncolnms("a b", case = "kebab"))
 #' @export
-clncolnms <- function(data, case = c("snake", "lower_camel",
-                                              "upper_camel",
-                                              "screaming_snake", "none"),
-                               sep = "_") {
+clncolnms <- function(
+  data,
+  case = c("snake", "lower_camel", "upper_camel", "screaming_snake", "none"),
+  sep = "_",
+  quiet = FALSE
+) {
   .rmbl_no_fn(data = data)
   case <- .rmbl_arg(case)
   sep <- .rmbl_text1(sep, "sep")
+  quiet <- .rmbl_flag1(quiet, "quiet")
+  .cln_data(data)
   nms <- if (is.data.frame(data)) names(data) else as.character(data)
   if (length(nms) == 0L) {
-    if (is.data.frame(data)) return(data)
+    if (is.data.frame(data)) {
+      return(data)
+    }
     return(character(0))
   }
   original <- nms
+  words <- strsplit(.rmbl_name_words(nms), " ", fixed = TRUE)
+  out <- vapply(
+    words,
+    function(w) .rmbl_case_words(w[nzchar(w)], case, sep),
+    character(1)
+  )
+  out <- .rmbl_dedup_names(out, sep)
+  if (!quiet) {
+    .rmbl_note_box(.rmbl_rename_box(original, out, dim(data)))
+  }
+  if (is.data.frame(data)) {
+    names(data) <- out
+    attr(data, "orignms") <- original
+    return(data)
+  }
+  out
+}
 
+#' Draws a one-line histogram.
+#'
+#' A one-line histogram from block-drawing characters, or ASCII where the
+#' console cannot render them. Eight levels is what the Unicode blocks
+#' give; the ASCII fallback has five and says less, but says it legibly.
+#' @param x The values binned into the sparkline.
+#' @param bins The number of bins, one character each.
+#' @return One string.
+#' @noRd
+.rmbl_sparkline <- function(x, bins = 10L) {
+  x <- .rmbl_num(x, "x")
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) {
+    return(strrep(" ", bins))
+  }
+  rng <- range(x)
+  if (!is.finite(rng[1L]) || rng[1L] == rng[2L]) {
+    # no spread to show: one full bar says "all the same value"
+    ticks <- if (.rmbl_unicode_ok()) "\u2588" else "#"
+    return(paste0(
+      strrep(" ", bins %/% 2L),
+      ticks,
+      strrep(" ", bins - bins %/% 2L - 1L)
+    ))
+  }
+  breaks <- seq(rng[1L], rng[2L], length.out = bins + 1L)
+  counts <- graphics::hist(x, breaks = breaks, plot = FALSE)$counts
+  levels <- if (.rmbl_unicode_ok()) {
+    c(
+      "\u2581",
+      "\u2582",
+      "\u2583",
+      "\u2584",
+      "\u2585",
+      "\u2586",
+      "\u2587",
+      "\u2588"
+    )
+  } else {
+    c(".", ":", "-", "=", "#")
+  }
+  mx <- max(counts)
+  idx <- ifelse(
+    counts == 0L,
+    0L,
+    pmax(1L, ceiling(counts / mx * length(levels)))
+  )
+  paste(ifelse(idx == 0L, " ", levels[pmax(1L, idx)]), collapse = "")
+}
+
+#' Capitalises each word: the first letter upper case, the rest lower case.
+#' @param w The words.
+#' @return A character vector.
+#' @noRd
+.rmbl_capitalise <- function(w) {
+  if (length(w) == 0L) {
+    return(character(0))
+  }
+  paste0(toupper(substring(w, 1L, 1L)), tolower(substring(w, 2L)))
+}
+
+#' The vector freqtbl() tabulates: `data` itself or its column `col`.
+#' @param data,col As for freqtbl().
+#' @return The vector to tabulate.
+#' @noRd
+.rmbl_freq_values <- function(data, col) {
+  if (!is.data.frame(data)) {
+    return(data)
+  }
+  if (is.null(col)) {
+    stop("`col` is required when `data` is a data frame", call. = FALSE)
+  }
+  # c("z", "grade") tabulated "z" alone and said nothing of "grade"
+  col <- .rmbl_colnames(col, "col")
+  if (!col %in% names(data)) {
+    stop(sprintf("no such column: %s", col), call. = FALSE)
+  }
+  data[[col]]
+}
+
+#' freqtbl()'s rows: the first `maxlvl` levels, the rest as "(other)", and
+#' the missing values last.
+#' @param tab The table of the non-missing values.
+#' @param maxlvl The number of levels shown.
+#' @param n_na The number of missing values.
+#' @return A list with the row labels `vals` and their `counts`.
+#' @noRd
+.rmbl_freq_levels <- function(tab, maxlvl, n_na) {
+  vals <- names(tab)
+  counts <- as.integer(tab)
+  if (length(vals) > maxlvl) {
+    keep <- seq_len(maxlvl)
+    other <- sum(counts[-keep])
+    vals <- c(vals[keep], "(other)")
+    counts <- c(counts[keep], other)
+  }
+  if (n_na > 0L) {
+    vals <- c(vals, NA_character_)
+    counts <- c(counts, n_na)
+  }
+  list(vals = vals, counts = counts)
+}
+
+#' Column names as ASCII words separated by single spaces.
+#' @param nms The column names to split into words.
+#' @return A character vector, one string of words per name; `"x"` for a
+#'   name with no letters or digits.
+#' @noRd
+.rmbl_name_words <- function(nms) {
   # Transliterate first: an accented name must not become empty.
   out <- iconv(nms, to = "ASCII//TRANSLIT")
   out[is.na(out)] <- nms[is.na(out)]
@@ -554,19 +714,35 @@ clncolnms <- function(data, case = c("snake", "lower_camel",
   out <- gsub("[^A-Za-z0-9]+", " ", out)
   out <- trimws(out)
   out[!nzchar(out)] <- "x"
+  out
+}
 
-  words <- strsplit(out, " ", fixed = TRUE)
-  out <- vapply(words, function(w) {
-    w <- w[nzchar(w)]
-    switch(case,
-      snake = paste(tolower(w), collapse = sep),
-      screaming_snake = paste(toupper(w), collapse = sep),
-      lower_camel = paste0(tolower(w[1L]),
-                           paste(.rmbl_capitalise(w[-1L]), collapse = "")),
-      upper_camel = paste(.rmbl_capitalise(w), collapse = ""),
-      none = paste(w, collapse = sep))
-  }, character(1))
+#' Joins the words of one name in the case clncolnms() was asked for.
+#' @param w The non-empty words of the name.
+#' @param case,sep As for clncolnms().
+#' @return A single string.
+#' @noRd
+.rmbl_case_words <- function(w, case, sep) {
+  switch(
+    case,
+    snake = paste(tolower(w), collapse = sep),
+    screaming_snake = paste(toupper(w), collapse = sep),
+    lower_camel = paste0(
+      tolower(w[1L]),
+      paste(.rmbl_capitalise(w[-1L]), collapse = "")
+    ),
+    upper_camel = paste(.rmbl_capitalise(w), collapse = ""),
+    none = paste(w, collapse = sep)
+  )
+}
 
+#' Makes cleaned names valid and unique.
+#' @param out The cleaned names.
+#' @param sep The separator before a duplicate's number.
+#' @return The names, with an `x` before a leading digit and `sep2`, `sep3`,
+#'   ... after the second and later copies of a name.
+#' @noRd
+.rmbl_dedup_names <- function(out, sep) {
   # A name starting with a digit is not syntactically valid.
   out <- ifelse(grepl("^[0-9]", out), paste0("x", out), out)
   # Disambiguate duplicates rather than letting one silently win.
@@ -577,19 +753,19 @@ clncolnms <- function(data, case = c("snake", "lower_camel",
       out[idx] <- paste0(nm, c("", paste0(sep, seq_len(length(idx) - 1L) + 1L)))
     }
   }
-  if (is.data.frame(data)) {
-    names(data) <- out
-    attr(data, "orignms") <- original
-    return(data)
-  }
   out
 }
 
-#' Capitalises each word: the first letter upper case, the rest lower case.
-#' @param w The words.
-#' @return A character vector.
+#' Stops unless clncolnms() was given a data frame or column names without
+#' NA ("missing value where TRUE/FALSE needed" before).
+#' @param data What clncolnms() was given.
+#' @return NULL, invisibly.
 #' @noRd
-.rmbl_capitalise <- function(w) {
-  if (length(w) == 0L) return(character(0))
-  paste0(toupper(substring(w, 1L, 1L)), tolower(substring(w, 2L)))
+.cln_data <- function(data) {
+  if (!is.data.frame(data) &&
+        (!(is.character(data) || is.factor(data)) || anyNA(data))) {
+    stop("clncolnms: `data` must be a data frame or column names, ",
+         "without NA", call. = FALSE)
+  }
+  invisible(NULL)
 }

@@ -133,7 +133,13 @@ population is spread.
 
 ```{r banded-tables-and-concentration-bands-lorenz-plot, fig.width = 8, fig.height = 4}
 op <- par(mfrow = c(1, 2))
-barplot(counts, names.arg = b$label, col = blpal()[2], main = "Counts by band", ylab = "count")
+barplot(
+  counts,
+  names.arg = b$label,
+  col = blpal()[2],
+  main = "Counts by band",
+  ylab = "count"
+)
 plotlrnz(placements, main = "Concentration of placements")
 par(op)
 ```

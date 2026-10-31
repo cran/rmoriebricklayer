@@ -7,7 +7,8 @@ if (!interactive() && !any(nzchar(Sys.getenv(c("NOT_CRAN", "MY_UNIVERSE", "IN_PK
 }
 
 ## ----include = FALSE----------------------------------------------------------
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
@@ -108,8 +109,17 @@ ci_plot <- function(t, lab, main) {
   y <- seq_len(nrow(t))
   op <- par(mar = c(4, 10, 3, 1))
   on.exit(par(op))
-  plot(t$estimate, y, xlim = range(t$lower, t$upper, na.rm = TRUE), yaxt = "n", pch = 19,
-       col = blpal()[1], xlab = "estimate and 95% interval", ylab = "", main = main)
+  plot(
+    t$estimate,
+    y,
+    xlim = range(t$lower, t$upper, na.rm = TRUE),
+    yaxt = "n",
+    pch = 19,
+    col = blpal()[1],
+    xlab = "estimate and 95% interval",
+    ylab = "",
+    main = main
+  )
   segments(t$lower, y, t$upper, y, col = blpal()[1])
   axis(2, y, lab[o], las = 1, cex.axis = 0.7)
 }
@@ -117,7 +127,8 @@ t1 <- d[d$measure == d$measure[1], ]
 ci_plot(t1, paste(t1$group, t1$age), t1$measure[1])
 
 ## ----include = FALSE----------------------------------------------------------
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
@@ -203,8 +214,17 @@ ci_plot <- function(t, lab, main) {
   y <- seq_len(nrow(t))
   op <- par(mar = c(4, 10, 3, 1))
   on.exit(par(op))
-  plot(t$estimate, y, xlim = range(t$lower, t$upper, na.rm = TRUE), yaxt = "n", pch = 19,
-       col = blpal()[1], xlab = "estimate and 95% interval", ylab = "", main = main)
+  plot(
+    t$estimate,
+    y,
+    xlim = range(t$lower, t$upper, na.rm = TRUE),
+    yaxt = "n",
+    pch = 19,
+    col = blpal()[1],
+    xlab = "estimate and 95% interval",
+    ylab = "",
+    main = main
+  )
   segments(t$lower, y, t$upper, y, col = blpal()[1])
   axis(2, y, lab[o], las = 1, cex.axis = 0.7)
 }
@@ -281,13 +301,22 @@ sz <- rbind(
   "HQC-5" = hqcsz(5L)[c("public", "ciphertext")]
 )
 op <- par(mar = c(7, 5, 3, 1))
-barplot(t(sz), beside = TRUE, col = blpal()[1:2], ylab = "bytes", las = 2, cex.names = 0.8,
-        legend.text = c("public key", "ciphertext"), args.legend = list(x = "topleft", bty = "n"),
-        main = "Key and ciphertext sizes")
+barplot(
+  t(sz),
+  beside = TRUE,
+  col = blpal()[1:2],
+  ylab = "bytes",
+  las = 2,
+  cex.names = 0.8,
+  legend.text = c("public key", "ciphertext"),
+  args.legend = list(x = "topleft", bty = "n"),
+  main = "Key and ciphertext sizes"
+)
 par(op)
 
 ## ----include = FALSE----------------------------------------------------------
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
@@ -361,24 +390,35 @@ root <- tempfile("capsules-")
 for (nm in c("one", "two")) {
   d <- file.path(root, nm)
   dir.create(d, recursive = TRUE)
-  utils::write.csv(data.frame(x = 1:3), file.path(d, "data.csv"), row.names = FALSE)
-  writeLines('{"resource": {"filename": "data.csv"}}', file.path(d, "data_provenance.json"))
+  utils::write.csv(
+    data.frame(x = 1:3),
+    file.path(d, "data.csv"),
+    row.names = FALSE
+  )
+  writeLines(
+    '{"resource": {"filename": "data.csv"}}',
+    file.path(d, "data_provenance.json")
+  )
 }
 kf <- tempfile(fileext = ".json")
 writeLines(tojs(unclass(pqckg(height = 4)), auto_unbox = TRUE), kf)
 copy <- tempfile(fileext = ".json")
-invisible(file.copy(kf, copy))   # an old copy of the key, kept by mistake
+invisible(file.copy(kf, copy)) # an old copy of the key, kept by mistake
 
-status <- blcli(c("sign", root, "--scheme", "xmss-sha256", "--key-file", kf, "--json"),
-                out = function(s) NULL)
+status <- blcli(
+  c("sign", root, "--scheme", "xmss-sha256", "--key-file", kf, "--json"),
+  out = function(s) NULL
+)
 status
 state <- fromjs(paste(readLines(kf), collapse = "\n"))
-state$next_index                # two capsules signed, two indices used
+state$next_index # two capsules signed, two indices used
 state$used$generation
 
 # the old copy is refused: the bundles show indices it does not know are used
-blcli(c("sign", root, "--scheme", "xmss-sha256", "--key-file", copy, "--overwrite"),
-      out = function(s) cat(s[grepl("stale", s)]))
+blcli(
+  c("sign", root, "--scheme", "xmss-sha256", "--key-file", copy, "--overwrite"),
+  out = function(s) cat(grep("stale", s, fixed = TRUE, value = TRUE))
+)
 xmssidxseen(root)[, c("index", "reused")]
 
 ## ----post-quantum-signatures-wrong--------------------------------------------
@@ -399,12 +439,32 @@ sig <- cpssign(msg, key)
 cpsvrf(msg, sig, fipspubkey(key))
 
 ## ----post-quantum-signatures-signature-sizes-plot, fig.width = 7, fig.height = 4.5----
-sch <- c("ML-DSA-44", "ML-DSA-65", "ML-DSA-87", "SLH-DSA-SHA2-128f", "SLH-DSA-SHAKE-128s")
-sz <- t(vapply(sch, function(s) fipssz(s)[c("public_key", "signature")], numeric(2)))
+sch <- c(
+  "ML-DSA-44",
+  "ML-DSA-65",
+  "ML-DSA-87",
+  "SLH-DSA-SHA2-128f",
+  "SLH-DSA-SHAKE-128s"
+)
+sz <- t(vapply(
+  sch,
+  function(s) fipssz(s)[c("public_key", "signature")],
+  numeric(2)
+))
 op <- par(mar = c(9, 5, 3, 1))
-barplot(t(sz), beside = TRUE, log = "y", ylim = c(10, 2 * max(sz)), col = blpal()[1:2],
-        ylab = "bytes (log scale)", las = 2, cex.names = 0.8, legend.text = c("public key", "signature"),
-        args.legend = list(x = "topleft", bty = "n"), main = "Key and signature sizes")
+barplot(
+  t(sz),
+  beside = TRUE,
+  log = "y",
+  ylim = c(10, 2 * max(sz)),
+  col = blpal()[1:2],
+  ylab = "bytes (log scale)",
+  las = 2,
+  cex.names = 0.8,
+  legend.text = c("public key", "signature"),
+  args.legend = list(x = "topleft", bty = "n"),
+  main = "Key and signature sizes"
+)
 par(op)
 
 ## ----include = FALSE----------------------------------------------------------
@@ -412,7 +472,10 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
 
 ## ----side-channel-assurance-harnesses-----------------------------------------
-list.files(system.file(package = "rmoriebricklayer"), pattern = "^(ctcheck|dudect|tvla|fuzz)$")
+list.files(
+  system.file(package = "rmoriebricklayer"),
+  pattern = "^(ctcheck|dudect|tvla|fuzz)$"
+)
 
 ## ----side-channel-assurance-agree---------------------------------------------
 key <- kemkg(512)
@@ -425,17 +488,23 @@ sig <- cpssign("manifest", skey, determ = TRUE)
 cpsvrf("manifest", sig, fipspubkey(skey))
 
 ## ----side-channel-assurance-tvla-readme---------------------------------------
-readLines(system.file("tvla", "README.md", package = "rmoriebricklayer"), n = 12)
+readLines(
+  system.file("tvla", "README.md", package = "rmoriebricklayer"),
+  n = 12
+)
 
 ## ----side-channel-assurance-indigenous-masked---------------------------------
 getOption("rmoriebricklayer.masked", TRUE)
 
 ## ----side-channel-assurance-decap-timing-plot, fig.width = 7, fig.height = 4.5----
 bad <- sent$ciphertext
-substr(bad, 1, 1) <- if (substr(bad, 1, 1) == "0") "1" else "0"  # one hex digit changed
+# one hex digit changed
+substr(bad, 1, 1) <- if (substr(bad, 1, 1) == "0") "1" else "0"
 tm <- function(ct) {
   s <- proc.time()[["elapsed"]]
-  for (i in 1:200) kemdecap(key, ct)
+  for (i in 1:200) {
+    kemdecap(key, ct)
+  }
   (proc.time()[["elapsed"]] - s) / 200 * 1e6
 }
 honest <- tampered <- numeric(60)
@@ -443,6 +512,9 @@ for (k in 1:60) {
   honest[k] <- tm(sent$ciphertext)
   tampered[k] <- tm(bad)
 }
-plotecdf(c(honest, tampered), rep(c("honest ciphertext", "one digit changed"), each = 60),
-         main = "ML-KEM-512 decapsulation time (microseconds)")
+plotecdf(
+  c(honest, tampered),
+  rep(c("honest ciphertext", "one digit changed"), each = 60),
+  main = "ML-KEM-512 decapsulation time (microseconds)"
+)
 

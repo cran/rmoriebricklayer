@@ -34,8 +34,13 @@ test_that("a recorded number can be recovered from the manifest", {
   # A provenance record that cannot reproduce its own numbers is the one
   # failure mode this whole file exists to prevent.
   for (x in c(
-    1 / 3, pi, 1e-300, 2^-1074, .Machine$double.xmax,
-    .Machine$double.eps, 1234567.891011
+    1 / 3,
+    pi,
+    1e-300,
+    2^-1074,
+    .Machine$double.xmax,
+    .Machine$double.eps,
+    1234567.891011
   )) {
     m <- mkmnf(list(x = x), env = FALSE)
     back <- fromjs(mnfcanon(m))
@@ -69,8 +74,14 @@ test_that("the extremes survive, because the reader is ours", {
   # integer arithmetic and a remainder that decides the rounding, so
   # the answer is the same on every IEEE platform.
   for (x in c(
-    .Machine$double.xmax, 1e308, 1.5e300, 1e200, 1e100,
-    2^-1074, 5e-324, 1e-310
+    .Machine$double.xmax,
+    1e308,
+    1.5e300,
+    1e200,
+    1e100,
+    2^-1074,
+    5e-324,
+    1e-310
   )) {
     m <- mkmnf(list(x = x), env = FALSE)
     back <- fromjs(mnfcanon(m))$meta$x
@@ -101,12 +112,18 @@ test_that("decimal conversion is correctly rounded, not libc's guess", {
   # what any conforming converter must produce on every platform.
   hexdbl <- function(hex) {
     readBin(
-      as.raw(strtoi(substring(
-        hex, seq(1L, 15L, 2L),
-        seq(2L, 16L, 2L)
-      ), 16L)),
+      as.raw(strtoi(
+        substring(
+          hex,
+          seq(1L, 15L, 2L),
+          seq(2L, 16L, 2L)
+        ),
+        16L
+      )),
       "double",
-      n = 1L, size = 8L, endian = "little"
+      n = 1L,
+      size = 8L,
+      endian = "little"
     )
   }
   cases <- list(
@@ -151,11 +168,17 @@ test_that("the environment record carries the generator", {
   # a seed means nothing without the kind it was fed to.
   expect_true("rng_kind" %in% names(env))
   expect_match(env$rng_kind, "Mersenne-Twister|Wichmann|Marsaglia|Knuth")
-  expect_true(is.logical(env$rng_seeded))
-  expect_true(all(c(
-    "r_version", "platform", "os", "captured_utc",
-    "packages"
-  ) %in% names(env)))
+  expect_type(env$rng_seeded, "logical")
+  expect_true(all(
+    c(
+      "r_version",
+      "platform",
+      "os",
+      "captured_utc",
+      "packages"
+    ) %in%
+      names(env)
+  ))
   # and the recorded kind is the one in force
   old <- RNGkind()
   on.exit(RNGkind(old[1], old[2], old[3]), add = TRUE)
@@ -164,15 +187,10 @@ test_that("the environment record carries the generator", {
 })
 
 test_that("an attestation binds the manifest, the key and the note", {
-  m <- mkmnf(list(dataset = "otis", rows = 1200L),
-    env = FALSE
-  )
+  m <- mkmnf(list(dataset = "otis", rows = 1200L), env = FALSE)
   for (sch in c("ML-DSA-44", "SLH-DSA-SHAKE-128f")) {
     key <- fipskg(sch)
-    att <- cpsatst(m, key,
-      ctx = "release",
-      note = "counts as published"
-    )
+    att <- cpsatst(m, key, ctx = "release", note = "counts as published")
     expect_s3_class(att, "bricklayer_attestation")
     expect_identical(att$scheme, sch)
     expect_identical(att$digest, mnfdgst(m))
@@ -180,12 +198,8 @@ test_that("an attestation binds the manifest, the key and the note", {
     expect_true(res$ok, info = sch)
     expect_true(all(res$checks$ok))
     # naming the key that should have signed is part of the check
-    expect_true(cpschkatst(att, m,
-      keyexp = key$public
-    )$ok, info = sch)
-    expect_false(cpschkatst(att, m,
-      keyexp = fipskg(sch)$public
-    )$ok, info = sch)
+    expect_true(cpschkatst(att, m, keyexp = key$public)$ok, info = sch)
+    expect_false(cpschkatst(att, m, keyexp = fipskg(sch)$public)$ok, info = sch)
 
     # every field inside the payload is covered by the signature, so
     # editing any of them afterwards is detected
@@ -195,9 +209,7 @@ test_that("an attestation binds the manifest, the key and the note", {
     for (field in c("note", "context", "prehash", "signed_utc", "digest")) {
       bad <- att
       bad[[field]] <- paste0(bad[[field]], "x")
-      expect_false(cpschkatst(bad, m)$ok,
-        info = paste(sch, field)
-      )
+      expect_false(cpschkatst(bad, m)$ok, info = paste(sch, field))
     }
     # and a signature lifted from another attestation does not fit
     other <- cpsatst(m, key, ctx = "release", note = "other")
@@ -248,8 +260,12 @@ test_that("the falsification controls can fail, and do", {
     r$controls$passed[r$controls$control == ctrl]
   }
 
-  real <- cpsfals(d, function(z) stats::cor(z$x, z$y),
-    trt = "x", n = 199L, seed = 42L
+  real <- cpsfals(
+    d,
+    function(z) stats::cor(z$x, z$y),
+    trt = "x",
+    n = 199L,
+    seed = 42L
   )
   expect_s3_class(real, "bricklayer_falsification")
   expect_true(all(real$controls$passed))
@@ -257,17 +273,18 @@ test_that("the falsification controls can fail, and do", {
 
   # a constant is not an association, and the permutation control is
   # what says so: everything else about a constant is perfectly stable
-  const <- cpsfals(d, function(z) 0.5,
-    trt = "x",
-    n = 199L, seed = 42L
-  )
+  const <- cpsfals(d, function(z) 0.5, trt = "x", n = 199L, seed = 42L)
   expect_false(verdict(const, "permutation"))
   expect_true(verdict(const, "subset_stability"))
 
   # nor is noise
   noise <- data.frame(x = stats::rnorm(200), y = stats::rnorm(200))
-  nul <- cpsfals(noise, function(z) stats::cor(z$x, z$y),
-    trt = "x", n = 199L, seed = 7L
+  nul <- cpsfals(
+    noise,
+    function(z) stats::cor(z$x, z$y),
+    trt = "x",
+    n = 199L,
+    seed = 7L
   )
   expect_false(verdict(nul, "permutation"))
 
@@ -279,7 +296,9 @@ test_that("the falsification controls can fail, and do", {
       stats::cor(z$x, z$y) +
         if (".rmbl_random_common_cause" %in% names(z)) 1 else 0
     },
-    trt = "x", n = 99L, seed = 3L
+    trt = "x",
+    n = 99L,
+    seed = 3L
   )
   expect_false(verdict(peek, "random_common_cause"))
   expect_true(verdict(peek, "permutation"))
@@ -289,8 +308,12 @@ test_that("the permutation floor is reported rather than implied", {
   set.seed(2)
   d <- data.frame(x = stats::rnorm(60))
   d$y <- 2 * d$x + stats::rnorm(60, sd = 0.1)
-  r <- cpsfals(d, function(z) stats::cor(z$x, z$y),
-    trt = "x", n = 19L, seed = 1L
+  r <- cpsfals(
+    d,
+    function(z) stats::cor(z$x, z$y),
+    trt = "x",
+    n = 19L,
+    seed = 1L
   )
   p <- r$controls$value[r$controls$control == "permutation"]
   # 19 permutations cannot produce a p-value below 1/20, however strong
@@ -310,11 +333,11 @@ test_that("a skipped control is reported as skipped", {
   r <- cpsfals(d, function(z) mean(z$y), n = 49L, seed = 1L)
   sk <- r$controls[r$controls$control %in% c("permutation", "placebo"), ]
   expect_true(all(is.na(sk$passed)))
-  expect_true(all(grepl("skipped", sk$detail)))
+  expect_true(all(grepl("skipped", sk$detail, fixed = TRUE)))
   # the controls that do not need a treatment still ran
-  expect_true(all(!is.na(
+  expect_false(anyNA(
     r$controls$passed[r$controls$control == "subset_stability"]
-  )))
+  ))
   expect_null(r$treatment)
   # the RNG state is recorded, so the run can be repeated
   expect_match(r$rng_kind, "Mersenne-Twister")
@@ -335,9 +358,10 @@ test_that("falsification input is checked", {
     cpsfals(d, function(z) NA_real_, trt = "x"),
     "one finite number"
   )
-  expect_error(cpsfals(d, function(z) stop("boom"),
-    trt = "x"
-  ), "the statistic failed")
+  expect_error(
+    cpsfals(d, function(z) stop("boom"), trt = "x"),
+    "the statistic failed"
+  )
   expect_error(
     cpsfals(d, function(z) 1, trt = "nope"),
     "not a column"
@@ -375,7 +399,7 @@ test_that("the bundle's reader fallback works, since a bundle runs it", {
   # real behavioural divergence between the path the package takes and
   # the path a bundle takes.
   expect_warning(
-    fallback_na <- .rmbl_strtod("not a number"),
+    assign("fallback_na", .rmbl_strtod("not a number")),
     "NAs introduced by coercion"
   )
   expect_true(is.na(fallback_na))
@@ -385,7 +409,7 @@ test_that("the bundle's reader fallback works, since a bundle runs it", {
   cache$strtod <- TRUE
   expect_identical(.rmbl_strtod("0.1"), 0.1)
   expect_identical(.rmbl_strtod("1e23"), 1e23)
-  expect_silent(native_na <- .rmbl_strtod("not a number"))
+  expect_silent(assign("native_na", .rmbl_strtod("not a number")))
   expect_true(is.na(native_na))
 })
 
@@ -405,59 +429,201 @@ test_that("the reader is chosen once, not re-decided per number", {
   expect_true(isTRUE(cache$strtod))
 })
 
-test_that("a hash-based attestation carries its context, and a damaged key is reported", {
-  m <- mkmnf(list(a = 1), env = FALSE)
-  key <- pqckg(height = 4L)
-  att <- cpsatst(m, key, ctx = "release")
-  expect_identical(att$context, "release")
-  expect_true(cpschkatst(att, m)$ok)
-  bad <- att
-  bad$public <- substring(att$public, 1L, 100L)
-  res <- cpschkatst(bad, m)
-  expect_false(res$ok)
-  expect_match(res$checks$detail[res$checks$check == "signature"], "not usable")
-  expect_error(.rmbl_attest_key_from(bad), "64 bytes")
+test_that(
+  paste0(
+    "a hash-based attestation carries its context, and a damaged key is ",
+    "reported"
+  ),
+  {
+    m <- mkmnf(list(a = 1), env = FALSE)
+    key <- pqckg(height = 4L)
+    att <- cpsatst(m, key, ctx = "release")
+    expect_identical(att$context, "release")
+    expect_true(cpschkatst(att, m)$ok)
+    bad <- att
+    bad$public <- substring(att$public, 1L, 100L)
+    res <- cpschkatst(bad, m)
+    expect_false(res$ok)
+    expect_match(
+      res$checks$detail[res$checks$check == "signature"],
+      "not usable"
+    )
+    expect_error(.rmbl_attest_key_from(bad), "64 bytes")
+  }
+)
+
+test_that(
+  paste0(
+    "an hmac attestation names its key by id, checks with the secret, and ",
+    "refuses what hmac cannot bind"
+  ),
+  {
+    m <- mkmnf(list(a = 1), env = FALSE)
+    att <- cpsatst(m, "rmbl-test-secret-hmac", note = "shared")
+    # morie's field order and convention: public = HMAC-SHA-256(key, "public"),
+    # no context, no pre-hash
+    expect_named(
+      att,
+      c(
+        "digest",
+        "scheme",
+        "public",
+        "context",
+        "prehash",
+        "note",
+        "signed_utc",
+        "signature"
+      )
+    )
+    expect_identical(att$scheme, "hmac")
+    expect_identical(
+      att$public,
+      "1c28aab2838d16e632796fc899e5c4724117a19b60a66eb70f0a5b9bf55afe5b"
+    )
+    expect_identical(att$context, "")
+    expect_identical(att$prehash, "none")
+    expect_false(any(grepl("rmbl-test-secret-hmac", unlist(att), fixed = TRUE)))
+    res <- cpschkatst(
+      att,
+      m,
+      key = "rmbl-test-secret-hmac",
+      keyexp = att$public
+    )
+    expect_true(res$ok)
+    expect_identical(
+      res$checks$check,
+      c(
+        "attestation_complete",
+        "manifest_digest",
+        "key_as_expected",
+        "signature"
+      )
+    )
+    # a raw secret is the same key as its bytes
+    expect_true(cpschkatst(att, m, key = charToRaw("rmbl-test-secret-hmac"))$ok)
+    # the wrong key, no key, an edited field, a mismatched expected id
+    wrong <- cpschkatst(att, m, key = "another-secret")
+    expect_false(wrong$ok)
+    expect_identical(
+      wrong$checks$detail[wrong$checks$check == "signature"],
+      "the key given is not the key the attestation names"
+    )
+    none <- cpschkatst(att, m)
+    expect_false(none$ok)
+    expect_identical(
+      none$checks$detail[none$checks$check == "signature"],
+      "an hmac signature needs the shared key"
+    )
+    forged <- att
+    forged$note <- "edited"
+    expect_false(cpschkatst(forged, m, key = "rmbl-test-secret-hmac")$ok)
+    kx <- cpschkatst(
+      att,
+      m,
+      key = "rmbl-test-secret-hmac",
+      keyexp = strrep("0", 64L)
+    )
+    expect_false(kx$ok)
+    expect_identical(
+      kx$checks$detail[kx$checks$check == "key_as_expected"],
+      "the attestation carries a different key from the one expected"
+    )
+    expect_true(kx$checks$ok[kx$checks$check == "signature"])
+    expect_output(print(att), "hmac")
+    expect_error(cpsatst(m, "s", ctx = "release"), "no `ctx`")
+    expect_error(cpsatst(m, "s", prehash = "sha256"), "no `prehash`")
+    expect_error(cpsatst(m, ""), "shared secret")
+    expect_error(cpsatst(m, raw(0)), "shared secret")
+    expect_error(cpsatst(m, c("a", "b")), "shared secret")
+    expect_error(cpschkatst(att, m, key = function() 1), "not a function")
+  }
+)
+
+test_that("attestation errors name ctx and keyexp", {
+  f <- function() 1
+  expect_error(cpsatst(list(), NULL, ctx = f), "cpsatst: `ctx` must be data")
+  expect_error(
+    cpschkatst(list(), list(), keyexp = f),
+    "cpschkatst: `keyexp` must be data"
+  )
 })
 
-test_that("an hmac attestation names its key by id, checks with the secret, and refuses what hmac cannot bind", {
-  m <- mkmnf(list(a = 1), env = FALSE)
-  att <- cpsatst(m, "rmbl-test-secret-hmac", note = "shared")
-  # morie's field order and convention: public = HMAC-SHA-256(key, "public"), no context, no pre-hash
-  expect_identical(names(att), c(
-    "digest", "scheme", "public", "context", "prehash", "note", "signed_utc", "signature"
-  ))
-  expect_identical(att$scheme, "hmac")
-  expect_identical(att$public, "1c28aab2838d16e632796fc899e5c4724117a19b60a66eb70f0a5b9bf55afe5b")
-  expect_identical(att$context, "")
-  expect_identical(att$prehash, "none")
-  expect_false(any(grepl("rmbl-test-secret-hmac", unlist(att), fixed = TRUE)))
-  res <- cpschkatst(att, m, key = "rmbl-test-secret-hmac", keyexp = att$public)
-  expect_true(res$ok)
-  expect_identical(res$checks$check, c("attestation_complete", "manifest_digest", "key_as_expected", "signature"))
-  # a raw secret is the same key as its bytes
-  expect_true(cpschkatst(att, m, key = charToRaw("rmbl-test-secret-hmac"))$ok)
-  # the wrong key, no key, an edited field, a mismatched expected id
-  wrong <- cpschkatst(att, m, key = "another-secret")
-  expect_false(wrong$ok)
-  expect_identical(wrong$checks$detail[wrong$checks$check == "signature"],
-                   "the key given is not the key the attestation names")
-  none <- cpschkatst(att, m)
-  expect_false(none$ok)
-  expect_identical(none$checks$detail[none$checks$check == "signature"],
-                   "an hmac signature needs the shared key")
-  forged <- att
-  forged$note <- "edited"
-  expect_false(cpschkatst(forged, m, key = "rmbl-test-secret-hmac")$ok)
-  kx <- cpschkatst(att, m, key = "rmbl-test-secret-hmac", keyexp = strrep("0", 64L))
-  expect_false(kx$ok)
-  expect_identical(kx$checks$detail[kx$checks$check == "key_as_expected"],
-                   "the attestation carries a different key from the one expected")
-  expect_true(kx$checks$ok[kx$checks$check == "signature"])
-  expect_output(print(att), "hmac")
-  expect_error(cpsatst(m, "s", ctx = "release"), "no `ctx`")
-  expect_error(cpsatst(m, "s", prehash = "sha256"), "no `prehash`")
-  expect_error(cpsatst(m, ""), "shared secret")
-  expect_error(cpsatst(m, raw(0)), "shared secret")
-  expect_error(cpsatst(m, c("a", "b")), "shared secret")
-  expect_error(cpschkatst(att, m, key = function() 1), "not a function")
+# Prints `x` on an ASCII console: the lines and what print() returned.
+o1_box <- function(x, ...) {
+  withr::local_envvar(RMBL_ASCII_ONLY = "1")
+  tmp <- withr::local_tempfile()
+  v <- withr::with_output_sink(tmp, withVisible(print(x, ...)))
+  list(out = readLines(tmp), v = v)
+}
+
+# The box's frame, its title and the facts expected in it.
+o1_expect_box <- function(b, x, title, facts = character()) {
+  expect_false(b$v$visible)
+  expect_identical(b$v$value, x)
+  expect_match(b$out[1L], "^\\+-- ")
+  expect_true(grepl(title, b$out[1L], fixed = TRUE))
+  expect_match(b$out[length(b$out)], "^\\+-+\\+$")
+  for (f in facts) {
+    expect_true(any(grepl(f, b$out, fixed = TRUE)), info = f)
+  }
+}
+
+test_that("attestations and their checks print as boxes", {
+  key <- fipskg("ML-DSA-44")
+  m <- mkmnf(list(project = "demo"), env = FALSE)
+  a <- cpsatst(m, key, note = "release")
+  o1_expect_box(
+    o1_box(a),
+    a,
+    "Capsule attestation",
+    c("Scheme", "ML-DSA-44", "release", "cpschkatst()")
+  )
+  ck <- cpschkatst(a, m)
+  b <- o1_box(ck)
+  o1_expect_box(b, ck, "Attestation check: OK", c("VERIFIED", "signature"))
+  txt <- format(ck)
+  expect_true(any(grepl("^  ok +signature", txt)))
+  bad <- cpschkatst(a, mkmnf(list(project = "other"), env = FALSE))
+  b2 <- o1_box(bad)
+  o1_expect_box(b2, bad, "Attestation check: FAILED", "NOT VERIFIED")
+  expect_true(any(grepl("X +manifest_digest", b2$out)))
+})
+
+test_that("the check-row helpers lay out a verdict", {
+  ck <- data.frame(
+    check = c("a", "longer"),
+    ok = c(TRUE, NA),
+    detail = c("fine", NA),
+    stringsAsFactors = FALSE
+  )
+  expect_identical(.rmbl_check_lines(ck), c("ok   a       fine", "FAIL longer"))
+  expect_identical(.rmbl_check_lines(ck[0, ]), character())
+  long <- data.frame(
+    check = "d",
+    ok = TRUE,
+    detail = strrep("ab", 32),
+    stringsAsFactors = FALSE
+  )
+  expect_identical(
+    .rmbl_check_lines(long),
+    paste0("ok   d  ", strrep("ab", 32))
+  )
+  expect_match(.rmbl_check_reading(TRUE, "good", "bad"), "^Every check")
+  expect_match(.rmbl_check_reading(FALSE, "good", "bad"), "bad\\.$")
+  expect_identical(.rmbl_hex_head(""), "<none>")
+  expect_identical(.rmbl_hex_head("abcd", 2L), "ab... (2 bytes)")
+})
+
+test_that("check lines keep long names whole and mark soft failures", {
+  ck <- data.frame(
+    check = c(strrep("n", 40), "short"),
+    ok = c(TRUE, FALSE),
+    severity = c("error", "warn"),
+    detail = c("long detail", "d"),
+    stringsAsFactors = FALSE
+  )
+  out <- .rmbl_check_lines(ck)
+  expect_identical(out[1L], paste("ok  ", strrep("n", 40)))
+  expect_identical(out[2L], "       long detail")
+  expect_identical(out[3L], "WARN short  d")
 })

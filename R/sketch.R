@@ -2,8 +2,8 @@
 #
 # One-pass summaries for capsule members larger than memory. The moment
 # accumulator is exact algebra -- chunked accumulation and a single batch pass
-# agree to rounding -- while the cardinality sketch trades a bounded relative error
-# for fixed memory.
+# agree to rounding -- while the cardinality sketch trades a bounded relative
+# error for fixed memory.
 
 #' Summary statistics accumulated in blocks
 #'
@@ -72,7 +72,8 @@
 #' }
 #' smrystat(acc)
 #'
-#' # The batch answer to rounding (the formulas are exact; the arithmetic is double):
+#' # The batch answer to rounding (the formulas are exact; the arithmetic is
+#' # double):
 #' all.equal(smrystat(acc)[["variance"]], stats::var(x))
 #' all.equal(smrystat(acc)[["mean"]], mean(x))
 #'
@@ -91,9 +92,15 @@
 #' @name onl
 #' @export
 onlsmry <- function(x = NULL) {
-  acc <- structure(list(state = c(0, 0, 0, 0, 0)),
-                   class = c("bricklayer_online", "list"))
-  if (is.null(x)) return(acc)
+  acc <- structure(
+    list(state = c(0, 0, 0, 0, 0)),
+    class = c("bricklayer_online", "list")
+  )
+  if (is.null(x)) {
+    return(acc)
+  }
+  # checked here, so a refusal names onlsmry(), not smryupd()
+  x <- .rmbl_num(x, "x")
   smryupd(acc, x)
 }
 
@@ -105,12 +112,18 @@ smryupd <- function(acc, x) {
   }
   x <- .rmbl_num(x, "x")
   x <- x[!is.na(x)]
-  # an infinite value has no mean or variance: the accumulator held NaN and smrystat() failed in
-  # R's words ("missing value where TRUE/FALSE needed"; final audit of 1.0.0, #11)
+  # an infinite value has no mean or variance: the accumulator held NaN and
+  # smrystat() failed in R's words ("missing value where TRUE/FALSE needed";
+  # final audit of 1.0.0, #11)
   if (any(is.infinite(x))) {
-    stop("`x` has infinite values, which no moment can hold; set them to NA first", call. = FALSE)
+    stop(
+      "`x` has infinite values, which no moment can hold; set them to NA first",
+      call. = FALSE
+    )
   }
-  if (length(x) == 0L) return(acc)
+  if (length(x) == 0L) {
+    return(acc)
+  }
   block <- .Call(C_rmbl_moments_acc, x)
   acc$state <- .Call(C_rmbl_moments_merge, acc$state, block)
   acc
@@ -119,8 +132,10 @@ smryupd <- function(acc, x) {
 #' @rdname onl
 #' @export
 smrymrg <- function(a, b) {
-  if (!inherits(a, "bricklayer_online") ||
-      !inherits(b, "bricklayer_online")) {
+  if (
+    !inherits(a, "bricklayer_online") ||
+      !inherits(b, "bricklayer_online")
+  ) {
     stop("both arguments must come from onlsmry()", call. = FALSE)
   }
   a$state <- .Call(C_rmbl_moments_merge, a$state, b$state)
@@ -139,23 +154,34 @@ smrystat <- function(acc) {
   m2 <- if (n > 0) s[3L] / n else NaN
   skew <- if (n > 2 && isTRUE(s[3L] > 0)) (s[4L] / n) / m2^1.5 else NaN
   kurt <- if (n > 3 && isTRUE(s[3L] > 0)) (s[5L] / n) / (m2 * m2) - 3 else NaN
-  c(n = n, mean = if (n > 0) s[2L] else NaN, variance = variance,
-    sd = sqrt(variance), skewness = skew, kurtosis = kurt)
+  c(
+    n = n,
+    mean = if (n > 0) s[2L] else NaN,
+    variance = variance,
+    sd = sqrt(variance),
+    skewness = skew,
+    kurtosis = kurt
+  )
 }
 
 #' @export
-print.bricklayer_online <- function(x, ...) {
+format.bricklayer_online <- function(x, ...) {
   s <- smrystat(x)
-  cat(.rmbl_rule("Accumulated summary"), "\n")
-  cat(.rmbl_kv(list(
-    n = format(s[["n"]], big.mark = ","),
-    mean = formatC(s[["mean"]], format = "g", digits = 6),
-    sd = formatC(s[["sd"]], format = "g", digits = 6),
-    skewness = formatC(s[["skewness"]], format = "g", digits = 4),
-    kurtosis = formatC(s[["kurtosis"]], format = "g", digits = 4))),
-    sep = "\n")
-  cat(.rmbl_rule(), "\n")
-  invisible(x)
+  .rmbl_stat_block(
+    "Accumulated summary",
+    facts = list(
+      n = format(s[["n"]], big.mark = ","),
+      Mean = formatC(s[["mean"]], format = "g", digits = 6),
+      `Standard deviation` = formatC(s[["sd"]], format = "g", digits = 6),
+      Variance = formatC(s[["variance"]], format = "g", digits = 6),
+      Skewness = formatC(s[["skewness"]], format = "g", digits = 4),
+      `Excess kurtosis` = formatC(s[["kurtosis"]], format = "g", digits = 4)
+    ),
+    reading = paste(
+      "Moments of every value seen so far, kept in one pass; smryupd() adds",
+      "more and smrymrg() combines two summaries exactly."
+    )
+  )
 }
 
 #' Uniform sample of a stream in one pass
@@ -235,13 +261,14 @@ print.bricklayer_online <- function(x, ...) {
 rsvidx <- function(n, k, seed = 42L) {
   n <- .rmbl_num(n, "n")
   k <- .rmbl_num(k, "k")
-  if (length(n) != 1L || is.na(n) || !is.finite(n) || n < 0 || n != floor(n)) {
-    stop("rsvidx: `n` must be a single non-negative whole number", call. = FALSE)
+  .rsv_check_whole(n, "rsvidx: `n`")
+  .rsv_check_whole(k, "`k`")
+  if (k > .Machine$integer.max) {
+    stop("`k` must be at most 2147483647", call. = FALSE)
   }
-  if (length(k) != 1L || is.na(k) || !is.finite(k) || k < 0 || k != floor(k)) {
-    stop("`k` must be a single non-negative whole number", call. = FALSE)
+  if (n > .Machine$integer.max) {
+    stop("rsvidx: `n` must be at most 2147483647", call. = FALSE)
   }
-  if (k > .Machine$integer.max) stop("`k` must be at most 2147483647", call. = FALSE)
   seed <- .rmbl_seed(seed)
   .Call(C_rmbl_reservoir, n, k, seed)
 }
@@ -341,21 +368,16 @@ rsvsmp <- function(x, k, seed = 42L) {
 #' @export
 dstnskch <- function(x, p = 14L, regstr = NULL) {
   .rmbl_no_fn(x = x)
-  p <- .rmbl_num(p, "p", integer = TRUE)
-  if (length(p) != 1L || is.na(p) || p < 4L || p > 20L) {
-    stop("`p` must be a single integer between 4 and 20", call. = FALSE)
-  }
+  p <- .rmbl_sketch_p(p)
   if (!is.null(regstr)) {
-    regstr <- .rmbl_num(regstr, "regstr", integer = TRUE)
-    if (length(regstr) != bitwShiftL(1L, p)) {
-      stop("`regstr` must have 2^p entries, from a sketch with the ",
-           "same `p`", call. = FALSE)
-    }
+    regstr <- .rmbl_sketch_regs(regstr, p)
   }
-  # in blocks of a million, so a long vector shows its progress (a register keeps its maximum,
-  # so the blocks give exactly the registers of one pass)
+  # in blocks of a million, so a long vector shows its progress (a register
+  # keeps its maximum, so the blocks give exactly the registers of one pass)
   n <- length(x)
-  if (n <= 1e6) return(.Call(C_rmbl_hll_add, as.character(x), p, regstr))
+  if (n <= 1e6) {
+    return(.Call(C_rmbl_hll_add, as.character(x), p, regstr))
+  }
   pg <- blprog("distinct sketch", n)
   on.exit(pg$done(), add = TRUE)
   for (s in seq.int(1, n, by = 1e6)) {
@@ -369,7 +391,9 @@ dstnskch <- function(x, p = 14L, regstr = NULL) {
 #' @rdname dstn
 #' @export
 dstncnt <- function(regstr) {
-  if (is.null(regstr) || length(regstr) == 0L) return(0)
+  if (is.null(regstr) || length(regstr) == 0L) {
+    return(0)
+  }
   regstr <- .rmbl_registers(regstr, "regstr")
   .Call(C_rmbl_hll_count, regstr)
 }
@@ -388,15 +412,56 @@ skchmrg <- function(a, b) {
   pmax(a, b)
 }
 
+#' One non-negative whole number, checked.
+#' @param v The value checked to be a non-negative whole number.
+#' @param what How the error names it.
+#' @noRd
+.rsv_check_whole <- function(v, what) {
+  if (length(v) != 1L || is.na(v) || !is.finite(v) || v < 0 || v != floor(v)) {
+    stop(what, " must be a single non-negative whole number", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+#' Checks a sketch's precision: a whole number from 4 to 20.
+#' @param p The precision given.
+#' @return It, as an integer.
+#' @noRd
+.rmbl_sketch_p <- function(p) {
+  p <- .rmbl_num(p, "p", integer = TRUE)
+  if (length(p) != 1L || is.na(p) || p < 4L || p > 20L) {
+    stop("`p` must be a single integer between 4 and 20", call. = FALSE)
+  }
+  p
+}
+
+#' Checks the registers a sketch is continued from.
+#' @param regstr The registers given.
+#' @param p The sketch's precision.
+#' @return The registers as integers.
+#' @noRd
+.rmbl_sketch_regs <- function(regstr, p) {
+  regstr <- .rmbl_num(regstr, "regstr", integer = TRUE)
+  if (length(regstr) != bitwShiftL(1L, p)) {
+    stop(
+      "`regstr` must have 2^p entries, from a sketch with the ",
+      "same `p`",
+      call. = FALSE
+    )
+  }
+  regstr
+}
+
 #' HyperLogLog registers: non-negative integers.
 #' @param r The registers passed by the user.
-#' @param what The argument's name, used in the error message.
+#' @param what The argument's name, quoted if the registers are invalid.
 #' @return The registers as an integer vector.
 #' @noRd
 .rmbl_registers <- function(r, what) {
   r <- .rmbl_num_input(r, what)
-  if (any(!is.finite(r)) || any(r < 0) || any(r > 64) || any(r != floor(r))) {
-    stop(sprintf("`%s` must be non-negative integer registers", what),
+  if (!all(is.finite(r)) || any(r < 0) || any(r > 64) || any(r != floor(r))) {
+    stop(
+      sprintf("`%s` must be non-negative integer registers", what),
       call. = FALSE
     )
   }

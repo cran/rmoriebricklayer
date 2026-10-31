@@ -55,7 +55,18 @@ ps <- dload("nsw_dw/psid_controls")
 Or, without signing in, from Rajeev Dehejia's own pages (whitespace-separated text):
 
 ```{r causal-effects-nsw-open, eval = FALSE}
-cols <- c("treat", "age", "educ", "black", "hisp", "married", "nodegree", "re74", "re75", "re78")
+cols <- c(
+  "treat",
+  "age",
+  "educ",
+  "black",
+  "hisp",
+  "married",
+  "nodegree",
+  "re74",
+  "re75",
+  "re78"
+)
 nber <- function(f) {
   dest <- file.path(tempdir(), f)
   bldl(paste0("https://users.nber.org/~rdehejia/data/", f), dest)
@@ -81,8 +92,8 @@ The experimental benchmark, and the same question asked of the observational sam
 x <- c("age", "educ", "black", "hisp", "married", "nodegree", "re74", "re75")
 exp <- rbind(tr, ct)
 obs <- rbind(tr, ps)
-mean(tr$re78) - mean(ct$re78)                 # the experiment
-mean(tr$re78) - mean(ps$re78)                 # treated against the PSID, unadjusted
+mean(tr$re78) - mean(ct$re78) # the experiment
+mean(tr$re78) - mean(ps$re78) # treated against the PSID, unadjusted
 plrcf(exp, "re78", "treat", x)
 plrcf(obs, "re78", "treat", x)
 plrcf(obs, "re78", "treat", x, kfol = 10, seed = 2)

@@ -7,9 +7,16 @@ if (!interactive() && !any(nzchar(Sys.getenv(c("NOT_CRAN", "MY_UNIVERSE", "IN_PK
 }
 
 ## ----courts-and-crime-setup, include = FALSE----------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 8, fig.height = 4.5)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 8,
+  fig.height = 4.5
+)
 library(rmoriebricklayer)
-ext <- function(f) read.csv(system.file("extdata", f, package = "rmoriebricklayer"))
+ext <- function(f) {
+  read.csv(system.file("extdata", f, package = "rmoriebricklayer"))
+}
 
 ## ----courts-and-crime-hub, eval = FALSE---------------------------------------
 # clearance <- dload("ocj_statistics/clearance_rate_criminal")
@@ -19,15 +26,25 @@ ext <- function(f) read.csv(system.file("extdata", f, package = "rmoriebricklaye
 ## ----courts-and-crime-flow----------------------------------------------------
 f <- ext("ocj_flow_ontario.csv")
 cf <- caseflow(f$received, f$disposed, pend = f$pending, prd = f$month)
-cf[c(1, 12, 24), c("period", "received", "disposed", "clearance", "rolclr", "pertoclear")]
+cf[
+  c(1, 12, 24),
+  c("period", "received", "disposed", "clearance", "rolclr", "pertoclear")
+]
 plot(cf)
 
 ## ----courts-and-crime-life----------------------------------------------------
 d <- ext("ocj_time_to_disposition.csv")
 last <- nrow(d)
 shares <- unlist(d[last, c("under_10", "m10_15", "m15_18", "over_18")])
-lt <- lifetbl(c("Under 10 Months", "Between 10-15 Months", "Between 15-18 Months", "Over 18 Months"),
-                 events = shares * f$disposed[last])
+lt <- lifetbl(
+  c(
+    "Under 10 Months",
+    "Between 10-15 Months",
+    "Between 15-18 Months",
+    "Over 18 Months"
+  ),
+  events = shares * f$disposed[last]
+)
 lt
 plot(lt)
 
@@ -45,7 +62,12 @@ cd
 plot(cd)
 # a group's share of the cases received in a year, as a percentage
 caseshare <- function(group, yr) {
-  sprintf("%.0f%%", 100 * sum(g$received[g$offence_group == group & g$year == yr]) / sum(g$received[g$year == yr]))
+  sprintf(
+    "%.0f%%",
+    100 *
+      sum(g$received[g$offence_group == group & g$year == yr]) /
+      sum(g$received[g$year == yr])
+  )
 }
 
 ## ----courts-and-crime-courts--------------------------------------------------
@@ -108,33 +130,67 @@ siudate("not a date")
 # f <- siufprs("24-OCI-123")
 
 ## ----siu-reports-indigenous-siu, eval = FALSE---------------------------------
-# fnservices <- c("Nishnawbe-Aski Police Service", "Anishinabek Police Service",
-#                  "Treaty Three Police Service", "UCCM Anishnaabe Police Service")
+# fnservices <- c(
+#   "Nishnawbe-Aski Police Service",
+#   "Anishinabek Police Service",
+#   "Treaty Three Police Service",
+#   "UCCM Anishnaabe Police Service"
+# )
 # reports <- lapply(reporturls, siufprs)
-# mine <- Filter(function(r) any(grepl(paste(fnservices, collapse = "|"), r$police_service)),
-#                reports)
+# mine <- Filter(
+#   function(r) any(grepl(paste(fnservices, collapse = "|"), r$police_service)),
+#   reports
+# )
 # length(mine)
 
 ## ----siu-reports-siu-timeline-plot, fig.width = 7, fig.height = 3.5-----------
-rpt <- siuprs(siutxt(paste(readLines(system.file("extdata", "siu_synthetic_report.html",
-                                                    package = "rmoriebricklayer"), warn = FALSE),
-                           collapse = "\n")))
+rpt <- siuprs(siutxt(paste(
+  readLines(
+    system.file(
+      "extdata",
+      "siu_synthetic_report.html",
+      package = "rmoriebricklayer"
+    ),
+    warn = FALSE
+  ),
+  collapse = "\n"
+)))
 iso <- rpt[grepl("_iso$", names(rpt)) & grepl("^\\d{4}-\\d{2}-\\d{2}$", rpt)]
 when <- as.Date(iso)
 o <- order(when)
-lab <- gsub("_", " ", sub("_iso$", "", names(iso)[o]))
+lab <- gsub("_", " ", sub("_iso$", "", names(iso)[o]), fixed = TRUE)
 span <- diff(range(when))
 op <- par(mar = c(4, 1, 3, 1))
-plot(when[o], seq_along(o), pch = 19, col = blpal()[1], yaxt = "n", xaxt = "n", xlab = "", ylab = "",
-     xlim = range(when) + c(-0.1, 0.1) * as.numeric(span), ylim = c(0.5, length(o) + 0.5),
-     main = "Dates in the synthetic report")
+plot(
+  when[o],
+  seq_along(o),
+  pch = 19,
+  col = blpal()[1],
+  yaxt = "n",
+  xaxt = "n",
+  xlab = "",
+  ylab = "",
+  xlim = range(when) + c(-0.1, 0.1) * as.numeric(span),
+  ylim = c(0.5, length(o) + 0.5),
+  main = "Dates in the synthetic report"
+)
 axis.Date(1, when, format = "%Y-%m-%d")
-text(when[o], seq_along(o), paste0(lab, "  ", format(when[o])), cex = 0.75,
-     pos = ifelse(seq_along(o) < length(o), 4, 2))
+text(
+  when[o],
+  seq_along(o),
+  paste0(lab, "  ", format(when[o])),
+  cex = 0.75,
+  pos = ifelse(seq_along(o) < length(o), 4, 2)
+)
 par(op)
 
 ## ----include = FALSE----------------------------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 3.6)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 3.6
+)
 library(rmoriebricklayer)
 
 ## ----air-pollution-and-health-sigmas------------------------------------------
@@ -153,14 +209,37 @@ x <- seq(200, 5000, by = 100)
 h <- 30 + r$finalrise
 cd <- gplume(q = 100, u = 4, h = h, rcpt = cbind(x, 0, 0), stab = "D")
 cb <- gplume(q = 100, u = 4, h = h, rcpt = cbind(x, 0, 0), stab = "B")
-plot(x, cd, type = "l", xlab = "downwind distance (m)", ylab = "concentration (g/m^3)",
-     main = "Ground-level centreline concentration")
+plot(
+  x,
+  cd,
+  type = "l",
+  xlab = "downwind distance (m)",
+  ylab = "concentration (g/m^3)",
+  main = "Ground-level centreline concentration"
+)
 lines(x, cb, col = 2)
-legend("topright", c("class D (neutral)", "class B (unstable)"), col = 1:2, lty = 1, bty = "n")
+legend(
+  "topright",
+  c("class D (neutral)", "class B (unstable)"),
+  col = 1:2,
+  lty = 1,
+  bty = "n"
+)
 
 ## ----air-pollution-and-health-particles---------------------------------------
-p <- lagrprt(n = 500, x0 = 0, y0 = 0, u = 1, v = 0, kx = 0.5, ky = 0.5,
-                          dt = 1, nsteps = 50, seed = 1, grid = c(0, 100, -30, 30, 20, 12))
+p <- lagrprt(
+  n = 500,
+  x0 = 0,
+  y0 = 0,
+  u = 1,
+  v = 0,
+  kx = 0.5,
+  ky = 0.5,
+  dt = 1,
+  nsteps = 50,
+  seed = 1,
+  grid = c(0, 100, -30, 30, 20, 12)
+)
 c(mean_x = p$mean_x, meany = p$meany)
 
 ## ----air-pollution-and-health-crf---------------------------------------------
@@ -186,8 +265,13 @@ c(rr = b$extra$rr, paf = b$paf, attributable = b$attrcases)
 b$citation
 
 ## ----air-pollution-and-health-area--------------------------------------------
-areas <- data.frame(fsa = c("M6H", "M5V", "M4W", "M1B"), exposure = c(28, 18, 15, 24),
-                    population = c(40000, 60000, 25000, 70000), brate = 0.008)
+areas <- data.frame(
+  fsa = c("M6H", "M5V", "M4W", "M1B"),
+  exposure = c(28, 18, 15, 24),
+  population = c(40000, 60000, 25000, 70000),
+  brate = 0.008,
+  stringsAsFactors = FALSE
+)
 polbrdarea(areas)
 
 ## ----air-pollution-and-health-equity------------------------------------------
@@ -253,30 +337,52 @@ fpeqv(fp$co2eg * 1e4)   # if this ran ten thousand times
 
 ## ----air-pollution-and-health-indigenous-air----------------------------------
 cp <- indiex("censuspop")
-tot <- cp[cp$GEO_LEVEL != "Country" & cp$AGE_GROUP == "Total - Age groups" &
-            cp$RESIDENCE == "Total - Residence on or off reserve" &
-            grepl("^Total - Average age", cp$CHARACTERISTIC_NAME), ]
+tot <- cp[
+  cp$GEO_LEVEL != "Country" &
+    cp$AGE_GROUP == "Total - Age groups" &
+    cp$RESIDENCE == "Total - Residence on or off reserve" &
+    grepl("^Total - Average age", cp$CHARACTERISTIC_NAME),
+]
 pop <- stats::setNames(tot$FIRST_NATIONS, tot$GEO_NAME)
 head(pop[order(-pop)], 5)
-# relative risk of all-cause mortality from PM2.5, and the share of deaths attributable to
-# the excess above the guideline if the whole population breathes the scenario level
-sapply(c(8, 12), function(conc) {
+# relative risk of all-cause mortality from PM2.5, and the share of deaths
+# attributable to the excess above the guideline if the whole population
+# breathes the scenario level
+vapply(c(8, 12), function(conc) {
   rr <- crfpm25(conc, refconc = 5)$rr
   c(pm25 = conc, rr = rr, attributable = attrfrac(rr, 1))
-})
+}, numeric(3))
 
 ## ----include = FALSE----------------------------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4, dpi = 72)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 4,
+  dpi = 72
+)
 library(rmoriebricklayer)
 
 ## ----first-nations-metis-inuit-health-estimates-------------------------------
-d <- data.frame(REF_DATE = "2022", GEO = "Canada",
-                `Indigenous identity` = rep(c("First Nations", "Metis"), each = 4),
-                Statistics = rep(c("Number of persons", "Percent", "Low 95% confidence interval",
-                                   "High 95% confidence interval"), 2),
-                UOM = rep(c("Persons", "Percent", "Percent", "Percent"), 2),
-                VALUE = c(415000, 47.1, 45.2, 49.0, 320000, 50.3, 48.1, 52.5),
-                STATUS = "", check.names = FALSE)
+d <- data.frame(
+  REF_DATE = "2022",
+  GEO = "Canada",
+  `Indigenous identity` = rep(c("First Nations", "M\u00e9tis"), each = 4),
+  Statistics = rep(
+    c(
+      "Number of persons",
+      "Percent",
+      "Low 95% confidence interval",
+      "High 95% confidence interval"
+    ),
+    2
+  ),
+  UOM = rep(c("Persons", "Percent", "Percent", "Percent"), 2),
+  VALUE = c(415000, 47.1, 45.2, 49.0, 320000, 50.3, 48.1, 52.5),
+  STATUS = "",
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
 scests(d)
 
 ## ----first-nations-metis-inuit-health-load, eval = FALSE----------------------
@@ -292,16 +398,30 @@ g
 plot(g)
 
 ## ----first-nations-metis-inuit-health-distinctions----------------------------
-dt <- dstntst(mh[mh$group != "Non-Indigenous", ], "group", "estimate", "lower", "upper")
+dt <- dstntst(
+  mh[mh$group != "Non-Indigenous", ],
+  "group",
+  "estimate",
+  "lower",
+  "upper"
+)
 dt
 plot(dt)
 
 ## ----first-nations-metis-inuit-health-ordinal---------------------------------
 r <- indiex("mentalhealth")
 r <- r[r$region == "Canada", ]
-oc <- ordcmp(r, "group", "rating", "estimate", "lower", "upper",
-                      lvls = c("Fair or poor", "Good", "Very good", "Excellent"),
-                      ref = "M\u00e9tis", qual = "quality")
+oc <- ordcmp(
+  r,
+  "group",
+  "rating",
+  "estimate",
+  "lower",
+  "upper",
+  lvls = c("Fair or poor", "Good", "Very good", "Excellent"),
+  ref = "M\u00e9tis",
+  qual = "quality"
+)
 oc
 plot(oc)
 
@@ -317,84 +437,186 @@ plot(sp)
 
 ## ----first-nations-metis-inuit-health-wellness--------------------------------
 wb <- indiex("wellbeing")
-w <- welprof(wb, "group", "indicator", "estimate", "lower", "upper",
-                      well = c("Life satisfaction rating of 8, 9 or 10",
-                                   "Sense of meaning and purpose rating of 8, 9 or 10",
-                                   "Always or often has a hopeful outlook"),
-                      distress = c("Life satisfaction rating between 0 and 5",
-                                   "Rarely or never has a hopeful outlook"),
-                      qual = "quality")
+w <- welprof(
+  wb,
+  "group",
+  "indicator",
+  "estimate",
+  "lower",
+  "upper",
+  well = c(
+    "Life satisfaction rating of 8, 9 or 10",
+    "Sense of meaning and purpose rating of 8, 9 or 10",
+    "Always or often has a hopeful outlook"
+  ),
+  distress = c(
+    "Life satisfaction rating between 0 and 5",
+    "Rarely or never has a hopeful outlook"
+  ),
+  qual = "quality"
+)
 plot(w)
 frmaud(w)
 
 ## ----first-nations-metis-inuit-health-dual------------------------------------
-dc <- dualcont(w, "Always or often has a hopeful outlook", "Life satisfaction rating between 0 and 5")
+dc <- dualcont(
+  w,
+  "Always or often has a hopeful outlook",
+  "Life satisfaction rating between 0 and 5"
+)
 dc
 plot(dc)
 
 ## ----first-nations-metis-inuit-health-balance---------------------------------
-dom <- c("Perceived health, very good or excellent" = "physical",
-         "Perceived mental health, very good or excellent" = "mental",
-         "Life satisfaction, satisfied or very satisfied" = "emotional",
-         "Sense of belonging to local community, somewhat strong or very strong" = "community")
-d <- h[h$period == "2019/2022" & h$age == "Total, 18 years and over" & h$indicator %in% names(dom), ]
+dom <- c(
+  "Perceived health, very good or excellent" = "physical",
+  "Perceived mental health, very good or excellent" = "mental",
+  "Life satisfaction, satisfied or very satisfied" = "emotional",
+  "community"
+)
+names(dom)[4] <- paste(
+  "Sense of belonging to local community,",
+  "somewhat strong or very strong"
+)
+d <- h[
+  h$period == "2019/2022" &
+    h$age == "Total, 18 years and over" &
+    h$indicator %in% names(dom),
+]
 d$domain <- dom[d$indicator]
-hb <- holbal(d, "group", "domain", "estimate", "lower", "upper", qual = "quality")
+hb <- holbal(
+  d,
+  "group",
+  "domain",
+  "estimate",
+  "lower",
+  "upper",
+  qual = "quality"
+)
 hb
 plot(hb)
 
 ## ----first-nations-metis-inuit-health-continuum-------------------------------
-mw <- mhcont(wb, "group", "indicator", "estimate", "lower", "upper",
-        hope = "Always or often has a hopeful outlook",
-        meaning = "Sense of meaning and purpose rating of 8, 9 or 10",
-        purp = "Sense of meaning and purpose rating of 8, 9 or 10", qual = "quality")
+mw <- mhcont(
+  wb,
+  "group",
+  "indicator",
+  "estimate",
+  "lower",
+  "upper",
+  hope = "Always or often has a hopeful outlook",
+  meaning = "Sense of meaning and purpose rating of 8, 9 or 10",
+  purp = "Sense of meaning and purpose rating of 8, 9 or 10",
+  qual = "quality"
+)
 mw[, c("group", "indicator", "domain", "estimate", "shared")]
 plot(mw)
 
 ## ----first-nations-metis-inuit-health-healing---------------------------------
-hc <- healchg(h[h$age == "Total, 18 years and over", ], "group", "indicator", "period",
-                     "estimate", "lower", "upper", from = "2015/2018", to = "2019/2022",
-                     qual = "quality",
-                     well = c("Perceived mental health, very good or excellent",
-                                  "Sense of belonging to local community, somewhat strong or very strong"))
-hc <- hc[hc$indicator %in% c("Perceived mental health, very good or excellent",
-                             "Sense of belonging to local community, somewhat strong or very strong",
-                             "Mood disorder", "Anxiety disorder"), ]
+hc <- healchg(
+  h[h$age == "Total, 18 years and over", ],
+  "group",
+  "indicator",
+  "period",
+  "estimate",
+  "lower",
+  "upper",
+  from = "2015/2018",
+  to = "2019/2022",
+  qual = "quality",
+  well = c(
+    "Perceived mental health, very good or excellent",
+    "Sense of belonging to local community, somewhat strong or very strong"
+  )
+)
+hc <- hc[
+  hc$indicator %in%
+    c(
+      "Perceived mental health, very good or excellent",
+      "Sense of belonging to local community, somewhat strong or very strong",
+      "Mood disorder",
+      "Anxiety disorder"
+    ),
+]
 plot(hc)
 
 ## ----first-nations-metis-inuit-health-connection------------------------------
 r <- indiex("mentalhealth")
 r <- r[r$rating == "Excellent or very good" & r$region != "Canada", ]
-pair <- merge(r[r$group == "First Nations", ], r[r$group == "M\u00e9tis", ], by = "region",
-              suffixes = c("fn", "me"))
-ca <- connassoc(pair, "region", "estimatefn", "estimateme", "lowerfn", "upperfn",
-                             "lowerme", "upperme")
+pair <- merge(
+  r[r$group == "First Nations", ],
+  r[r$group == "M\u00e9tis", ],
+  by = "region",
+  suffixes = c("fn", "me")
+)
+ca <- connassoc(
+  pair,
+  "region",
+  "estimatefn",
+  "estimateme",
+  "lowerfn",
+  "upperfn",
+  "lowerme",
+  "upperme"
+)
 ca
-plot(ca, xlab = "First Nations: excellent or very good (%)",
-     ylab = "M\u00e9tis: excellent or very good (%)")
+plot(
+  ca,
+  xlab = "First Nations: excellent or very good (%)",
+  ylab = "M\u00e9tis: excellent or very good (%)"
+)
 
 ## ----first-nations-metis-inuit-health-community-------------------------------
 h2 <- h[h$period == "2019/2022" & h$age == "Total, 18 years and over", ]
-ci <- commidx(h2, "group", "indicator", "estimate", "lower", "upper", qual = "quality",
-        w = c("Sense of belonging to local community, somewhat strong or very strong" = 2,
-                    "Has a regular healthcare provider" = 1,
-                    "Perceived life stress, most days quite a bit or extremely stressful" = -2,
-                    "Heavy drinking" = -1))
+ci <- commidx(
+  h2,
+  "group",
+  "indicator",
+  "estimate",
+  "lower",
+  "upper",
+  qual = "quality",
+  w = c(
+    "Sense of belonging to local community, somewhat strong or very strong" = 2,
+    "Has a regular healthcare provider" = 1,
+    "Perceived life stress, most days quite a bit or extremely stressful" = -2,
+    "Heavy drinking" = -1
+  )
+)
 plot(ci)
 
 ## ----first-nations-metis-inuit-health-census-foster---------------------------
 p <- cnsprof(indiex("censuspop"))
 fc <- profshr(p, "Foster children", "Total - Children in census families")
-fc <- fc[fc$geo == "Canada" & fc$age == "0 to 14 years" &
-           fc$group %in% c("First Nations", "M\u00e9tis", "Inuit", "Non-Indigenous"), ]
-fc[, c("residence", "group", "numerator", "denominator", "estimate", "lower", "upper")]
+fc <- fc[
+  fc$geo == "Canada" &
+    fc$age == "0 to 14 years" &
+    fc$group %in% c("First Nations", "M\u00e9tis", "Inuit", "Non-Indigenous"),
+]
+fc[, c(
+  "residence",
+  "group",
+  "numerator",
+  "denominator",
+  "estimate",
+  "lower",
+  "upper"
+)]
 plot(fc[fc$residence == "Total - Residence on or off reserve", ])
 
 ## ----first-nations-metis-inuit-health-census-language-------------------------
-know <- "Total - Knowledge of Indigenous languages for the population in private households - 25% sample data"
+know <- paste(
+  "Total - Knowledge of Indigenous languages for the population in private",
+  "households - 25% sample data"
+)
 la <- profshr(p, "Indigenous languages", know)
-la[la$geo == "Canada" & la$age == "Total - Age groups" & la$residence == "Total - Residence on or off reserve" &
-     la$group %in% c("First Nations", "M\u00e9tis", "Inuit"), c("group", "estimate", "lower", "upper")]
+la[
+  la$geo == "Canada" &
+    la$age == "Total - Age groups" &
+    la$residence == "Total - Residence on or off reserve" &
+    la$group %in% c("First Nations", "M\u00e9tis", "Inuit"),
+  c("group", "estimate", "lower", "upper")
+]
 
 ## ----first-nations-metis-inuit-health-census-standard-------------------------
 cnsstd(p)
@@ -402,18 +624,35 @@ cnsstd(p)
 ## ----first-nations-metis-inuit-health-census-cwb------------------------------
 h <- cnsprof(indiex("censushh"))
 cw <- cnscwb(p, h)
-cw[cw$geo %in% c("Canada", "Nunavut"), c("geo", "group", "income", "education", "housing", "labour", "cwb")]
+cw[
+  cw$geo %in% c("Canada", "Nunavut"),
+  c("geo", "group", "income", "education", "housing", "labour", "cwb")
+]
 plot(cw)
 
 ## ----first-nations-metis-inuit-health-generations-----------------------------
-genexpo(parent = c(TRUE, FALSE, TRUE, NA), gparent = c(TRUE, FALSE, FALSE, TRUE))
+genexpo(
+  parent = c(TRUE, FALSE, TRUE, NA),
+  gparent = c(TRUE, FALSE, FALSE, TRUE)
+)
 et <- exptrnd(cases = c(60, 95, 70), n = c(500, 520, 300))
 plot(et)
 
 ## ----first-nations-metis-inuit-health-trc-gaps, fig.height = 9----------------
 g <- trchlthgap()
-g[g$measure %in% c("Life expectancy at birth", "Infant mortality rate"),
-  c("measure", "period", "group", "estimate", "refest", "disratio", "lower", "upper")]
+g[
+  g$measure %in% c("Life expectancy at birth", "Infant mortality rate"),
+  c(
+    "measure",
+    "period",
+    "group",
+    "estimate",
+    "refest",
+    "disratio",
+    "lower",
+    "upper"
+  )
+]
 plot(g)
 
 ## ----first-nations-metis-inuit-health-trc-------------------------------------
@@ -424,28 +663,101 @@ plot(p)
 ## ----first-nations-metis-inuit-health-continuity------------------------------
 prof <- cnsprof(indiex("censuspop"))
 la <- profshr(prof, "Indigenous languages", know)
-la <- la[la$age == "Total - Age groups" & la$group == "First Nations" & la$geo != "Canada" &
-           la$residence == "Total - Residence on or off reserve", ]
+la <- la[
+  la$age == "Total - Age groups" &
+    la$group == "First Nations" &
+    la$geo != "Canada" &
+    la$residence == "Total - Residence on or off reserve",
+]
 mh2 <- indiex("mentalhealth")
-mh2 <- mh2[mh2$rating == "Excellent or very good" & mh2$group == "First Nations", ]
-both <- merge(la[c("geo", "estimate", "lower", "upper")], mh2[c("region", "estimate", "lower", "upper")],
-              by.x = "geo", by.y = "region", suffixes = c("lang", "mh"))
-cc <- connassoc(both, "geo", "estimatelang", "estimatemh", "lowerlang", "upperlang",
-                             "lowermh", "uppermh")
+mh2 <- mh2[
+  mh2$rating == "Excellent or very good" & mh2$group == "First Nations",
+]
+both <- merge(
+  la[c("geo", "estimate", "lower", "upper")],
+  mh2[c("region", "estimate", "lower", "upper")],
+  by.x = "geo",
+  by.y = "region",
+  suffixes = c("lang", "mh")
+)
+cc <- connassoc(
+  both,
+  "geo",
+  "estimatelang",
+  "estimatemh",
+  "lowerlang",
+  "upperlang",
+  "lowermh",
+  "uppermh"
+)
 cc
-plot(cc, xlab = "First Nations who know an Indigenous language (%)",
-     ylab = "First Nations: mental health excellent or very good (%)")
+plot(
+  cc,
+  xlab = "First Nations who know an Indigenous language (%)",
+  ylab = "First Nations: mental health excellent or very good (%)"
+)
 
 ## ----first-nations-metis-inuit-health-own-data--------------------------------
-own <- data.frame(group = c("Aboriginal", "Torres Strait Islander", "Non-Indigenous Australians"),
-                  pct = c(31.2, 27.5, 18.9), rse = c(4.1, 22.0, 1.2), flag = c("", "*", ""))
+own <- data.frame(
+  group = c(
+    "Aboriginal",
+    "Torres Strait Islander",
+    "Non-Indigenous Australians"
+  ),
+  pct = c(31.2, 27.5, 18.9),
+  rse = c(4.1, 22.0, 1.2),
+  flag = c("", "*", ""),
+  stringsAsFactors = FALSE
+)
 own <- cbind(own, limfrom(own$pct, cv = own$rse)[c("lower", "upper")])
 own$quality <- qltyrcd(own$flag, suppr = "**", caution = "*")
-indgap(own, "group", "pct", "lower", "upper", ref = "Non-Indigenous Australians",
-               qual = "quality")
+indgap(
+  own,
+  "group",
+  "pct",
+  "lower",
+  "upper",
+  ref = "Non-Indigenous Australians",
+  qual = "quality"
+)
+
+## ----first-nations-metis-inuit-health-own-micro-------------------------------
+set.seed(7)
+n <- 600
+resp <- data.frame(
+  group = sample(c("First Nations", "Inuit", "Non-Indigenous"), n, TRUE),
+  wt = runif(n, 50, 150)
+)
+resp$goodmh <- rbinom(n, 1, ifelse(resp$group == "Non-Indigenous", 0.6, 0.5))
+des <- svydes(resp, w = "wt")
+tab <- as.data.frame(
+  svyest(des, resp, "goodmh", by = "group", stat = "proportion", lvls = "1")
+)
+indgap(tab, "group", "estimate", "lower", "upper")
+
+## ----first-nations-metis-inuit-health-own-profile-----------------------------
+prof <- data.frame(
+  community = rep(c("Lakeside", "Riverbend"), each = 3),
+  item = rep(c("Hopeful", "Satisfied", "Rarely hopeful"), 2),
+  pct = c(64, 71, 12, 58, 66, 16),
+  lo = c(59, 66, 9, 52, 60, 12),
+  hi = c(69, 76, 15, 64, 72, 20),
+  stringsAsFactors = FALSE
+)
+welprof(prof, "community", "item", "pct", "lo", "hi",
+        well = c("Hopeful", "Satisfied"), distress = "Rarely hopeful")
+
+## ----first-nations-metis-inuit-health-own-vectors-----------------------------
+agestd(events = c(4, 9, 11, 6, 3), pop = c(9000, 8000, 6000, 4000, 2000),
+       std = c(30000, 25000, 20000, 15000, 10000))
 
 ## ----include = FALSE----------------------------------------------------------
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.2)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4.2
+)
 library(rmoriebricklayer)
 
 ## ----search-and-rescue-list---------------------------------------------------
@@ -532,19 +844,30 @@ srchfig("6-5")
 srchfig("6-6")
 
 ## ----search-and-rescue-own-recipes--------------------------------------------
-# an HTML table with each line in <code>: in a Markdown table a `$` starts a formula and a `|`
-# ends the cell, so both are written as entities
+# an HTML table with each line in <code>: in a Markdown table a `$` starts a
+# formula and a `|` ends the cell, so both are written as entities
 tab <- srchfig()[, c("fig", "caption", "yours")]
 esc <- function(x) {
-  for (r in list(c("&", "&amp;"), c("<", "&lt;"), c(">", "&gt;"), c("$", "&#36;"), c("|", "&#124;"))) {
+  for (r in list(
+    c("&", "&amp;"),
+    c("<", "&lt;"),
+    c(">", "&gt;"),
+    c("$", "&#36;"),
+    c("|", "&#124;")
+  )) {
     x <- gsub(r[1], r[2], x, fixed = TRUE)
   }
   x
 }
 tab$caption <- esc(tab$caption)
 tab$yours <- sprintf("<code>%s</code>", esc(tab$yours))
-knitr::kable(tab, format = "html", escape = FALSE, row.names = FALSE,
-             col.names = c("Figure", "Caption", "From your own numbers"))
+knitr::kable(
+  tab,
+  format = "html",
+  escape = FALSE,
+  row.names = FALSE,
+  col.names = c("Figure", "Caption", "From your own numbers")
+)
 
 ## ----search-and-rescue-own-lateral--------------------------------------------
 lr <- ltrlrng(seq(-3, 3, by = 0.05), W = 0.8)
@@ -564,28 +887,42 @@ pswppod(W = 0.8, S = 1, navsd = 0.1)
 ## ----search-and-rescue-own-update---------------------------------------------
 srchscs(poc = c(0.5, 0.3, 0.2), pod = c(0.8, 0.5, 0))
 
-## ----search-and-rescue-plan-map-----------------------------------------------
+## ----search-and-rescue-plan-grid----------------------------------------------
 xe <- seq(-4, 8, by = 0.5)
 ye <- seq(-3, 9, by = 0.5)
+
+## ----search-and-rescue-plan-map-----------------------------------------------
 m <- datumpmap(xe, ye, center = c(2, 3), sigma = 1.5)
+m
 plot(m)
 
-## ----search-and-rescue-plan-day1----------------------------------------------
-day1 <- opteffort(m, W = 0.6, effort = 40)
-day1$pos
-plot(day1)
+## ----search-and-rescue-plan-scenarios-----------------------------------------
+trail <- datumpmap(xe, ye, "corridor", c(2, 3), sigma = 0.5, end = c(2, 8))
+mix <- datumpmap(xe, ye, "general", wts = 0.7 * m$poc + 0.3 * trail$poc)
+plot(mix)
+
+## ----search-and-rescue-plan-pod-----------------------------------------------
+walked <- matrix(0, nrow(m$poc), ncol(m$poc))
+walked[12:13, 12:13] <- 2
+pd <- srchpod(W = 0.6, effort = walked, area = m, model = "random")
+range(pd)
+
+## ----search-and-rescue-plan-pos-----------------------------------------------
+day1 <- srchscs(m, pd)
+day1
+plot(day1$map)
 
 ## ----search-and-rescue-plan-day2----------------------------------------------
-upd <- srchscs(as.vector(m$poc), as.vector(day1$pod))
-poc2 <- matrix(upd$pocupd, nrow = nrow(m$poc))
-day2 <- opteffort(poc2, area = rep(0.25, length(poc2)), W = 0.6, effort = 40)
-day2$pos
+day2 <- opteffort(day1$map, W = 0.6, effort = 40)
+day2
+day3 <- srchscs(day1$map, day2)
+day3$pos
+
+## ----search-and-rescue-plan-plot----------------------------------------------
+plot(day2)
+plot(day1$map, view = "both")
 
 ## ----search-and-rescue-grid---------------------------------------------------
-m <- datumpmap(seq(-6, 6, by = 0.5), seq(-6, 6, by = 0.5), sigma = 2)
-a <- opteffort(m, W = 1, effort = 30)
-a$pos
-optcrcsrch(sigma = 2, W = 1, effort = 30)$pos
-plot(a)
-srchscs(c(0.5, 0.3, 0.2), c(0.8, 0.5, 0))
+optcrcsrch(sigma = 1.5, W = 0.6, effort = 40)
+optsqr(c(40, 40) * 0.6, E = 1.1774 * 1.5)
 

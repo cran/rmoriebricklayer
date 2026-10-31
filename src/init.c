@@ -249,6 +249,7 @@ extern SEXP C_rmbl_env_wipe(SEXP);
 extern SEXP C_rmbl_path_kind(SEXP);
 extern SEXP C_rmbl_write_file_checked(SEXP, SEXP, SEXP);
 extern SEXP C_rmbl_gunzip_checked(SEXP, SEXP);   /* rmbl_gunzip.c */
+extern SEXP C_rmbl_gunzip_count(SEXP, SEXP);     /* rmbl_gunzip.c */
 extern SEXP C_rmbl_csv_split(SEXP, SEXP);   /* rmbl_csv.c */
 /* rmbl_progress.c: .bl_readline's check that raises a pending Ctrl-C before the terminal read
  * starts, and the progress bar and spinner */
@@ -261,6 +262,12 @@ extern SEXP C_rmbl_svy_reptotals(SEXP, SEXP, SEXP);
 extern int rmbl_progress_bar(double, double, int, int, int, int, int, int, int, char *, int);
 extern const char *rmbl_progress_spinner(double, int);
 
+/* a bundle check's run inside a Windows job object (rmbl_winjob.c) */
+extern SEXP C_rmbl_winjob(SEXP, SEXP, SEXP);
+/* a bundle check's survivors found and reaped on Linux (rmbl_reap.c) */
+extern SEXP C_rmbl_subreap(SEXP);
+extern SEXP C_rmbl_reap(SEXP);
+
 static const R_CallMethodDef CallEntries[] = {
     {"C_rmbl_flock_acquire",  (DL_FUNC) &C_rmbl_flock_acquire,  2},
     {"C_rmbl_flock_release",  (DL_FUNC) &C_rmbl_flock_release,  1},
@@ -269,6 +276,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rmbl_path_kind",      (DL_FUNC) &C_rmbl_path_kind,      1},
     {"C_rmbl_write_file_checked", (DL_FUNC) &C_rmbl_write_file_checked, 3},
     {"C_rmbl_gunzip_checked",     (DL_FUNC) &C_rmbl_gunzip_checked,     2},
+    {"C_rmbl_gunzip_count",       (DL_FUNC) &C_rmbl_gunzip_count,       2},
     {"C_rmbl_json_fast",          (DL_FUNC) &C_rmbl_json_fast,          3},
     {"C_rmbl_svy_dblcode",        (DL_FUNC) &C_rmbl_svy_dblcode,        1},
     {"C_rmbl_sha256_real",        (DL_FUNC) &C_rmbl_sha256_real,        1},
@@ -403,6 +411,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rmbl_blake2b",           (DL_FUNC) &C_rmbl_blake2b,           3},
     {"C_rmbl_pbkdf2",            (DL_FUNC) &C_rmbl_pbkdf2,            4},
     {"C_rmbl_os_random",         (DL_FUNC) &C_rmbl_os_random,         1},
+    {"C_rmbl_winjob",            (DL_FUNC) &C_rmbl_winjob,            3},
+    {"C_rmbl_subreap",           (DL_FUNC) &C_rmbl_subreap,           1},
+    {"C_rmbl_reap",              (DL_FUNC) &C_rmbl_reap,              1},
     {NULL, NULL, 0}
 };
 

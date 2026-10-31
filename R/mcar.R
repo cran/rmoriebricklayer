@@ -9,113 +9,6 @@
 # missingness -- and those require EM, since the likelihood has no
 # closed form once the pattern of observation varies by row.
 
-#' Estimates a multivariate normal mean and covariance from incomplete data by EM.
-#'
-#' ML estimates of a multivariate normal mean and covariance from data
-#' with missing entries, by expectation-maximisation (Dempster, Laird &
-#' Rubin 1977; the MVN case is Little & Rubin 2002 ch. 11).
-#'
-#' E-step: for each row, the missing entries are replaced by their
-#'   conditional expectation given the observed ones, and the conditional
-#'   COVARIANCE of those entries is accumulated separately. Imputing the
-#'   conditional mean alone and then taking a sample covariance is the
-#'   classic error -- it understates the variance, because it treats an
-#'   estimate as if it were an observation.
-#' M-step: the completed first and second moments give the next estimates.
-#'
-#' Returns the estimates plus the iteration count, or NULL when the
-#' problem is degenerate.
-#' @param X A numeric matrix with missing entries as NA.
-#' @param max_iter The largest number of EM iterations.
-#' @param tol The change in the estimates that ends the iterations.
-#' @param ridge The eigenvalue floor passed to .rmbl_make_pd().
-#' @return A list with `mu`, `sigma` and `iterations`, or NULL.
-#' @noRd
-.rmbl_em_mvn <- function(X, max_iter = 500L, tol = 1e-7, ridge = 1e-8) {
-  n <- nrow(X)
-  p <- ncol(X)
-  obs <- !is.na(X)
-
-  # Start from the pairwise-complete moments, which is a consistent
-  # starting point even when no row is complete.
-  mu <- vapply(seq_len(p), function(j) mean(X[obs[, j], j]), numeric(1))
-  if (anyNA(mu)) return(NULL)
-  S <- stats::cov(X, use = "pairwise.complete.obs")
-  S[!is.finite(S)] <- 0
-  diag(S) <- ifelse(is.finite(diag(S)) & diag(S) > 0, diag(S), 1)
-  S <- .rmbl_make_pd(S, ridge)
-
-  solve_safe <- function(M) {
-    tryCatch(solve(M), error = function(e) {
-      tryCatch(solve(M + diag(ridge * max(1, mean(diag(M))), nrow(M))),
-               error = function(e2) NULL)
-    })
-  }
-
-  iter <- 0L
-  pg <- blprog("EM (normal, missing data)", 0)
-  on.exit(pg$done(), add = TRUE)
-  for (it in seq_len(max_iter)) {
-    iter <- it
-    pg$update(info = sprintf("iteration %d", it))
-    T1 <- numeric(p)              # accumulated first moments
-    T2 <- matrix(0, p, p)         # accumulated second moments
-    for (i in seq_len(n)) {
-      o <- which(obs[i, ])
-      m <- which(!obs[i, ])
-      xi <- numeric(p)
-      Ci <- matrix(0, p, p)
-      if (length(o) == p) {
-        xi <- X[i, ]
-      } else if (length(o) == 0L) {
-        # a row with nothing observed contributes only the prior
-        xi <- mu
-        Ci <- S
-      } else {
-        Soo_inv <- solve_safe(S[o, o, drop = FALSE])
-        if (is.null(Soo_inv)) return(NULL)
-        B <- S[m, o, drop = FALSE] %*% Soo_inv
-        xi[o] <- X[i, o]
-        xi[m] <- mu[m] + as.numeric(B %*% (X[i, o] - mu[o]))
-        # the conditional covariance of the imputed block
-        Ci[m, m] <- S[m, m, drop = FALSE] -
-          B %*% S[o, m, drop = FALSE]
-      }
-      T1 <- T1 + xi
-      T2 <- T2 + outer(xi, xi) + Ci
-    }
-    mu_new <- T1 / n
-    S_new <- T2 / n - outer(mu_new, mu_new)
-    S_new <- (S_new + t(S_new)) / 2          # keep it exactly symmetric
-    S_new <- .rmbl_make_pd(S_new, ridge)
-
-    delta <- max(max(abs(mu_new - mu)), max(abs(S_new - S)))
-    mu <- mu_new
-    S <- S_new
-    if (is.finite(delta) && delta < tol) break
-  }
-  list(mu = mu, sigma = S, iterations = iter)
-}
-
-#' Makes a symmetric matrix positive definite by flooring its eigenvalues.
-#'
-#' Nudge a symmetric matrix to positive definiteness by flooring its
-#' eigenvalues. EM can land on a numerically indefinite estimate on the
-#' way to convergence, and inverting that would end the run.
-#' @param S A square matrix.
-#' @param ridge The relative eigenvalue floor.
-#' @return The symmetrised matrix, with its eigenvalues floored when needed.
-#' @noRd
-.rmbl_make_pd <- function(S, ridge = 1e-8) {
-  S <- (S + t(S)) / 2
-  ev <- tryCatch(eigen(S, symmetric = TRUE), error = function(e) NULL)
-  if (is.null(ev)) return(S + diag(ridge, nrow(S)))
-  floor_val <- ridge * max(1, max(abs(ev$values)))
-  if (min(ev$values) >= floor_val) return(S)
-  vals <- pmax(ev$values, floor_val)
-  ev$vectors %*% diag(vals, length(vals)) %*% t(ev$vectors)
-}
-
 #' Little's test for data missing completely at random
 #'
 #' @description
@@ -245,43 +138,251 @@
 #' @export
 mcartst <- function(data, maxit = 500L, tol = 1e-7) {
   maxit <- .rmbl_scalar(maxit, "maxit", 1, 1e6, integer = TRUE)
-  tol <- .rmbl_scalar(tol, "tol", 1e-12, 1)   # zero never converged (final audit of 1.0.0)
-  if (is.matrix(data)) data <- as.data.frame(data)
+  # zero never converged (final audit of 1.0.0)
+  tol <- .rmbl_scalar(tol, "tol", 1e-12, 1)
+  X <- .rmbl_mcar_matrix(.rmbl_mcar_numeric(data))
+  p <- ncol(X)
+  .rmbl_mcar_rank(X)
+
+  fit <- .rmbl_em_mvn(X, max_iter = maxit, tol = tol)
+  if (is.null(fit)) {
+    stop(
+      "the EM estimates did not converge to a usable covariance: the ",
+      "columns may be collinear, or a pattern may have too few rows",
+      call. = FALSE
+    )
+  }
+
+  pt <- .rmbl_mcar_d2(X, fit)
+  d2 <- pt$d2
+  used <- pt$used
+  patterns <- pt$patterns
+  df <- pt$df_sum - p
+  note <- .rmbl_mcar_note(df, pt$skipped)
+  out <- list(
+    statistic = d2,
+    df = df,
+    logpvalue = if (df > 0) {
+      stats::pchisq(d2, df, lower.tail = FALSE, log.p = TRUE)
+    } else {
+      NA_real_
+    },
+    p_value = if (df > 0) {
+      stats::pchisq(d2, df, lower.tail = FALSE)
+    } else {
+      NA_real_
+    },
+    npat = length(patterns),
+    nused = used,
+    nvars = p,
+    iterations = fit$iterations,
+    mu = stats::setNames(fit$mu, colnames(X)),
+    sigma = fit$sigma,
+    note = note
+  )
+  class(out) <- c("bricklayer_mcar", "list")
+  out
+}
+
+#' @export
+format.bricklayer_mcar <- function(x, ...) {
+  g <- .rmbl_glyphs()
+  verdict <- if (is.na(x$p_value)) {
+    paste0(g$warn, " no test possible")
+  } else if (x$p_value < 0.05) {
+    paste0(g$bad, " MCAR rejected: the missingness is related to the data")
+  } else {
+    paste0(g$ok, " no departure from MCAR detected")
+  }
+  .rmbl_res_block(
+    "Little's MCAR test",
+    facts = list(
+      Verdict = verdict,
+      Statistic = formatC(x$statistic, format = "f", digits = 3),
+      df = x$df,
+      `p-value` = .rmbl_fmt_p(x$p_value),
+      Patterns = x$npat,
+      Variables = x$nvars,
+      `Rows used` = x$nused,
+      `EM iterations` = x$iterations
+    ),
+    reading = if (!is.na(x$p_value) && x$p_value >= 0.05) {
+      paste(
+        "Not evidence OF MCAR: a large p-value is a failure to detect a",
+        "departure, and this test has little power on small samples."
+      )
+    } else if (!is.na(x$p_value)) {
+      paste(
+        "Rows with different patterns of missing values have different",
+        "means: an analysis of the complete rows alone may be biased."
+      )
+    },
+    notes = if (!is.na(x$note)) paste(g$warn, x$note)
+  )
+}
+
+#' Estimates a multivariate normal mean and covariance from incomplete data by
+#' EM.
+#'
+#' ML estimates of a multivariate normal mean and covariance from data
+#' with missing entries, by expectation-maximisation (Dempster, Laird &
+#' Rubin 1977; the MVN case is Little & Rubin 2002 ch. 11).
+#'
+#' E-step: for each row, the missing entries are replaced by their
+#'   conditional expectation given the observed ones, and the conditional
+#'   COVARIANCE of those entries is accumulated separately. Imputing the
+#'   conditional mean alone and then taking a sample covariance is the
+#'   classic error -- it understates the variance, because it treats an
+#'   estimate as if it were an observation.
+#' M-step: the completed first and second moments give the next estimates.
+#'
+#' Returns the estimates plus the iteration count, or NULL when the
+#' problem is degenerate.
+#' @param X A numeric matrix with missing entries as NA.
+#' @param max_iter The most EM iterations for the normal fit.
+#' @param tol The change in the estimates that ends the iterations.
+#' @param ridge The eigenvalue floor passed to .rmbl_make_pd().
+#' @return A list with `mu`, `sigma` and `iterations`, or NULL.
+#' @noRd
+.rmbl_em_mvn <- function(X, max_iter = 500L, tol = 1e-7, ridge = 1e-8) {
+  n <- nrow(X)
+  p <- ncol(X)
+  obs <- !is.na(X)
+
+  # Start from the pairwise-complete moments, which is a consistent
+  # starting point even when no row is complete.
+  mu <- vapply(seq_len(p), function(j) mean(X[obs[, j], j]), numeric(1))
+  if (anyNA(mu)) {
+    return(NULL)
+  }
+  S <- stats::cov(X, use = "pairwise.complete.obs")
+  S[!is.finite(S)] <- 0
+  diag(S) <- ifelse(is.finite(diag(S)) & diag(S) > 0, diag(S), 1)
+  S <- .rmbl_make_pd(S, ridge)
+
+  iter <- 0L
+  pg <- blprog("EM (normal, missing data)", 0)
+  on.exit(pg$done(), add = TRUE)
+  for (it in seq_len(max_iter)) {
+    iter <- it
+    pg$update(info = sprintf("iteration %d", it))
+    mom <- .rmbl_em_moments(X, obs, mu, S, ridge)
+    if (is.null(mom)) {
+      return(NULL)
+    }
+    T1 <- mom$T1
+    T2 <- mom$T2
+    mu_new <- T1 / n
+    S_new <- T2 / n - outer(mu_new, mu_new)
+    S_new <- (S_new + t(S_new)) / 2 # keep it exactly symmetric
+    S_new <- .rmbl_make_pd(S_new, ridge)
+
+    delta <- max(max(abs(mu_new - mu)), max(abs(S_new - S)))
+    mu <- mu_new
+    S <- S_new
+    if (is.finite(delta) && delta < tol) break
+  }
+  list(mu = mu, sigma = S, iterations = iter)
+}
+
+#' Makes a symmetric matrix positive definite by flooring its eigenvalues.
+#'
+#' Nudge a symmetric matrix to positive definiteness by flooring its
+#' eigenvalues. EM can land on a numerically indefinite estimate on the
+#' way to convergence, and inverting that would end the run.
+#' @param S A square matrix.
+#' @param ridge The relative eigenvalue floor.
+#' @return The symmetrised matrix, with its eigenvalues floored when needed.
+#' @noRd
+.rmbl_make_pd <- function(S, ridge = 1e-8) {
+  S <- (S + t(S)) / 2
+  ev <- tryCatch(eigen(S, symmetric = TRUE), error = function(e) NULL)
+  if (is.null(ev)) {
+    return(S + diag(ridge, nrow(S)))
+  }
+  floor_val <- ridge * max(1, max(abs(ev$values)))
+  if (min(ev$values) >= floor_val) {
+    return(S)
+  }
+  vals <- pmax(ev$values, floor_val)
+  ev$vectors %*% diag(vals, length(vals)) %*% t(ev$vectors)
+}
+
+#' The numeric columns of mcartst()'s data, the others dropped with a warning.
+#' @param data A data frame or a numeric matrix.
+#' @return A data frame of at least two numeric columns.
+#' @noRd
+.rmbl_mcar_numeric <- function(data) {
+  if (is.matrix(data)) {
+    data <- as.data.frame(data)
+  }
   if (!is.data.frame(data)) {
-    stop("mcartst: `data` must be a data frame or a numeric matrix", call. = FALSE)
+    stop(
+      "mcartst: `data` must be a data frame or a numeric matrix",
+      call. = FALSE
+    )
   }
   num <- vapply(data, is.numeric, logical(1))
   if (!all(num)) {
     dropped <- names(data)[!num]
-    warning(sprintf("dropping non-numeric column(s): %s",
-                    paste(dropped, collapse = ", ")), call. = FALSE)
+    warning(
+      sprintf(
+        "dropping non-numeric column(s): %s",
+        toString(dropped)
+      ),
+      call. = FALSE
+    )
     data <- data[, num, drop = FALSE]
   }
   if (ncol(data) < 2L) {
     stop("Little's test needs at least two numeric columns", call. = FALSE)
   }
+  data
+}
 
+#' The matrix Little's test runs on: wholly missing columns and rows out.
+#' @param data A data frame of numeric columns.
+#' @return A double matrix with at least two columns and two rows.
+#' @noRd
+.rmbl_mcar_matrix <- function(data) {
   X <- as.matrix(data)
   storage.mode(X) <- "double"
   # A wholly missing column carries no information and makes every
   # pattern's submatrix singular.
   all_na_col <- apply(is.na(X), 2L, all)
-  if (any(all_na_col)) X <- X[, !all_na_col, drop = FALSE]
+  if (any(all_na_col)) {
+    X <- X[, !all_na_col, drop = FALSE]
+  }
   # A wholly missing row belongs to no pattern with observed variables.
   keep_row <- !apply(is.na(X), 1L, all)
   X <- X[keep_row, , drop = FALSE]
 
   n <- nrow(X)
   p <- ncol(X)
-  # an infinite value made the covariance non-finite and the refusal spoke of collinearity
+  # an infinite value made the covariance non-finite and the refusal spoke of
+  # collinearity
   if (any(is.infinite(X))) {
-    stop("`x` has infinite values, which Little's test cannot use; set them to NA first", call. = FALSE)
+    stop(
+      "`data` has infinite values, which Little's test cannot use; set ",
+      "them to NA first",
+      call. = FALSE
+    )
   }
   if (p < 2L || n < 2L) {
-    stop("too few complete columns or rows remain for Little's test",
-         call. = FALSE)
+    stop(
+      "too few complete columns or rows remain for Little's test",
+      call. = FALSE
+    )
   }
+  X
+}
 
+#' Refuses a matrix whose columns are collinear, before EM floors it.
+#' @param X The data matrix.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_mcar_rank <- function(X) {
+  p <- ncol(X)
   # Refuse rank-deficient input rather than computing through it. The EM
   # step floors the covariance's eigenvalues to keep it invertible, so a
   # collinear column would not stop the algorithm -- it would quietly
@@ -299,26 +400,33 @@ mcartst <- function(data, maxit = 500L, tol = 1e-7) {
     stats::cov(X, use = "pairwise.complete.obs")
   }
   S0[!is.finite(S0)] <- 0
-  ev0 <- tryCatch(eigen(S0, symmetric = TRUE, only.values = TRUE)$values,
-                  error = function(e) NULL)
-  if (!is.null(ev0) &&
-      min(ev0) <= 1e-8 * max(abs(ev0), .Machine$double.eps)) {
-    stop("the columns are collinear (or one is constant), so the ",
-         "multivariate normal likelihood Little's test is built on is ",
-         "degenerate. Drop the redundant column(s) first -- ",
-         "topcors() and drpconst() will find them.",
-         call. = FALSE)
+  ev0 <- tryCatch(
+    eigen(S0, symmetric = TRUE, only.values = TRUE)$values,
+    error = function(e) NULL
+  )
+  if (
+    !is.null(ev0) &&
+      min(ev0) <= 1e-8 * max(abs(ev0), .Machine$double.eps)
+  ) {
+    stop(
+      "the columns are collinear (or one is constant), so the ",
+      "multivariate normal likelihood Little's test is built on is ",
+      "degenerate. Drop the redundant column(s) first -- ",
+      "topcors() and drpconst() will find them.",
+      call. = FALSE
+    )
   }
+  invisible(NULL)
+}
 
-  fit <- .rmbl_em_mvn(X, max_iter = maxit, tol = tol)
-  if (is.null(fit)) {
-    stop("the EM estimates did not converge to a usable covariance: the ",
-         "columns may be collinear, or a pattern may have too few rows",
-         call. = FALSE)
-  }
-
+#' Little's d-squared, summed over the missingness patterns.
+#' @param X The data matrix.
+#' @param fit The EM estimates (.rmbl_em_mvn()).
+#' @return list(d2, df_sum, used, skipped, patterns).
+#' @noRd
+.rmbl_mcar_d2 <- function(X, fit) {
   obs <- !is.na(X)
-  codes <- apply(obs, 1L, function(r) paste0(as.integer(r), collapse = ""))
+  codes <- apply(obs, 1L, function(r) paste(as.integer(r), collapse = ""))
   patterns <- unique(codes)
 
   d2 <- 0
@@ -328,7 +436,7 @@ mcartst <- function(data, maxit = 500L, tol = 1e-7) {
   for (code in patterns) {
     rows <- which(codes == code)
     o <- which(obs[rows[1L], ])
-    pj <- length(o)   # at least one: wholly missing rows were dropped above
+    pj <- length(o) # at least one: wholly missing rows were dropped above
     nj <- length(rows)
     # The pattern's observed-variable means, against the ML estimates.
     xbar <- colMeans(X[rows, o, drop = FALSE])
@@ -343,76 +451,101 @@ mcartst <- function(data, maxit = 500L, tol = 1e-7) {
     df_sum <- df_sum + pj
     used <- used + nj
   }
+  list(
+    d2 = d2,
+    df_sum = df_sum,
+    used = used,
+    skipped = skipped,
+    patterns = patterns
+  )
+}
 
-  df <- df_sum - p
+#' The note mcartst() attaches: nothing to test, or patterns skipped.
+#' @param df The test's degrees of freedom.
+#' @param skipped The number of patterns skipped.
+#' @return One string, or NA.
+#' @noRd
+.rmbl_mcar_note <- function(df, skipped) {
   note <- NA_character_
   if (df <= 0) {
-    note <- paste0("df is ", df, ": with a single missingness pattern there ",
-                   "is nothing to test. A complete table trivially ",
-                   "satisfies MCAR.")
+    note <- paste0(
+      "df is ",
+      df,
+      ": with a single missingness pattern there ",
+      "is nothing to test. A complete table trivially ",
+      "satisfies MCAR."
+    )
   }
   if (skipped > 0L) {
-    note <- paste(stats::na.omit(c(note, sprintf(
-      "%d pattern(s) were skipped: their observed variables were collinear.",
-      skipped))), collapse = " ")
+    note <- paste(
+      stats::na.omit(c(
+        note,
+        sprintf(
+          paste0(
+            "%d pattern(s) were skipped: their observed variables were ",
+            "collinear."
+          ),
+          skipped
+        )
+      )),
+      collapse = " "
+    )
   }
-  out <- list(statistic = d2,
-              df = df,
-              logpvalue = if (df > 0) {
-                stats::pchisq(d2, df, lower.tail = FALSE, log.p = TRUE)
-              } else {
-                NA_real_
-              },
-              p_value = if (df > 0) {
-                stats::pchisq(d2, df, lower.tail = FALSE)
-              } else {
-                NA_real_
-              },
-              npat = length(patterns),
-              nused = used,
-              nvars = p,
-              iterations = fit$iterations,
-              mu = stats::setNames(fit$mu, colnames(X)),
-              sigma = fit$sigma,
-              note = note)
-  class(out) <- c("bricklayer_mcar", "list")
-  out
+  note
 }
 
-#' @export
-format.bricklayer_mcar <- function(x, ...) {
-  g <- .rmbl_glyphs()
-  verdict <- if (is.na(x$p_value)) {
-    paste0(g$warn, " no test possible")
-  } else if (x$p_value < 0.05) {
-    paste0(g$bad, " MCAR rejected: the missingness is related to the data")
-  } else {
-    paste0(g$ok, " no departure from MCAR detected")
-  }
-  lines <- c(.rmbl_rule("Little's MCAR test"),
-             paste0("  ", verdict),
-             "",
-             .rmbl_kv(list(
-               statistic = formatC(x$statistic, format = "f", digits = 3),
-               df = x$df,
-               "p-value" = .rmbl_fmt_p(x$p_value),
-               patterns = x$npat,
-               variables = x$nvars,
-               "rows used" = x$nused,
-               "EM iterations" = x$iterations)))
-  if (!is.na(x$note)) {
-    lines <- c(lines, "", paste0("  ", g$warn, " ", x$note))
-  }
-  if (!is.na(x$p_value) && x$p_value >= 0.05) {
-    lines <- c(lines, "",
-               paste0("  Not evidence OF MCAR: a large p-value is a failure ",
-                      "to detect a"),
-               "  departure, and this test has little power on small samples.")
-  }
-  c(lines, .rmbl_rule())
+#' Inverts a covariance block, with a ridge when it is singular.
+#' @param M A square matrix.
+#' @param ridge The relative ridge added when solve() fails.
+#' @return The inverse, or NULL when even the ridged matrix is singular.
+#' @noRd
+.rmbl_em_solve <- function(M, ridge) {
+  tryCatch(solve(M), error = function(e) {
+    tryCatch(
+      solve(M + diag(ridge * max(1, mean(diag(M))), nrow(M))),
+      error = function(e2) NULL
+    )
+  })
 }
 
-#' @rdname printmeth
-#' @export
-#' @method print bricklayer_mcar
-print.bricklayer_mcar <- .rmbl_print_via_format
+#' One E-step of .rmbl_em_mvn(): the completed first and second moments.
+#' @param X The data matrix.
+#' @param obs Which entries of `X` are observed.
+#' @param mu,S The current mean and covariance.
+#' @param ridge The ridge for a singular observed block.
+#' @return list(T1, T2), the accumulated moments, or NULL when an observed
+#'   block cannot be inverted.
+#' @noRd
+.rmbl_em_moments <- function(X, obs, mu, S, ridge) {
+  n <- nrow(X)
+  p <- ncol(X)
+  T1 <- numeric(p) # accumulated first moments
+  T2 <- matrix(0, p, p) # accumulated second moments
+  for (i in seq_len(n)) {
+    o <- which(obs[i, ])
+    m <- which(!obs[i, ])
+    xi <- numeric(p)
+    Ci <- matrix(0, p, p)
+    if (length(o) == p) {
+      xi <- X[i, ]
+    } else if (length(o) == 0L) {
+      # a row with nothing observed contributes only the prior
+      xi <- mu
+      Ci <- S
+    } else {
+      Soo_inv <- .rmbl_em_solve(S[o, o, drop = FALSE], ridge)
+      if (is.null(Soo_inv)) {
+        return(NULL)
+      }
+      B <- S[m, o, drop = FALSE] %*% Soo_inv
+      xi[o] <- X[i, o]
+      xi[m] <- mu[m] + as.numeric(B %*% (X[i, o] - mu[o]))
+      # the conditional covariance of the imputed block
+      Ci[m, m] <- S[m, m, drop = FALSE] -
+        B %*% S[o, m, drop = FALSE]
+    }
+    T1 <- T1 + xi
+    T2 <- T2 + outer(xi, xi) + Ci
+  }
+  list(T1 = T1, T2 = T2)
+}

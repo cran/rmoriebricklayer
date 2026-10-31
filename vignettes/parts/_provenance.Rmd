@@ -1,7 +1,8 @@
 # Provenance you can verify
 
 ```{r provenance-setup, include = FALSE}
-# the one-time index record of this vignette stays out of the reader's configuration directory
+# the one-time index record of this vignette stays out of the reader's
+# configuration directory
 options(rmoriebricklayer.xmssidxfile = tempfile())
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(rmoriebricklayer)
@@ -38,7 +39,12 @@ An edited manifest has a different digest, which the signature does not
 cover:
 
 ```{r}
-edited <- sub("fetched=2026-09-12", "fetched=2026-01-01", manifest)
+edited <- sub(
+  "fetched=2026-09-12",
+  "fetched=2026-01-01",
+  manifest,
+  fixed = TRUE
+)
 cpsvrf(csha256(edited), sig, "team-secret")
 ```
 
@@ -131,7 +137,8 @@ are implemented here too, at every parameter set both standards define
 the list `pqcbknd()` reports is the same on every machine.
 `fipskg()` takes any of them, `fipskey()` wraps key material that
 came from elsewhere, and both are stateless: one key signs any number of
-messages.
+messages. The default, SLH-DSA-SHA2-128s, rests on the hash function alone,
+the most conservative assumption for a record meant to outlive its author.
 
 What makes that defensible is the cross-check rather than care. In
 deterministic mode this package and OpenSSL 3.5 produce the same bytes
@@ -142,6 +149,34 @@ construction where a single misplaced field changes every output.
 ```{r}
 pqcbknd()
 ```
+
+### Signing inside a FIPS 140-3 module
+
+The package's own ML-DSA and SLH-DSA are not a validated cryptographic
+module, and no amount of testing makes them one: validation is a
+certificate NIST issues for one exact build. Where a record has to be
+signed by a validated module, the package can hand the work to one.
+`fipsmod()` loads the OpenSSL FIPS provider on its own (a distribution's,
+or an upstream build it installs with `openssl fipsinstall`), and says
+which module it is and whether that exact build is on the package's list
+of certificates: today the Chainguard FIPS Provider for OpenSSL 3.6.0-r4,
+CMVP #5523, which covers ML-DSA and SLH-DSA. `fipsmkg()` makes the key
+inside the module, and `cpssign()` signs with it there; `cpsvrf()` and
+`cpsxvrf()` verify the result like any other signature.
+
+```{r, eval = FALSE}
+mod <- fipsmod()
+mod                       # the module, its build and its certificate
+key <- fipsmkg("ML-DSA-65", mod)
+sig <- cpssign("a manifest digest", key)
+cpsvrf("a manifest digest", sig, key)
+```
+
+A module that is not on the list is reported as such, not as
+unvalidated: it may hold a certificate the list does not have yet, and
+NIST's list is the authority. The claim to make is about the module
+("signed inside the Chainguard FIPS Provider, CMVP #5523"), never that
+this package is validated.
 
 ## Signing something a verifier can check
 
@@ -305,6 +340,50 @@ and the outcome:
 evlrr(2, lo = 1.4, hi = 2.9)
 ```
 
+## A trial whose allocation nobody can rewrite
+
+In a randomised trial the two records that must not move after the data
+are seen are the outcomes and the allocation. The outcomes are declared
+above; the allocation is a list made before the first participant and
+committed to.
+
+```{r}
+alloc <- ralloc(arms = c("drug", "placebo"), ratio = c(1, 1),
+                strata = c(Toronto = 24, Ottawa = 16), codes = TRUE,
+                seed = "a vignette, not a trial")
+alloc
+```
+
+The box shows how many participants each arm has, never who is in which,
+and not the seed. For a real trial leave `seed` out: the seed is then 48
+bytes from the operating system, and the list cannot be guessed before it
+is opened. Sites and the pharmacy get only the `id` and `kit` columns.
+
+Sign the commitment, and the declared outcomes with it, before enrolment
+(and send the signed record to a timestamp authority; `tsvrf()` checks the
+token it returns):
+
+```{r}
+trial <- fipskg("ML-DSA-44")
+record <- paste(attr(alloc, "alloc")$digest,
+                mnfdgst(mkmnf(list(outcomes = plan$statistics),
+                              env = FALSE)))
+sealed <- cpssign(record, trial, ctx = "trial commitment")
+cpsvrf(record, sealed, fipspubkey(trial), ctx = "trial commitment")
+```
+
+At unblinding the statistician reveals the list and the seed, and anyone
+can check them against what was signed:
+
+```{r}
+rallocvrf(alloc, digest = attr(alloc, "alloc")$digest)
+
+# one allocation changed after the commitment is caught
+moved <- alloc
+moved$arm[1] <- setdiff(c("drug", "placebo"), moved$arm[1])
+rallocvrf(moved, digest = attr(alloc, "alloc")$digest)$ok
+```
+
 ## Keeping your own copy of the source
 
 A capsule pins a source by its SHA-256, and `fetchvrf()` fetches it from wherever a copy with that SHA-256 still
@@ -317,9 +396,13 @@ read), and with `upload = "rmorie"` keeps it at archive.rmorie.com under your da
 `upload = "wayback"` asks the Wayback Machine as well.
 
 ```{r eval = FALSE}
-cap <- arccap("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip", "captures",
-              upload = c("rmorie", "wayback"), reason = "Custody table cited in chapter 3")
-cap$archive                     # its page at archive.rmorie.com
+cap <- arccap(
+  "https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip",
+  "captures",
+  upload = c("rmorie", "wayback"),
+  reason = "Custody table cited in chapter 3"
+)
+cap$archive # its page at archive.rmorie.com
 arcfind("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip")
 arcget(cap$capture_id, "table.zip", sha256 = cap$sha256)
 ```
@@ -328,8 +411,12 @@ When the source is gone and the Wayback Machine cannot be reached, `fetchvrf()` 
 failing that from the WARC files in your own folder, still checked against the pin:
 
 ```{r eval = FALSE}
-fetchvrf("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip", "table.zip",
-         sha256 = cap$sha256, arcs = c("rmorie", "captures"))
+fetchvrf(
+  "https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip",
+  "table.zip",
+  sha256 = cap$sha256,
+  arcs = c("rmorie", "captures")
+)
 ```
 
 From a terminal the same steps are `rmbl archive save URL --reason "..."`, `rmbl archive find URL` and
@@ -376,6 +463,94 @@ about what else was put beside it.
 
 ```{r}
 unlink(dir, recursive = TRUE)
+```
+
+## A bundle a reviewer double-clicks
+
+The capsule above is for someone who runs R. A reproducibility bundle is
+for anyone: one zip a reviewer unzips and double-clicks
+(`START_HERE.command` on macOS, `START_HERE.bat` on Windows,
+`start_here.sh` on Linux), with nothing installed but R. The runner
+inside finds the data, checks it against the pinned SHA-256, runs your
+analysis and says, for every number you report, what it got.
+
+**Step 1: start a project.** `mkbndlproj()` writes three files that
+already build and run, so every step can be tried before the analysis
+is written.
+
+```{r}
+proj <- file.path(tempdir(), "my-study")
+p <- mkbndlproj(proj, title = "My study", author = "A. Researcher",
+                contact = "a.researcher@example.org", overwrite = TRUE)
+p
+```
+
+`config.json` says who and what (and `r_packages`, the packages your
+analysis needs); `data_provenance.json` names the data file, where it
+can be downloaded and its SHA-256, plus a recipe for synthetic data;
+`analysis.R` reads the data and records one check per number the paper
+reports with `recrd()`.
+
+**Step 2: pin your data.** Point the provenance at the real file and its
+digest. A reviewer whose copy differs is stopped, not given different
+numbers.
+
+```{r}
+dat <- data.frame(group = rep(c("a", "b"), 50), value = rep(c(4, 6), 50),
+                  stringsAsFactors = FALSE)
+csv <- file.path(tempdir(), "my_data.csv")
+write.csv(dat, csv, row.names = FALSE)
+pv <- file.path(proj, "data_provenance.json")
+prov <- fromjs(pv, simplifyVector = FALSE)
+prov$resource$sha256 <- sha256file(csv)
+writeLines(tojs(prov, auto_unbox = TRUE, pretty = TRUE), pv)
+```
+
+With `resource$direct_url` set too, a bundle without the data downloads
+it and checks it; here the data travels inside.
+
+**Step 3: build the zip.** Before writing it, `mkbndl()` checks that
+every function the bundled files call is in the bundle, so it cannot
+stop on the reviewer's machine with "could not find function".
+
+```{r}
+b <- mkbndl(proj, dest = tempdir(), data = csv, overwrite = TRUE)
+b
+```
+
+Send `b$sha256` separately from the zip: the reviewer checks it before
+opening anything.
+
+**Step 4: what the reviewer sees.** Unzipped and started (here from R;
+a reviewer double-clicks), the runner uses the data inside, checks it
+and runs the analysis:
+
+```{r}
+out <- file.path(tempdir(), "reviewer")
+unzip(b$path, exdir = out)
+st <- file.path(out, sub("[.]zip$", "", basename(b$path)))
+res <- system2(file.path(R.home("bin"), "Rscript"),
+               c(shQuote(file.path(st, "setup_and_run.R")), "--quick"),
+               stdout = TRUE, stderr = TRUE)
+cat(grep("PASS:|DIFFER:|INFO:", res, value = TRUE), sep = "\n")
+```
+
+Both checks pass on the real data. Run with `--synthetic` the same
+checks come out INFO: generated data never counts as a reproduction.
+`--data FILE` takes a copy the reviewer already has.
+
+The same from a terminal, once `instcli()` has put `rmbl` on the path:
+
+```sh
+rmbl pack --new my-study --title "My study"
+rmbl pack my-study --data my_data.csv       # writes my-study_v1_with_data.zip here
+```
+
+The package ships a full example, the Ontario restrictive confinement
+analysis with 55 checks: `mkbndl("otis-mrp", dest = tempdir())`.
+
+```{r}
+unlink(c(proj, out, csv, b$path), recursive = TRUE)
 ```
 
 ## When, not just in what order
@@ -526,7 +701,7 @@ dates and licence) in the package's COPYRIGHTS file:
 
 ```{r provenance-indigenous-provenance}
 cr <- readLines(system.file("COPYRIGHTS", package = "rmoriebricklayer"))
-cat(cr[grep("indigenouslifeexpectancy", cr) + 0:4], sep = "\n")
+cat(cr[grep("indigenouslifeexpectancy", cr, fixed = TRUE) + 0:4], sep = "\n")
 ```
 
 With a data key (`dlogin()`), `indtabs()` lists the mirrored tables themselves:
@@ -544,6 +719,12 @@ The manifest above pins these ten values. A verifier that recomputes the digest 
 exactly what this chart shows.
 
 ```{r provenance-provenance-plot, fig.width = 6, fig.height = 4}
-barplot(d$x, names.arg = seq_len(nrow(d)), col = blpal()[1], xlab = "row", ylab = "x",
-        main = "The values the manifest pins")
+barplot(
+  d$x,
+  names.arg = seq_len(nrow(d)),
+  col = blpal()[1],
+  xlab = "row",
+  ylab = "x",
+  main = "The values the manifest pins"
+)
 ```
