@@ -360,3 +360,89 @@ test_that("the codec still agrees with jsonlite where it is installed", {
     expect_equal(mine, theirs, info = paste("mismatch for", deparse(x)[1]))
   }
 })
+
+test_that("JSON: the R parser runs where findInterval() lacks checkSorted", {
+  # R 4.1 to 4.4 have no checkSorted / checkNA; 1.0.4 passed them anyway,
+  # so there every document the R parser read stopped with "unused
+  # arguments" (an error, a duplicate key, a staged bundle)
+  old <- list(json = .rmbl_native$json, fi = .rmbl_native$findint)
+  withr::defer({
+    .rmbl_native$json <- old$json
+    .rmbl_native$findint <- old$fi
+  })
+  .rmbl_native$json <- FALSE
+  txt <- "{ \"a\" : [ 1, 22 , \"x y\" ],\n \"b\": { \"c\": null } }"
+  want <- fromjs(txt, simplifyVector = FALSE)
+  .rmbl_native$findint <- FALSE
+  expect_identical(fromjs(txt, simplifyVector = FALSE), want)
+  expect_error(fromjs("{\"a\": }"), "unexpected character at character 7")
+  expect_error(
+    fromjs("{\"a\": 1, \"a\": 2}"),
+    "duplicate key \"a\" at character 17",
+    fixed = TRUE
+  )
+  expect_identical(
+    .rmbl_findint(c(0, 2.5, 9), c(1, 2, 3)),
+    findInterval(c(0, 2.5, 9), c(1, 2, 3))
+  )
+  .rmbl_native$findint <- NULL
+  expect_identical(fromjs(txt, simplifyVector = FALSE), want)
+  expect_identical(
+    .rmbl_native$findint,
+    all(c("checkSorted", "checkNA") %in% names(formals(findInterval)))
+  )
+})
+
+test_that("JSON: records holding arrays read as a list column on every R", {
+  # is.atomic(NULL) is TRUE before R 4.4.0; 1.0.4 relied on FALSE, so on
+  # R 4.1 to 4.3 this column came out as NA or stopped
+  expect_false(.rmbl_is_atomic(NULL))
+  expect_true(.rmbl_is_atomic(1:2))
+  expect_false(.rmbl_is_atomic(list(1)))
+  old <- .rmbl_native$json
+  withr::defer({
+    .rmbl_native$json <- old
+  })
+  for (native in c(TRUE, FALSE)) {
+    .rmbl_native$json <- if (native) NULL else FALSE
+    nat <- if (native) "native parser" else "R parser"
+    x <- fromjs('[{"a":[1,2]},{"a":[3]}]')
+    expect_s3_class(x, "data.frame")
+    expect_identical(x$a, list(1:2, 3L), info = nat)
+    y <- fromjs('[{"a":[1,2]},{"a":3}]')
+    expect_identical(y$a, list(1:2, 3L), info = nat)
+  }
+})
+
+test_that("JSON: 100 arrays deep reads and writes back, a 101st does not", {
+  # the depth is the arrays and objects open; 1.0.4 also counted the value
+  # inside the hundredth, so fromjs() refused what tojs() had written
+  mk <- function(n) Reduce(function(acc, i) list(acc), seq_len(n), list(1))
+  at100 <- paste0(strrep("[", 100), "1", strrep("]", 100))
+  at101 <- paste0(strrep("[", 101), "1", strrep("]", 101))
+  obj100 <- paste0(strrep("{\"a\":", 100), "1", strrep("}", 100))
+  old <- .rmbl_native$json
+  withr::defer({
+    .rmbl_native$json <- old
+  })
+  for (native in c(TRUE, FALSE)) {
+    .rmbl_native$json <- if (native) NULL else FALSE
+    nat <- if (native) "native parser" else "R parser"
+    expect_identical(as.vector(unlist(fromjs(at100))), 1L, info = nat)
+    expect_identical(unlist(fromjs(obj100), use.names = FALSE), 1L, info = nat)
+    expect_error(fromjs(at101), "100 levels at character 101", info = nat)
+    # mk(98) is 99 lists and the vector [1] inside: 100 arrays
+    s <- tojs(mk(98))
+    expect_identical(nchar(gsub("[^[]", "", s)), 100L)
+    # read back unsimplified, the [1] is list(1L): written unboxed, it is [1]
+    back <- fromjs(s, simplifyVector = FALSE)
+    expect_identical(tojs(back, auto_unbox = TRUE), s, info = nat)
+  }
+  # one list more puts the vector's [1] at the 101st level
+  expect_error(tojs(mk(99)), "nesting deeper than 100 levels")
+  # unboxed, the 1 inside the hundredth array opens nothing
+  expect_identical(
+    nchar(gsub("[^[]", "", tojs(mk(99), auto_unbox = TRUE))),
+    100L
+  )
+})

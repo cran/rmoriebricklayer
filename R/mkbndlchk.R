@@ -361,9 +361,14 @@ format.rmbl_bundle_audit <- function(x, ...) {
     if (is.na(pid) || pid <= 0L) {
       return(FALSE)
     }
+    # suppressWarnings() inside, not a warning handler: file() warns that it
+    # cannot open the file before it releases the connection, and a handler
+    # that leaves there leaks it; a scan over /proc used up all 128
     b <- tryCatch(
-      readBin(file.path("/proc", pid, "environ"), "raw", 1048576L),
-      error = function(e) raw(), warning = function(w) raw()
+      suppressWarnings(
+        readBin(file.path("/proc", pid, "environ"), "raw", 1048576L)
+      ),
+      error = function(e) raw()
     )
     length(grepRaw(mark, b, fixed = TRUE)) > 0L
   }, NA)]
@@ -600,8 +605,12 @@ format.rmbl_bundle_audit <- function(x, ...) {
   p <- list.files("/proc", pattern = "^[0-9]+$")
   # a process can end while it is read: its line is then ""
   st <- vapply(p, function(k) {
-    c(tryCatch(readLines(file.path("/proc", k, "stat"), n = 1L, warn = FALSE),
-               error = function(e) "", warning = function(w) ""), "")[1L]
+    c(tryCatch(
+      suppressWarnings(
+        readLines(file.path("/proc", k, "stat"), n = 1L, warn = FALSE)
+      ),
+      error = function(e) ""
+    ), "")[1L]
   }, "", USE.NAMES = FALSE)
   # the fields after the name in parentheses (which may hold spaces)
   f <- strsplit(sub("^.*\\) ", "", st), " ", fixed = TRUE)
@@ -671,9 +680,14 @@ format.rmbl_bundle_audit <- function(x, ...) {
   pids <- if (identical(sys, "Linux") && dir.exists("/proc")) {
     p <- list.files("/proc", pattern = "^[0-9]+$")
     p[vapply(p, function(k) {
+      # suppressWarnings() inside, not a warning handler: file() warns that it
+      # cannot open the file before it releases the connection, and a handler
+      # that leaves there leaks it; a scan over /proc used up all 128
       b <- tryCatch(
-        readBin(file.path("/proc", k, "environ"), "raw", 1048576L),
-        error = function(e) raw(), warning = function(w) raw()
+        suppressWarnings(
+          readBin(file.path("/proc", k, "environ"), "raw", 1048576L)
+        ),
+        error = function(e) raw()
       )
       length(grepRaw(mark, b, fixed = TRUE)) > 0L
     }, NA)]
@@ -721,7 +735,11 @@ format.rmbl_bundle_audit <- function(x, ...) {
 #' too. A shell without job control (dash with no terminal) signals the
 #' processes themselves, and the watchdog stops its own sleep when told to,
 #' so a short run is not held to the limit (mkbndlchk reported 124 for a
-#' one-second run there; ASAN + UBSAN job).
+#' one-second run there; ASAN + UBSAN job). The watchdog is stopped with
+#' KILL: a shell started with TERM ignored (unshare from util-linux before
+#' 2.38 ignores TERM in what it starts, so Ubuntu 22.04 runs every bundle
+#' that way) can neither trap TERM nor pass it on, and a TERM left every
+#' run there waiting out the whole limit.
 #' @return The lines of the script.
 #' @noRd
 .bndlchk_wrap <- function() {
@@ -743,7 +761,7 @@ format.rmbl_bundle_audit <- function(x, ...) {
     "wait \"$p\"",
     "rc=$?",
     "trap - INT TERM HUP",
-    "{ g -TERM \"$w\"; wait \"$w\"; } 2>/dev/null",
+    "{ g -KILL \"$w\"; wait \"$w\"; } 2>/dev/null",
     "if kill -0 -\"$p\" 2>/dev/null; then",
     "  kill -TERM -\"$p\" 2>/dev/null",
     "  sleep 1",

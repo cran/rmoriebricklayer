@@ -1,6 +1,6 @@
 Package: rmoriebricklayer
 Title: Reproducible Data Capsules with Provenance and Fallback
-Version: 1.0.4
+Version: 1.1.0
 Authors@R: 
     person(c("Vansh", "Singh"), "Ruhela", email = "vsruhela@proton.me",
            role = c("aut", "cre"),
@@ -37,10 +37,10 @@ Encoding: UTF-8
 Language: en-US
 Depends: R (>= 4.1.0)
 Imports: graphics, grDevices, methods, parallel, stats, tools, utils
-Suggests: withr, bslib (>= 0.9.0), digest, fixest, jsonlite, knitr,
-        later, lme4, MASS, mgcv, nlme, nnet, openssl, pkgdown,
+Suggests: withr (>= 2.5.0), bslib (>= 0.9.0), digest, fixest, jsonlite,
+        knitr, later, lme4, MASS, mgcv, nlme, nnet, openssl, pkgdown,
         rmarkdown, sf, promises, shiny, stringi, survival, survey,
-        testthat (>= 3.0.0)
+        testthat (>= 3.2.0)
 VignetteBuilder: knitr
 URL: https://github.com/rootcoder007/rmorie-bricklayer,
         https://rootcoder007.github.io/rmorie-bricklayer/
@@ -54,9 +54,9 @@ SystemRequirements: C++17, libcurl (deb: libcurl4-openssl-dev, rpm:
 Config/roxygen2/version: 8.1.1
 ByteCompile: yes
 NeedsCompilation: yes
-Packaged: 2026-10-31 09:06:13 UTC; rootcoder
+Packaged: 2026-11-01 12:21:07 UTC; rootcoder
 Author: Vansh Singh Ruhela [aut, cre] (ORCID:
     <https://orcid.org/0009-0004-1750-3592>)
 Maintainer: Vansh Singh Ruhela <vsruhela@proton.me>
 Repository: CRAN
-Date/Publication: 2026-10-31 11:10:02 UTC
+Date/Publication: 2026-11-07 12:30:02 UTC

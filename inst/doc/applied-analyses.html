@@ -1279,11 +1279,11 @@ measurement is listed:</p>
 <span id="cb34-4"><a href="#cb34-4" tabindex="-1"></a>                        <span class="at">memgb =</span> <span class="dv">16</span>)</span>
 <span id="cb34-5"><a href="#cb34-5" tabindex="-1"></a><span class="fu">print</span>(fp)</span>
 <span id="cb34-6"><a href="#cb34-6" tabindex="-1"></a><span class="co">#&gt; ╭── Computation footprint (modelled) ─────────────────────────────────────────╮</span></span>
-<span id="cb34-7"><a href="#cb34-7" tabindex="-1"></a><span class="co">#&gt; │   Time         0.004 s wall, 0.004 s CPU                                    │</span></span>
-<span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a><span class="co">#&gt; │   Utilisation  utilisation 0.12 (process) on 8 cores                        │</span></span>
+<span id="cb34-7"><a href="#cb34-7" tabindex="-1"></a><span class="co">#&gt; │   Time         0.004 s wall, 0.005 s CPU                                    │</span></span>
+<span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a><span class="co">#&gt; │   Utilisation  utilisation 0.16 (process) on 8 cores                        │</span></span>
 <span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a><span class="co">#&gt; │   Memory       16 GB                                                        │</span></span>
-<span id="cb34-10"><a href="#cb34-10" tabindex="-1"></a><span class="co">#&gt; │   Energy       1.29e-08 kWh (cpu 6.25e-09, memory 6.62e-09)                 │</span></span>
-<span id="cb34-11"><a href="#cb34-11" tabindex="-1"></a><span class="co">#&gt; │   CO2e         1.17e-06 g at 90.97 gCO2e/kWh (Canada, Ontario, 2024)        │</span></span>
+<span id="cb34-10"><a href="#cb34-10" tabindex="-1"></a><span class="co">#&gt; │   Energy       1.44e-08 kWh (cpu 7.81e-09, memory 6.62e-09)                 │</span></span>
+<span id="cb34-11"><a href="#cb34-11" tabindex="-1"></a><span class="co">#&gt; │   CO2e         1.31e-06 g at 90.97 gCO2e/kWh (Canada, Ontario, 2024)        │</span></span>
 <span id="cb34-12"><a href="#cb34-12" tabindex="-1"></a><span class="co">#&gt; │   Source       Electricity Maps (2025). Canada 2024 Yearly Carbon           │</span></span>
 <span id="cb34-13"><a href="#cb34-13" tabindex="-1"></a><span class="co">#&gt; │                Intensity Data (Version January 27, 2025). Electricity Maps  │</span></span>
 <span id="cb34-14"><a href="#cb34-14" tabindex="-1"></a><span class="co">#&gt; │                (via Green Algorithms data v3.1)                             │</span></span>
@@ -1317,9 +1317,9 @@ either tool:</p>
 <span id="cb35-4"><a href="#cb35-4" tabindex="-1"></a>                       <span class="at">usage =</span> <span class="st">&quot;machine&quot;</span>, <span class="at">loadcur =</span> <span class="st">&quot;codecarbon&quot;</span>)</span>
 <span id="cb35-5"><a href="#cb35-5" tabindex="-1"></a><span class="fu">rbind</span>(<span class="at">prolin =</span> <span class="fu">c</span>(<span class="at">usage =</span> a<span class="sc">$</span>usage, <span class="at">cpukwh =</span> a<span class="sc">$</span>enekwh<span class="sc">$</span>cpu),</span>
 <span id="cb35-6"><a href="#cb35-6" tabindex="-1"></a>      <span class="at">maccod =</span> <span class="fu">c</span>(<span class="at">usage =</span> b<span class="sc">$</span>usage, <span class="at">cpukwh =</span> b<span class="sc">$</span>enekwh<span class="sc">$</span>cpu))</span>
-<span id="cb35-7"><a href="#cb35-7" tabindex="-1"></a><span class="co">#&gt;        usage     cpukwh</span></span>
-<span id="cb35-8"><a href="#cb35-8" tabindex="-1"></a><span class="co">#&gt; prolin 0.125 4.6875e-09</span></span>
-<span id="cb35-9"><a href="#cb35-9" tabindex="-1"></a><span class="co">#&gt; maccod 0.000 5.0000e-09</span></span>
+<span id="cb35-7"><a href="#cb35-7" tabindex="-1"></a><span class="co">#&gt;        usage       cpukwh</span></span>
+<span id="cb35-8"><a href="#cb35-8" tabindex="-1"></a><span class="co">#&gt; prolin 0.125 4.687500e-09</span></span>
+<span id="cb35-9"><a href="#cb35-9" tabindex="-1"></a><span class="co">#&gt; maccod 0.250 5.703125e-09</span></span>
 <span id="cb35-10"><a href="#cb35-10" tabindex="-1"></a>b<span class="sc">$</span>usagemode</span>
 <span id="cb35-11"><a href="#cb35-11" tabindex="-1"></a><span class="co">#&gt; [1] &quot;machine&quot;</span></span></code></pre></div>
 </div>
@@ -1392,8 +1392,8 @@ another’s computation:</p>
 are the two the Green Algorithms calculator prints:</p>
 <div class="sourceCode" id="cb38"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" tabindex="-1"></a><span class="fu">fpeqv</span>(fp<span class="sc">$</span>co2eg <span class="sc">*</span> <span class="fl">1e4</span>)   <span class="co"># if this ran ten thousand times</span></span>
 <span id="cb38-2"><a href="#cb38-2" tabindex="-1"></a><span class="co">#&gt; ╭── Footprint in everyday terms ────────────────────────────────────────╮</span></span>
-<span id="cb38-3"><a href="#cb38-3" tabindex="-1"></a><span class="co">#&gt; │   Car travel   6.691e-05 km                                           │</span></span>
-<span id="cb38-4"><a href="#cb38-4" tabindex="-1"></a><span class="co">#&gt; │   Tree uptake  1.277e-05 tree-months                                  │</span></span>
+<span id="cb38-3"><a href="#cb38-3" tabindex="-1"></a><span class="co">#&gt; │   Car travel   7.504e-05 km                                           │</span></span>
+<span id="cb38-4"><a href="#cb38-4" tabindex="-1"></a><span class="co">#&gt; │   Tree uptake  1.432e-05 tree-months                                  │</span></span>
 <span id="cb38-5"><a href="#cb38-5" tabindex="-1"></a><span class="co">#&gt; │                                                                       │</span></span>
 <span id="cb38-6"><a href="#cb38-6" tabindex="-1"></a><span class="co">#&gt; │   The same emissions as driving a European passenger car this far, or │</span></span>
 <span id="cb38-7"><a href="#cb38-7" tabindex="-1"></a><span class="co">#&gt; │   what this many trees take up in a month.                            │</span></span>
