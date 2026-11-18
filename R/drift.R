@@ -409,7 +409,9 @@ drfthomog <- function(x, y, seed = 1L) {
 #'
 #' @details
 #' Zeros and non-finite values have no leading significant digit and are
-#' excluded; the sign is ignored.
+#' excluded; the sign is ignored. The digit is that of the value as R prints
+#' it, at 15 significant digits: `0.99999999999999989`, which prints as `1`,
+#' counts under 1.
 #'
 #' With \eqn{n} usable values, \eqn{O_d} the count with leading digit
 #' \eqn{d} and \eqn{E_d = n \log_{10}(1 + 1/d)},
@@ -1342,7 +1344,7 @@ cpsdrft <- function(
       as.POSIXct(v, origin = "1970-01-01", tz = "UTC"),
       "%Y-%m-%dT%H:%M:%SZ"
     ),
-    trimws(formatC(v, digits = 3, format = "g"))
+    trimws(.rmbl_fc(v, digits = 3, format = "g"))
   )
 }
 

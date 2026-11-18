@@ -551,7 +551,7 @@ test_that("report writers write no control byte from a label", {
       grepl(intToUtf8(0x9b), txt, fixed = TRUE)
   }
   d <- withr::local_tempdir()
-  items <- stats::setNames(list(yoy(c(1, 2)), data.frame(x = 1)),
+  items <- stats::setNames(list(yoychg(c(1, 2)), data.frame(x = 1)),
                            c(esc, paste0(esc, "2")))
   for (ext in c("md", "html", "txt")) {
     f <- file.path(d, paste0("r.", ext))
@@ -565,7 +565,9 @@ test_that("report writers write no control byte from a label", {
         }
       }
     )
-    txt <- paste(readLines(f, warn = FALSE), collapse = "\n")
+    # the report is UTF-8: read as such, it is matched in any locale
+    txt <- paste(readLines(f, warn = FALSE, encoding = "UTF-8"),
+                 collapse = "\n")
     expect_false(bad(txt), info = ext)
     expect_match(txt, "\\033", fixed = TRUE, info = ext)
   }

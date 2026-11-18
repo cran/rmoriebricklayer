@@ -138,11 +138,15 @@ test_that(
 test_that("no capsule, a glob, and the plural of the summary", {
   root <- withr::local_tempdir()
   x <- cpschk(root, fp = FALSE)
-  expect_identical(x$status, "ok")
-  expect_match(format(x), "No manifests found under `", fixed = TRUE)
+  # nothing found is nothing checked: a failure, with a row of its own
+  expect_identical(x$status, "error")
+  expect_identical(x$rows$check, "no_capsule")
+  expect_false(x$rows$ok)
+  expect_length(x$capsules, 0L)
+  expect_match(format(x), "No capsule found under `", fixed = TRUE)
   expect_match(
     format(cpschk(root, glob = "data/*", fp = FALSE)),
-    "` matching `data/*`.",
+    "` matching `data/*`: nothing was checked.",
     fixed = TRUE
   )
   cp <- pinned_capsule()
@@ -157,6 +161,27 @@ test_that("no capsule, a glob, and the plural of the summary", {
     vapply(x$capsules, `[[`, "", "capsule"),
     fwd(file.path(cp$root, "two"))
   )
+})
+
+test_that("a capsule hidden in a skipped folder or deleted is no pass", {
+  cp <- pinned_capsule()
+  key <- strrep("ab", 32L)
+  # .git and .rmbl-cache stay unsearched, so a capsule moved into one is not
+  # found: with a key to check against, finding nothing fails
+  for (hide in c(".rmbl-cache", ".git")) {
+    to <- file.path(cp$root, hide)
+    expect_true(file.rename(cp$dir, to))
+    x <- cpschk(cp$root, pubkey = key, fp = FALSE)
+    expect_identical(x$status, "error", info = hide)
+    expect_identical(x$rows$check, "no_capsule", info = hide)
+    expect_match(x$rows$detail, "nothing was checked", fixed = TRUE)
+    expect_true(file.rename(to, cp$dir))
+  }
+  unlink(cp$dir, recursive = TRUE)
+  x <- cpschk(cp$root, pubkey = key, fp = FALSE)
+  expect_identical(x$status, "error")
+  expect_identical(ghout(x)$status, "error")
+  expect_length(ghann(x), 1L)
 })
 
 test_that(
@@ -1075,7 +1100,7 @@ test_that("the text summary of a capsule check lists the failures", {
     c("NOT VERIFIED", "caps/one: error", "digest differs", "format(x)")
   )
   x$capsules <- list()
-  expect_true(any(grepl("No manifests", format(x, fmt = "text"), fixed = TRUE)))
+  expect_true(any(grepl("No capsule", format(x, fmt = "text"), fixed = TRUE)))
 })
 
 # ---- the console block keeps what the Markdown report shows ------------------
@@ -1116,4 +1141,40 @@ test_that("the capsule check lines: no rows, a fetched digest, each status", {
     .bl_cpschk_reading(list(status = "drift", path = "p"), caps),
     "A source has moved since it was pinned: see the rows below."
   )
+})
+
+test_that("cpschk(archive = TRUE) is ignored with a warning", {
+  d <- withr::local_tempdir()
+  expect_warning(
+    cpschk(d, fp = FALSE, archive = TRUE),
+    "`archive` is ignored"
+  )
+})
+
+test_that("cpschk() and cpsseal() bound the glob in their own words", {
+  d <- withr::local_tempdir()
+  expect_error(
+    cpschk(d, glob = strrep("A", 5000)),
+    "cpschk: `glob` is longer than the 4,096 bytes"
+  )
+  expect_error(
+    cpsseal(d, "a secret", glob = strrep("A", 5000)),
+    "cpsseal: `glob` is longer than the 4,096 bytes"
+  )
+  expect_identical(.bl_glob_rx("*.json"), utils::glob2rx("*.json"))
+  testthat::local_mocked_bindings(
+    glob2rx = function(...) "(",
+    .package = "utils"
+  )
+  expect_error(.bl_glob_rx("x"), "`glob` is not a pattern that can be matched")
+})
+
+test_that("ghcmt() and cpschk() take bytes that are no text as such", {
+  skip_if_not(isTRUE(l10n_info()[["UTF-8"]]))
+  expect_error(
+    cpschk(withr::local_tempdir(), pubkey = "\xff\xfe"),
+    "`pubkey` must be the expected public key"
+  )
+  x <- cpschk(withr::local_tempdir())
+  expect_error(ghcmt(x, failon = "\xff\xfe"), "`failon` holds text that is not")
 })

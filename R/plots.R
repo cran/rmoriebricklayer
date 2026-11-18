@@ -41,15 +41,16 @@
 #' \code{plotopt(cex = 1.2)}, and for a table with many rows use a taller
 #' device.
 #'
-#' Errors: an unknown palette \code{name}; \code{n} not a positive whole
-#' number; an option name other than the six above, or an unnamed value; an
-#' unknown \code{palette} option.
+#' Errors: an unknown palette \code{name}; \code{n} not a whole number from
+#' 1 to 100,000; an option name other than the six above, or an unnamed
+#' value; an unknown \code{palette} option.
 #'
 #' @param name Character scalar, the palette: \code{"okabe"} (the default), or
 #'   one of \code{"diverging"}, \code{"sequential"} and \code{"grey"}.
 #' @param n Integer scalar or \code{NULL} (the default: the palette's own
 #'   colours). The number of colours wanted; \code{"okabe"} and \code{"grey"}
-#'   recycle, \code{"sequential"} and \code{"diverging"} interpolate.
+#'   recycle, \code{"sequential"} and \code{"diverging"} interpolate. At
+#'   most 100,000 (a plot needs a few dozen).
 #' @param ... For \code{plotopt()}, named options to set:
 #'   \code{palette} (a palette name), \code{grid} (logical, draw grid
 #'   lines), \code{cex} (numeric text and symbol size), \code{las} (axis label
@@ -122,11 +123,7 @@ blpal <- function(
   if (is.null(n)) {
     return(base)
   }
-  n <- .rmbl_num(n, "n", integer = TRUE)
-  if (length(n) != 1L || is.na(n) || n < 1L) {
-    stop("`n` must be a single positive whole number", call. = FALSE)
-  }
-  n <- as.integer(n)[1L]
+  n <- .bl_pal_n(n)
   if (name %in% c("okabe", "grey")) {
     return(rep_len(base, n))
   }
@@ -192,7 +189,7 @@ plotopt <- function(...) {
 #' \describe{ \item{\code{rmbl_stock_flow}}{(\code{\link{stkflow}}) the average
 #'   daily population, length of stay, people and person-days over the periods,
 #'   one panel per measure in \code{what}; with an exposure, the flow and stock
-#'   rates too.} \item{\code{rmbl_yoy}}{(\code{\link{yoy}}) the
+#'   rates too.} \item{\code{rmbl_yoy}}{(\code{\link{yoychg}}) the
 #'   period-over-period percent change with its interval over the periods, the
 #'   period across and the change up, groups side by side, coloured by verdict;
 #'   \code{what = "value"} draws the values instead.} \item{\code{rmbl_rate},
@@ -268,7 +265,7 @@ plotopt <- function(...) {
 #'   \code{\link{lagrprt}}) a concentration field as an image with contours;
 #'   particle positions, with the counting grid behind them when one was given.}
 #'   \item{\code{rmbl_count_trend}}{(\code{\link{cnttrnd}}) the counts with the
-#'   fitted trend.} \item{\code{bricklayer_analysis}}{(\code{\link{anltab}}) the
+#'   fitted trend.} \item{\code{bricklayer_analysis}}{(\code{\link{anytab}}) the
 #'   change, rates and rate change of a published table, one panel each.}
 #'   \item{\code{rmbl_event_study}, \code{rmbl_staggered_att}}{
 #'   (\code{\link{evstudy}}, \code{\link{stgatt}}) the effect at each period
@@ -372,7 +369,8 @@ plotopt <- function(...) {
 #' @param gaps For \code{rmbl_yoy} (\code{what = "value"}) and
 #'   \code{rmbl_event_study} (\code{style = "stata"}): how a missing value
 #'   shows in a line. \code{"break"} (the default) breaks the
-#'   line there, so a \dQuote{no data} period that \code{yoy(complete = TRUE)}
+#'   line there, so a \dQuote{no data} period that \code{yoychg(complete =
+#'   TRUE)}
 #'   inserted is a visible gap; \code{"join"} draws the line straight over it.
 #' @return The data drawn, invisibly. For the plots over time the frame
 #'   carries the x position of each point drawn: an \code{at} column
@@ -386,14 +384,14 @@ plotopt <- function(...) {
 #' )
 #' plot(sf)
 #' plot(sf, what = "alos", col = "firebrick", main = "Length of stay")
-#' y <- yoy(
+#' y <- yoychg(
 #'   data.frame(year = 2019:2023, n = c(400, 420, 390, 460, 450)),
 #'   value = "n",
 #'   prd = "year"
 #' )
 #' plot(y)
 #' # small counts: each percentage carries its exact interval
-#' plot(yoy(
+#' plot(yoychg(
 #'   data.frame(year = 2019:2023, n = c(10, 12, 11, 15, 14)),
 #'   value = "n",
 #'   prd = "year"
@@ -488,7 +486,7 @@ plotopt <- function(...) {
 #'   n = c(10, 20, 12, 22, 11, 25, 15, 24),
 #'   pop = rep(c(1000, 2000), 4)
 #' )
-#' plot(anltab(tab, value = "n", prd = "year", by = "g", pop = "pop"))
+#' plot(anytab(tab, value = "n", prd = "year", by = "g", pop = "pop"))
 #' plot(cnttrnd(c(21000, 23000, 22000, 25000, 24000)))
 #' # banded tables
 #' plot(bandsens(
@@ -1496,7 +1494,7 @@ plot.rmbl_pollution_report <- function(
     if (is.null(main)) {
       sprintf(
         "%s, %s",
-        toupper(x$pollutant),
+        .rmbl_upper(x$pollutant),
         gsub("_", " ", x$outcome, fixed = TRUE)
       )
     } else {
@@ -2048,7 +2046,7 @@ plotfnl <- function(
 #' Base-graphics plots in the house style for a numeric variable split by a
 #' group, or two numeric variables: \describe{ \item{`plotrdg()`}{a ridgeline:
 #' one kernel density per group, stacked with a small overlap.}
-#' \item{`plotecdf()`}{the empirical distribution function of each group,
+#' \item{`plotcdfs()`}{the empirical distribution function of each group,
 #' overlaid.} \item{`plotvln()`}{a violin per group: the mirrored density, the
 #' median as a point and the interquartile range as a bar.}
 #' \item{`plothex()`}{the two-dimensional density of `x` and `y` in
@@ -2071,7 +2069,7 @@ plotfnl <- function(
 #' @return The data drawn, invisibly: for `plotrdg()` and `plotvln()` the
 #'   densities (`grp`, `x`, `y`), for `plotvln()` with the
 #'   per-group `median`, `q1` and `q3` as an attribute
-#'   `summary`, for `plotecdf()` the steps (`grp`, `x`,
+#'   `summary`, for `plotcdfs()` the steps (`grp`, `x`,
 #'   `y`), for `plothex()` the hexagon centres (`x`, `y`)
 #'   and `count`, for `plotgain()` the curves (`grp`,
 #'   `population`, `value`) with the Gini coefficients as an attribute
@@ -2081,7 +2079,7 @@ plotfnl <- function(
 #' x <- c(stats::rnorm(200), stats::rnorm(200, 2, 0.6))
 #' g <- rep(c("before", "after"), each = 200)
 #' plotrdg(x, g)
-#' plotecdf(x, g)
+#' plotcdfs(x, g)
 #' plotvln(x, g)
 #' plothex(x, x + stats::rnorm(400), bins = 20)
 #' plotgain(stats::rexp(400), g)
@@ -2108,7 +2106,7 @@ plotrdg <- function(
     if (length(v) < 2L) {
       return(NULL)
     }
-    k <- stats::density(v, bw = bw)
+    k <- .bl_density(v, bw)
     data.frame(grp = g, x = k$x, y = k$y, stringsAsFactors = FALSE)
   })
   out <- do.call(rbind, dens)
@@ -2150,7 +2148,7 @@ plotrdg <- function(
 
 #' @rdname plotmore
 #' @export
-plotecdf <- function(x, grp = NULL, ..., main = NULL, col = NULL, pal = NULL) {
+plotcdfs <- function(x, grp = NULL, ..., main = NULL, col = NULL, pal = NULL) {
   d <- .bl_xgrp(x, grp)
   lv <- levels(d$grp)
   cols <- .bl_cols(length(lv), col, pal)
@@ -2206,6 +2204,12 @@ plotvln <- function(
   .bl_check_bw(bw)
   lv <- levels(d$grp)
   cols <- .bl_cols(length(lv), col, pal)
+  # every density is computed once before the frame is drawn, so that values
+  # too large for a density are refused in words on every R version (R 4.1
+  # stops in plot.window() first, with "non-finite axis extents")
+  for (l in lv) {
+    if (sum(d$grp == l) >= 2L) .bl_density(d$x[d$grp == l], bw)
+  }
   op <- .bl_par(d$x)
   on.exit(graphics::par(op), add = TRUE)
   graphics::plot(
@@ -2353,7 +2357,7 @@ plotgain <- function(x, grp = NULL, ..., main = NULL, col = NULL, pal = NULL) {
 #' year.} \item{`plothrz()`}{a horizon chart: each series in its own thin row,
 #' its deviation from its own median folded into `bands` shaded bands, above in
 #' blue and below in red, so many series fit in little height.}
-#' \item{`plotsm()`}{small multiples: one panel per series on a shared scale.}
+#' \item{`plotmult()`}{small multiples: one panel per series on a shared scale.}
 #' \item{`plotbump()`}{a bump chart: the rank of each series in each period (1 =
 #' largest), so changes of order stand out.} }
 #' @param x Dates (a `Date` or text `as.Date()` reads) for
@@ -2384,7 +2388,7 @@ plotgain <- function(x, grp = NULL, ..., main = NULL, col = NULL, pal = NULL) {
 #'   nrow(d),
 #'   50 + 10 * as.integer(d$area) + 2 * (d$year - 2015)
 #' )
-#' plotsm(d$n, d$year, d$area)
+#' plotmult(d$n, d$year, d$area)
 #' plothrz(d$n, d$year, d$area)
 #' plotbump(d$n, d$year, d$area)
 #' try(plotcal("not a date", 1))
@@ -2430,8 +2434,8 @@ plotcal <- function(x, y, ..., main = NULL, col = NULL, pal = NULL) {
     main,
     sprintf(
       "Daily values, %s to %s",
-      format(r[1L], big.mark = ","),
-      format(r[2L], big.mark = ",")
+      .rmbl_ntxt(r[1L]),
+      .rmbl_ntxt(r[2L])
     )
   ))
   invisible(d[, c("date", "year", "week", "wday", "y")])
@@ -2491,7 +2495,7 @@ plothrz <- function(
 
 #' @rdname plotseries
 #' @export
-plotsm <- function(
+plotmult <- function(
   y,
   prd,
   grp = NULL,
@@ -2501,6 +2505,10 @@ plotsm <- function(
   pal = NULL
 ) {
   d <- .bl_series(y, prd, grp)
+  # range() of no finite value warned and gave c(Inf, -Inf)
+  if (!any(is.finite(d$y))) {
+    stop(.rmbl_fn(), "`y` has no finite value to draw", call. = FALSE)
+  }
   lv <- levels(d$grp)
   cols <- .bl_cols(length(lv), col, pal)
   op <- .bl_panels_begin(length(lv))
@@ -2799,7 +2807,7 @@ plotbump <- function(
 #' @noRd
 .bl_bar_labels <- function(mids, h, horiz) {
   say <- is.finite(h)
-  txt <- trimws(formatC(h[say], digits = 3, format = "fg", big.mark = ","))
+  txt <- trimws(.rmbl_fc(h[say], digits = 3, format = "fg", big.mark = ","))
   if (horiz) {
     graphics::text(
       h[say],
@@ -2829,7 +2837,7 @@ plotbump <- function(
 #' A series drawn as a line over a soft fill down to the axis, with haloed
 #' points and its last value emphasised and labelled. gaps = \code{"break"}
 #' keeps a missing value as a break in the line and its fill (a \dQuote{no data}
-#' year that yoy(complete = TRUE) inserted); \code{"join"} draws over it.
+#' year that yoychg(complete = TRUE) inserted); \code{"join"} draws over it.
 #' @param x The x values.
 #' @param y The y values.
 #' @param col The line colour.
@@ -2936,7 +2944,7 @@ plotbump <- function(
     graphics::text(
       x[n],
       y[n],
-      trimws(formatC(y[n], digits = 3, format = "fg", big.mark = ",")),
+      trimws(.rmbl_fc(y[n], digits = 3, format = "fg", big.mark = ",")),
       pos = 3,
       offset = 0.7,
       cex = 0.8,
@@ -3023,7 +3031,9 @@ plotbump <- function(
 #' @param digits The number of significant digits.
 #' @return A character vector.
 #' @noRd
-.bl_label <- function(x, digits = 3) format(x, digits = digits, big.mark = ",")
+.bl_label <- function(x, digits = 3) {
+  format(x, digits = digits, big.mark = ",", decimal.mark = ".")
+}
 
 #' The title: the caller's, or the method's default
 #' @param main The caller's title, or NULL.
@@ -3045,6 +3055,8 @@ plotbump <- function(
       call. = FALSE
     )
   }
+  # bytes that are not text failed in nchar() in base R's words
+  .rmbl_valid_text(main, "main")
   if (is.character(main)) .rmbl_ctl_escape(main) else main
 }
 
@@ -3821,7 +3833,7 @@ plotbump <- function(
   )
 }
 
-# Text periods in time order, read as the tables read them (yoy()'s period
+# Text periods in time order, read as the tables read them (yoychg()'s period
 # reader: fiscal years "2019/20", "Q1 2022", "2022 Q1", "Mar 2021", "March
 # 2021" and dates), or in the order `prdord` gives; anything the reader does
 # not know is sorted. Before, only year-first labels were ordered, so a plot
@@ -4558,7 +4570,7 @@ plotbump <- function(
       "%s: %s, PSI %s",
       cl,
       v,
-      formatC(sum(b$contrib), digits = 3, format = "g")
+      .rmbl_fc(sum(b$contrib), digits = 3, format = "g")
     )
   )
   if (!is.null(s$hist)) {
@@ -4607,7 +4619,7 @@ plotbump <- function(
     sprintf(
       "%s: largest gap %s",
       cl,
-      trimws(formatC(max(abs(e$ref - e$cur)), digits = 3, format = "g"))
+      trimws(.rmbl_fc(max(abs(e$ref - e$cur)), digits = 3, format = "g"))
     )
   ))
   .bl_ylab("Share at or below")
@@ -5457,7 +5469,7 @@ plotbump <- function(
   )
   out <- NULL
   if (length(v) >= 2L) {
-    k <- stats::density(v, bw = bw)
+    k <- .bl_density(v, bw)
     w <- 0.42 * k$y / max(k$y)
     graphics::polygon(
       c(i - w, rev(i + w)),
@@ -5569,6 +5581,15 @@ plotbump <- function(
   } else {
     match(d$prd, unique(d$prd))
   }
+  # an infinite period has no place on the axis: plot.window() stopped with
+  # "need finite 'xlim' values" after min() and max() warned
+  if (!all(is.finite(d$pos))) {
+    stop(
+      .rmbl_fn(),
+      "`prd` must be finite periods",
+      call. = FALSE
+    )
+  }
   d[order(d$grp, d$pos), , drop = FALSE]
 }
 
@@ -5580,12 +5601,7 @@ plotbump <- function(
 #' @noRd
 .bl_cal_days <- function(x, y) {
   dt <- tryCatch(as.Date(x), error = function(e) NULL)
-  if (
-    is.null(dt) ||
-      anyNA(dt[!is.na(x)]) ||
-      length(dt) != length(y) ||
-      !is.numeric(y)
-  ) {
+  if (!.bl_cal_ok(dt, x, y)) {
     stop(
       "plotcal: `x` must be dates, one per value of the numeric `y`",
       call. = FALSE
@@ -5748,7 +5764,7 @@ plotbump <- function(
   top <- utils::head(order(-b$contrib), 3L)
   cap <- paste0(
     "largest PSI terms: ",
-    toString(trimws(formatC(b$contrib[top], digits = 2, format = "g"))),
+    toString(trimws(.rmbl_fc(b$contrib[top], digits = 2, format = "g"))),
     if (nrow(b) > 3L) " ..." else ""
   )
   cx <- min(
@@ -5792,7 +5808,7 @@ plotbump <- function(
   graphics::text(
     colMeans(mids),
     apply(m, 2L, max),
-    formatC(bb$contrib, digits = 2, format = "g"),
+    .rmbl_fc(bb$contrib, digits = 2, format = "g"),
     pos = 3,
     cex = 0.6,
     col = "#3D4350",
@@ -5848,6 +5864,33 @@ plotbump <- function(
   invisible(NULL)
 }
 
+#' A kernel density, refused in words when the values are too large for one.
+#'
+#' stats::density() stops with "non-finite 'from'" (or 'to') when the values
+#' come within a few bandwidths of the largest double (review of 1.1.1).
+#' @param v The values, finite.
+#' @param bw The checked bandwidth.
+#' @return The density() result.
+#' @noRd
+.bl_density <- function(v, bw = "nrd0") {
+  tryCatch(
+    stats::density(v, bw = bw),
+    error = function(e) {
+      stop(
+        sprintf(
+          paste0(
+            "no density can be drawn for values this large (up to %s): its ",
+            "range passes the largest number R holds; rescale them (%s)"
+          ),
+          format(max(abs(v)), digits = 3L),
+          conditionMessage(e)
+        ),
+        call. = FALSE
+      )
+    }
+  )
+}
+
 #' Checks a density bandwidth: one positive number or a rule stats::density()
 #' knows, refused in words before density() refuses it in its own (B4).
 #' @param bw The bandwidth given to plotrdg() or plotvln().
@@ -5856,7 +5899,7 @@ plotbump <- function(
 .bl_check_bw <- function(bw) {
   rules <- c("nrd0", "nrd", "ucv", "bcv", "sj", "sj-ste", "sj-dpi")
   ok <- if (is.character(bw)) {
-    length(bw) == 1L && !is.na(bw) && tolower(bw) %in% rules
+    .bl_bw_rule(bw, rules)
   } else {
     is.numeric(bw) && length(bw) == 1L && is.finite(bw) && bw > 0 &&
       bw < 1e15
@@ -5872,4 +5915,41 @@ plotbump <- function(
     )
   }
   invisible(bw)
+}
+
+#' blpal()'s `n`, checked: a whole number from 1 to 100,000 (a plot needs a
+#' few dozen; .Machine$integer.max colours asked for 16 GB).
+#' @param n The number of colours asked for.
+#' @return `n` as an integer.
+#' @noRd
+.bl_pal_n <- function(n) {
+  n <- .rmbl_num(n, "n", integer = TRUE)
+  if (length(n) != 1L || is.na(n) || n < 1L || n > 1e5) {
+    stop(
+      "`n` must be a single positive whole number, at most 100,000",
+      call. = FALSE
+    )
+  }
+  as.integer(n)[1L]
+}
+
+#' Whether plotcal()'s `x` reads as dates, one per numeric `y`: not an
+#' infinite date (it has no year; as.integer() warned, then NA).
+#' @param dt `x` as dates, or NULL when as.Date() refused it.
+#' @param x,y As for plotcal().
+#' @return TRUE or FALSE.
+#' @noRd
+.bl_cal_ok <- function(dt, x, y) {
+  !is.null(dt) && !anyNA(dt[!is.na(x)]) && !any(is.infinite(unclass(dt))) &&
+    length(dt) == length(y) && is.numeric(y)
+}
+
+#' Whether a bandwidth given as text is one rule density() knows, said by
+#' one string that is valid text (bytes that are not failed in tolower()).
+#' @param bw The bandwidth given.
+#' @param rules The rule names.
+#' @return TRUE or FALSE.
+#' @noRd
+.bl_bw_rule <- function(bw, rules) {
+  length(bw) == 1L && !is.na(bw) && validEnc(bw) && .rmbl_lower(bw) %in% rules
 }

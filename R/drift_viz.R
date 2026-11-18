@@ -125,7 +125,7 @@ drfthtml <- function(
   title <- .rmbl_text1(title, "title")
   .rmbl_flag1(open, "open")
   p <- .bl_drift_payload(x, warn, fail, title)
-  writeLines(.bl_drift_page(p, title), file, useBytes = TRUE)
+  .rmbl_wlines(.bl_drift_page(p, title), file)
   if (open) {
     .bl_open_file(file)
   }
@@ -336,7 +336,7 @@ drftapp <- function(
 #' @noRd
 .bl_drift_note <- function(r, b, alpha, note = "") {
   f <- function(v) {
-    if (is.na(v)) "none" else trimws(formatC(v, digits = 3, format = "g"))
+    if (is.na(v)) "none" else trimws(.rmbl_fc(v, digits = 3, format = "g"))
   }
   switch(
     r$verdict,
@@ -529,9 +529,9 @@ drftapp <- function(
     untested = "\u2013 untested"
   )
   f <- function(v) {
-    ifelse(is.na(v), "", trimws(formatC(v, digits = 3, format = "g")))
+    ifelse(is.na(v), "", trimws(.rmbl_fc(v, digits = 3, format = "g")))
   }
-  esc <- function(s) gsub("|", "\\|", s, fixed = TRUE)
+  esc <- .yoy_md_esc
   paste(
     c(
       sprintf(
@@ -599,7 +599,7 @@ drftapp <- function(
 #' @return A data frame: run, file, column, psi and p_value.
 #' @noRd
 .bl_drift_history <- function(dir) {
-  dir <- .rmbl_string1(dir, "hist")
+  dir <- .rmbl_fspath(.rmbl_string1(dir, "hist"))
   if (!dir.exists(dir)) {
     stop(
       .rmbl_fn(),
@@ -607,12 +607,13 @@ drftapp <- function(
       call. = FALSE
     )
   }
-  files <- sort(list.files(dir, pattern = "\\.json$", full.names = TRUE))
+  files <- .rmbl_bsort(list.files(dir, pattern = "\\.json$",
+                                  full.names = TRUE))
   num <- function(v) if (is.null(v)) NA_real_ else as.numeric(v)
   rows <- lapply(seq_along(files), function(i) {
     j <- tryCatch(
       .rmbl_json_text(
-        readLines(files[i], warn = FALSE),
+        .rmbl_rlines(files[i]),
         simplifyVector = FALSE
       ),
       error = function(e) NULL
@@ -765,7 +766,7 @@ drftapp <- function(
   graphics::text(
     x,
     y,
-    ifelse(is.na(h$psi), "", formatC(h$psi, digits = 2, format = "g")),
+    ifelse(is.na(h$psi), "", .rmbl_fc(h$psi, digits = 2, format = "g")),
     cex = 0.6,
     col = "white"
   )
@@ -960,7 +961,7 @@ drftapp <- function(
       ifelse(
         st$stat == "sd" & kind != "number",
         paste(
-          trimws(formatC(v, digits = 3, format = "g")),
+          trimws(.rmbl_fc(v, digits = 3, format = "g")),
           if (kind == "date") "days" else "s"
         ),
         .bl_drift_iso(v, if (kind == "number") "number" else kind)
@@ -1346,8 +1347,8 @@ drftapp <- function(
       sprintf(
         "Without %s, the PSI would be %s (now %s).",
         toString(w$dropped),
-        trimws(formatC(w$psi, digits = 3, format = "g")),
-        trimws(formatC(sum(bn$contrib), digits = 3, format = "g"))
+        trimws(.rmbl_fc(w$psi, digits = 3, format = "g")),
+        trimws(.rmbl_fc(sum(bn$contrib), digits = 3, format = "g"))
       )
     }
   })

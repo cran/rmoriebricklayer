@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <thread>
+#include <stdexcept>
 #include <R.h>
 #include <Rinternals.h>
 #include <curl/curl.h>
@@ -45,9 +46,33 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <signal.h>
 #endif
 
 namespace {
+
+/* SIGPIPE ignored for as long as the guard lives, the previous action restored after, also when the
+ * scope is left by an exception (POSIX; Windows has no SIGPIPE). */
+struct PipeGuard {
+#ifndef _WIN32
+    struct sigaction old_action;
+    bool saved;
+    PipeGuard() {
+        struct sigaction ign;
+        std::memset(&ign, 0, sizeof ign);
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        saved = sigaction(SIGPIPE, &ign, &old_action) == 0;
+    }
+    ~PipeGuard() {
+        if (saved) sigaction(SIGPIPE, &old_action, nullptr);
+    }
+#else
+    PipeGuard() {}
+#endif
+    PipeGuard(const PipeGuard &) = delete;
+    PipeGuard &operator=(const PipeGuard &) = delete;
+};
 
 const char *kUA = "morie-bricklayer/1.0 (+https://github.com/rootcoder007/rmorie-bricklayer)";
 
@@ -595,7 +620,14 @@ CURLcode secure_perform(CURL *h, const std::string &start_url,
         curl_easy_setopt(h, CURLOPT_URL, url.c_str());
         curl_easy_setopt(h, CURLOPT_RESOLVE, pin);
         curl_easy_setopt(h, CURLOPT_HTTPHEADER, hdr);
-        const CURLcode rc = curl_easy_perform(h);
+        CURLcode rc;
+        {
+            /* CURLOPT_NOSIGNAL (needed so timeouts do not use SIGALRM) also stops libcurl ignoring
+             * SIGPIPE: a write to a connection the peer closed raised it, and R's handler stopped the
+             * call with "ignoring SIGPIPE signal" instead of libcurl's send error (rmorie CI) */
+            PipeGuard pipe_guard;
+            rc = curl_easy_perform(h);
+        }
         long code = 0;
         if (rc == CURLE_OK) curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
         std::string next;
@@ -1204,8 +1236,9 @@ long http_get_file(const std::string &url, const std::string &path, long timeout
     long code = -1;
     curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
     curl_easy_cleanup(h);
-    const bool lost_stream = fs.fp == nullptr;
-    if (fs.fp) std::fclose(fs.fp);
+    /* a full disk can show only when the buffered tail is flushed at close: that is a write
+     * that failed, not a finished file to move into place */
+    const bool lost_stream = fs.fp == nullptr || std::fclose(fs.fp) != 0;
     if (written) *written = fs.written;
     if (interrupted) *interrupted = prog.interrupted;
     /* a completed transfer with a 4xx/5xx status is the server's answer: report the status,
@@ -1216,7 +1249,7 @@ long http_get_file(const std::string &url, const std::string &path, long timeout
         if (err) *err = "HTTP " + std::to_string(code);
         return code;
     }
-    if (rc != CURLE_OK && lost_stream) {
+    if (lost_stream) {
         std::remove(part.c_str());
         if (err) *err = "cannot write " + part;
         if (local_fail) *local_fail = true;
@@ -1355,14 +1388,20 @@ std::string wayback_snapshot(const std::string &url, long timeout_s, bool *inter
 /* A Ctrl-C ends the pipeline where it lands: the Wayback lookup and the snapshot GET after an
  * interrupted download ran to their timeouts and the call came back as an ordinary error (CRAN
  * stress test of b617a3f, #5). `*interrupted` says so; the exported wrappers raise it. */
+/* why the live URL was not reached, in the transport's words, for blfetch()'s message */
+static std::string g_fetch_why;
+
 static int fetch_with_fallback(const char *url, const char *wayback, const char *path, int timeout_s,
                                bool *interrupted, const std::string &base = "") {
+    g_fetch_why.clear();
+    std::string why;
     if (timeout_s < 1) timeout_s = 120;   /* the C API's callers too: 0 would be no limit (M1) */
     const bool local = !base.empty();
     bool local_fail = false;
-    long code = http_get_file(url, path, timeout_s, nullptr, R_NilValue, nullptr, nullptr, interrupted,
+    long code = http_get_file(url, path, timeout_s, nullptr, R_NilValue, nullptr, &why, interrupted,
                               kMaxDownload, local, &local_fail);
     if (code >= 200 && code < 300) return 0;
+    if (code <= 0) g_fetch_why = why;
     if (*interrupted) return -1;
     /* the destination could not be written: no snapshot would fare better (review of 1.0.0, M2) */
     if (local_fail) return -2;
@@ -1636,7 +1675,14 @@ SEXP C_rmbl_fetch_fallback_impl(SEXP url, SEXP wayback, SEXP path, SEXP timeout,
     const std::string p = path_arg(path, "path");
     /* the C API's own entry when no test server is named: the path other packages call */
     int r = b[0] ? fetch_raise(u, w, p.c_str(), t, b) : rmbl_fetch_with_fallback(u, w, p.c_str(), t);
-    return Rf_ScalarInteger(r);
+    SEXP ans = PROTECT(Rf_ScalarInteger(r));
+    if (r <= -10 && !g_fetch_why.empty()) {
+        SEXP why = PROTECT(Rf_mkString(g_fetch_why.c_str()));
+        Rf_setAttrib(ans, Rf_install("why"), why);
+        UNPROTECT(1);
+    }
+    UNPROTECT(1);
+    return ans;
 }
 
 /* The request headers, one "Name: value" each. A line break inside one (a key pasted with a
@@ -1762,6 +1808,33 @@ SEXP C_rmbl_wayback_into_impl(SEXP url, SEXP timeout, SEXP api, SEXP cap) {
  * the name its CURLOPT_RESOLVE pin would carry (they must agree); `connect` is guard_socket()'s
  * answer for the IP literal `addr` (NA when it is not one), with `local_ok` as a hop admitted to a
  * local host would have it; `timeout` is what the timeout argument `tmo` becomes. */
+/* For the tests: the SIGPIPE guard that wraps every transfer. Returns three flags: inside the guard
+ * SIGPIPE is ignored; a SIGPIPE raised there does not reach R; after the guard (left normally, or by
+ * an exception when `fail` is TRUE) the action before it is back. NA on Windows. */
+SEXP C_rmbl_sigpipe_probe_impl(SEXP fail) {
+    SEXP out = PROTECT(Rf_allocVector(LGLSXP, 3));
+#ifdef _WIN32
+    for (int i = 0; i < 3; ++i) LOGICAL(out)[i] = NA_LOGICAL;
+#else
+    struct sigaction before, inside, after;
+    sigaction(SIGPIPE, nullptr, &before);
+    bool raised = false;
+    try {
+        PipeGuard g;
+        sigaction(SIGPIPE, nullptr, &inside);
+        raised = raise(SIGPIPE) == 0;
+        if (Rf_asLogical(fail) == TRUE) throw std::runtime_error("probe");
+    } catch (const std::runtime_error &) {
+    }
+    sigaction(SIGPIPE, nullptr, &after);
+    LOGICAL(out)[0] = inside.sa_handler == SIG_IGN;
+    LOGICAL(out)[1] = raised;
+    LOGICAL(out)[2] = after.sa_handler == before.sa_handler && after.sa_flags == before.sa_flags;
+#endif
+    UNPROTECT(1);
+    return out;
+}
+
 SEXP C_rmbl_net_probe_impl(SEXP url, SEXP addr, SEXP local_ok, SEXP tmo) {
     (void) rmbl_str0(url, "url");
     (void) rmbl_str0(addr, "addr");
@@ -1796,6 +1869,12 @@ SEXP C_rmbl_net_probe_impl(SEXP url, SEXP addr, SEXP local_ok, SEXP tmo) {
             std::memcpy(at, &s6, sizeof s6);   /* within `room` */
         }
         if (ca.family) {
+            /* libcurl starts the socket layer when its first handle is made (on Windows,
+             * WSAStartup); guard_socket() normally runs inside a transfer, after that. Called
+             * here in a process that has made no handle yet, socket() failed on Windows and the
+             * probe said "refused" for every address (1.1.1: the tests run in fresh processes) */
+            CURL *h0 = curl_easy_init();
+            if (h0) curl_easy_cleanup(h0);
             SockGuard g = {Rf_asLogical(local_ok) == TRUE};
             errno = 0;
             const curl_socket_t fd = guard_socket(&g, CURLSOCKTYPE_IPCXN, &ca);

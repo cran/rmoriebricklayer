@@ -415,13 +415,16 @@ format.bricklayer_timestamp <- function(x, ...) {
   if (is.raw(x)) {
     return(x)
   }
-  if (is.character(x) && length(x) == 1L && dir.exists(x)) {
+  if (is.character(x) && length(x) == 1L && !is.na(x) && .rmbl_isdir(x)) {
     stop(
       sprintf("`%s` is a directory, not a token file: %s", what, x),
       call. = FALSE
     )
   }
-  if (is.character(x) && length(x) == 1L && file.exists(x)) {
+  # a token given as text that is also a device's name (nul, con on
+  # Windows) is text, not a file
+  if (is.character(x) && length(x) == 1L && file.exists(x) && .rmbl_isreg(x)) {
+    x <- .rmbl_file1(x, what)
     b <- readBin(x, "raw", file.size(x))
     # a PEM file is base64 between markers; DER is what everything here
     # expects

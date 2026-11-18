@@ -41,7 +41,8 @@
 #'
 #' Errors: \code{man} not a list with \code{results}; \code{stats}
 #' not a non-empty fully named list, or with an element that is not a
-#' function.
+#' function. A statistic that warns while it is recomputed does not warn
+#' the caller: its warnings are added to its row's \code{detail}.
 #'
 #' @param man A manifest, as from [mkmnf()]
 #'   and [recrd()].
@@ -324,7 +325,8 @@ capdeps <- function(pkgs = loadedNamespaces()) {
   if (!is.null(pkgs) && !is.character(pkgs)) {
     stop("`pkgs` must be a character vector of package names", call. = FALSE)
   }
-  pkgs <- sort(unique(as.character(pkgs)))
+  .rmbl_valid_text(pkgs, "pkgs")
+  pkgs <- .rmbl_bsort(unique(as.character(pkgs)))
   pg <- blprog("reading package descriptions", length(pkgs))
   on.exit(pg$done(), add = TRUE)
   rows <- lapply(pkgs, function(p) {
@@ -361,7 +363,30 @@ capdeps <- function(pkgs = loadedNamespaces()) {
 #' @return A one-row data frame.
 #' @noRd
 .mnf_row <- function(nm, rec, f, data, tol) {
-  got <- tryCatch(f(data), error = function(e) e)
+  # a statistic's warnings belong to its row, not to the caller (mean() of
+  # data = NULL leaked "argument is not numeric or logical")
+  w <- new.env(parent = emptyenv())
+  w$msg <- character()
+  got <- tryCatch(
+    withCallingHandlers(f(data), warning = function(x) {
+      w$msg <- c(w$msg, conditionMessage(x))
+      invokeRestart("muffleWarning")
+    }),
+    error = function(e) e
+  )
+  row <- .mnf_row_of(nm, rec, got, tol)
+  if (length(w$msg)) {
+    row$detail <- paste0(row$detail, "; it warned: ", toString(unique(w$msg)))
+  }
+  row
+}
+
+#' One statistic's row of mnfrcmp(), from its recomputed value.
+#' @param nm,rec,tol As for .mnf_row().
+#' @param got The value, or the error it raised.
+#' @return A one-row data frame.
+#' @noRd
+.mnf_row_of <- function(nm, rec, got, tol) {
   if (inherits(got, "error")) {
     return(.mnf_frame(nm, "ERROR", conditionMessage(got)))
   }

@@ -9,7 +9,7 @@
 
 #' Write a change table to a file, in whatever format the name implies
 #'
-#' Writes a period-over-period table from [yoy()] in the format the
+#' Writes a period-over-period table from [yoychg()] in the format the
 #' file
 #' name implies, so one call serves a web page, a PDF for a report, a CSV for
 #' a spreadsheet, JSON for a program or Markdown for a README. Every format is
@@ -25,12 +25,12 @@
 #' [yoyjs()], \code{.md} and \code{.markdown} to
 #' [yoymd()]. An
 #' existing file is overwritten. Errors when \code{x} does not come from
-#' [yoy()], when the format cannot be read from the extension (pass
+#' [yoychg()], when the format cannot be read from the extension (pass
 #' \code{format}), or when \code{format} is not one of the names below; and
 #' whatever error the chosen writer raises.
 #'
 #' @param x An \code{rmbl_yoy} object from
-#' [yoy()].
+#' [yoychg()].
 #' @param file Character scalar, the output path.
 #' @param format Character scalar, the output format: \code{"auto"} (the
 #' default) reads it from the file extension; otherwise one of
@@ -45,7 +45,7 @@
 #' [yoycsv()]
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' d <- data.frame(year = 2019:2023, n = c(402, 377, 190, 268, 331))
-#' y <- yoy(d, value = "n", prd = "year")
+#' y <- yoychg(d, value = "n", prd = "year")
 #'
 #' for (ext in c("csv", "tsv", "json", "md", "html")) {
 #'   f <- file.path(tempdir(), paste0("change.", ext))
@@ -61,18 +61,19 @@
 #' unlink(f)
 #' try(yoywr(y, file.path(tempdir(), "change.xlsx")))
 #' @export
-#' @srrstats {G2.3b} format is lower-cased with tolower() before dispatch, and
-#'   so is the file extension when format = "auto".
+#' @srrstats {G2.3b} format is lower-cased by its ASCII bytes before
+#'   dispatch, and so is the file extension when format = "auto".
 #' @srrstats {G4.0} Output format is parsed from the file suffix
 #'   (csv/tsv/json/md/html/pdf); a path with no known suffix is refused unless
 #'   format is given.
 yoywr <- function(x, file, format = "auto", ...) {
   .rmbl_no_fn(file = file, format = format)
   if (!inherits(x, "rmbl_yoy")) {
-    stop("yoywr: `x` must be an rmbl_yoy object from yoy()", call. = FALSE)
+    stop("yoywr: `x` must be an rmbl_yoy object from yoychg()", call. = FALSE)
   }
   file <- as.character(file)[1L]
-  format <- tolower(as.character(format)[1L])
+  .rmbl_valid_text(format, "format")
+  format <- .rmbl_lower(as.character(format)[1L])
   format <- .rmbl_yoy_format(file, format)
   if (!format %in% c("html", "pdf", "csv", "tsv", "json", "markdown")) {
     stop(sprintf("unknown format: %s", format), call. = FALSE)
@@ -113,11 +114,12 @@ yoywr <- function(x, file, format = "auto", ...) {
 #' columns, the grouping, the lag, the units, and for counts the interval's
 #' confidence level and the base below which changes are noted. A pipe inside
 #' a Markdown cell is escaped. An existing file is overwritten. Errors when
-#' `x` does not come from [yoy()], or `digits` is not a whole
+#' `x` does not come from [yoychg()], or `digits` is not a
+#' whole
 #' number.
 #'
 #' @param x An `rmbl_yoy` object from
-#' [yoy()].
+#' [yoychg()].
 #' @param file Character scalar, the output path, or `NULL` to return the
 #' text instead of writing it.
 #' @param digits A whole number from 0 to 15, or `NULL`: decimal places for the
@@ -142,7 +144,7 @@ yoywr <- function(x, file, format = "auto", ...) {
 #' character scalar.
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' d <- data.frame(year = 2019:2023, n = c(402, 377, 190, 268, 331))
-#' y <- yoy(d, value = "n", prd = "year")
+#' y <- yoychg(d, value = "n", prd = "year")
 #'
 #' # Straight to text, for inspection.
 #' cat(yoycsv(y, NULL))
@@ -161,7 +163,7 @@ yoywr <- function(x, file, format = "auto", ...) {
 #' yoycsv(y, f)
 #' read.csv(f, comment.char = "#")[, c("year", "pctchg", "flag")]
 #'
-#' # only yoy() results are accepted
+#' # only yoychg() results are accepted
 #' try(yoycsv(d, NULL))
 #' @name yoydelim
 #' @export
@@ -215,7 +217,7 @@ yoytsv <- function(
 #' @export
 yoyjs <- function(x, file, digits = NULL, pretty = TRUE, ...) {
   if (!inherits(x, "rmbl_yoy")) {
-    stop("yoyjs: `x` must be an rmbl_yoy object from yoy()", call. = FALSE)
+    stop("yoyjs: `x` must be an rmbl_yoy object from yoychg()", call. = FALSE)
   }
   file <- .rmbl_out_file(file)
   pretty <- .rmbl_flag1(pretty, "pretty")
@@ -242,7 +244,7 @@ yoyjs <- function(x, file, digits = NULL, pretty = TRUE, ...) {
   )
   obj <- list(
     settings = settings,
-    # yoy() has already warned about periods with no order
+    # yoychg() has already warned about periods with no order
     summary = suppressWarnings(yoysmry(x)),
     rows = d
   )
@@ -255,7 +257,7 @@ yoyjs <- function(x, file, digits = NULL, pretty = TRUE, ...) {
   if (is.null(file)) {
     return(txt)
   }
-  writeLines(txt, file, useBytes = TRUE)
+  .rmbl_wlines(txt, file)
   invisible(file)
 }
 
@@ -263,7 +265,7 @@ yoyjs <- function(x, file, digits = NULL, pretty = TRUE, ...) {
 #' @export
 yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
   if (!inherits(x, "rmbl_yoy")) {
-    stop("yoymd: `x` must be an rmbl_yoy object from yoy()", call. = FALSE)
+    stop("yoymd: `x` must be an rmbl_yoy object from yoychg()", call. = FALSE)
   }
   file <- .rmbl_out_file(file)
   align <- .rmbl_flag1(align, "align")
@@ -273,12 +275,12 @@ yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
   pp <- identical(chgcol, "ppchg")
   cols <- .yoy_md_cols(d, m, chgcol, pp, digits)
   lines <- .yoy_md_lines(cols, align, length(m$by), nrow(d))
-  meta <- paste0("_", .yoy_meta_lines(m), "_")
+  meta <- paste0("_", .yoy_md_esc(.yoy_meta_lines(m)), "_")
   txt <- paste0(paste(c(lines, "", meta), collapse = "\n"), "\n")
   if (is.null(file)) {
     return(txt)
   }
-  writeLines(txt, file, useBytes = TRUE)
+  .rmbl_wlines(txt, file)
   invisible(file)
 }
 
@@ -294,7 +296,11 @@ yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
 #' @noRd
 .yoy_delim <- function(x, file, sep, digits, na, metadata, comment) {
   if (!inherits(x, "rmbl_yoy")) {
-    stop(.rmbl_fn(), "`x` must be an rmbl_yoy object from yoy()", call. = FALSE)
+    stop(
+      .rmbl_fn(),
+      "`x` must be an rmbl_yoy object from yoychg()",
+      call. = FALSE
+    )
   }
   file <- .rmbl_out_file(file)
   na <- .rmbl_text1(na, "na")
@@ -331,7 +337,7 @@ yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
   if (is.null(file)) {
     return(txt)
   }
-  writeLines(txt, file, sep = "", useBytes = TRUE)
+  .rmbl_wlines(txt, file, sep = "")
   invisible(file)
 }
 
@@ -363,7 +369,9 @@ yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
   if (!identical(m$direction, "neutral")) {
     bits <- c(bits, sprintf("direction: %s is better", m$direction))
   }
-  paste(bits, collapse = "; ")
+  # one line: a column name with a line break would start a second line with
+  # no comment prefix, which a reader then takes for data
+  gsub("[\r\n]+", " ", paste(bits, collapse = "; "))
 }
 
 #' Builds the data frame the machine-readable writers export.
@@ -421,14 +429,24 @@ yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
   cols[["note"]] <- ifelse(is.na(d$flag), "", d$flag)
   # a pipe would end the cell, a line break the row, and HTML in a label
   # would run in a renderer that allows it
-  cols <- lapply(cols, function(v) {
-    v <- .rmbl_ctl_escape(gsub("[\r\n]+", " ", v))
-    v <- gsub("&", "&amp;", v, fixed = TRUE)
-    v <- gsub("<", "&lt;", v, fixed = TRUE)
-    v <- gsub(">", "&gt;", v, fixed = TRUE)
-    gsub("|", "\\|", v, fixed = TRUE)
-  })
+  cols <- lapply(cols, .yoy_md_esc)
+  # the header cells are column names from the data, so they get the same
+  names(cols) <- .yoy_md_esc(names(cols))
   cols
+}
+
+#' Escapes text for a Markdown table cell.
+#' @param v The texts of one Markdown table column, or its header names.
+#' @return `v` on one line, with HTML and the pipe escaped.
+#' @noRd
+.yoy_md_esc <- function(v) {
+  # Markdown's own characters escaped first, so the backslash of a control
+  # byte's escape (\033) is not escaped again
+  v <- .rmbl_ctl_escape(.md_lit(gsub("[\r\n]+", " ", v)))
+  v <- gsub("&", "&amp;", v, fixed = TRUE)
+  v <- gsub("<", "&lt;", v, fixed = TRUE)
+  v <- gsub(">", "&gt;", v, fixed = TRUE)
+  gsub("|", "\\|", v, fixed = TRUE)
 }
 
 #' The lines of a Markdown table: the header, the rule and the rows.
@@ -545,10 +563,17 @@ yoymd <- function(x, file, digits = 1L, align = TRUE, ...) {
   if (!identical(format, "auto")) {
     return(format)
   }
-  ext <- tolower(sub(".*\\.", "", basename(file)))
+  ext <- .rmbl_lower(sub(".*\\.", "", basename(file)))
   map <- c(
-    html = "html", htm = "html", pdf = "pdf", csv = "csv", tsv = "tsv",
-    tab = "tsv", json = "json", md = "markdown", markdown = "markdown"
+    html = "html",
+    htm = "html",
+    pdf = "pdf",
+    csv = "csv",
+    tsv = "tsv",
+    tab = "tsv",
+    json = "json",
+    md = "markdown",
+    markdown = "markdown"
   )
   if (!ext %in% names(map)) {
     stop(

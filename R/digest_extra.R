@@ -171,7 +171,7 @@ ccrc32 <- function(x) {
 #' @references Krawczyk H, Bellare M, Canetti R (1997). HMAC: Keyed-Hashing
 #' for Message Authentication. RFC 2104.
 #'   \doi{10.17487/RFC2104}
-#' @examples
+#' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # RFC 4231 test case 2.
 #' chmac("Jefe", "what do ya want for nothing?")
 #'
@@ -630,7 +630,7 @@ crc32file <- function(path, blkbytes = 1048576L) {
 #' @noRd
 .rmbl_hex_to_raw <- function(hex) {
   hex <- as.character(hex)[1L]
-  n <- nchar(hex)
+  n <- nchar(hex, type = "bytes")
   if (n %% 2L != 0L) {
     stop("hex string has odd length", call. = FALSE)
   }

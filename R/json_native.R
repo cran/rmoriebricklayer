@@ -162,37 +162,29 @@ jsb64dec <- function(input) {
   if (!is.raw(input)) {
     stop("jsb64dec: `input` must be a raw vector or text", call. = FALSE)
   }
-  s <- rawToChar(input)
   # whitespace and padding may be dropped; anything else is not base64, and
-  # deleting it would decode a corrupt body into a shorter valid-looking one
-  if (grepl("[^A-Za-z0-9+/=[:space:]]", s)) {
-    stop("base64 input contains characters outside the alphabet", call. = FALSE)
+  # deleting it would decode a corrupt body into a shorter valid-looking one.
+  # Base64 is ASCII, so the bytes are matched as bytes: a byte that is not
+  # text failed in grepl() with base R's warnings (audit of 21478080, P3),
+  # and a nul byte in rawToChar() ("embedded nul in string")
+  nul <- any(input == as.raw(0L))
+  s <- if (nul) "" else rawToChar(input)
+  if (nul || grepl("[^A-Za-z0-9+/=[:space:]]", s, useBytes = TRUE)) {
+    stop(
+      "jsb64dec: `input` holds characters outside the base64 alphabet",
+      call. = FALSE
+    )
   }
   .rmbl_b64_padding(s)
-  ch <- strsplit(gsub("[^A-Za-z0-9+/]", "", s), "", fixed = TRUE)[[1]]
+  ch <- strsplit(
+    gsub("[^A-Za-z0-9+/]", "", s, useBytes = TRUE),
+    "",
+    fixed = TRUE
+  )[[1]]
   if (!length(ch)) {
     return(raw(0))
   }
-  v <- match(ch, .RMBL_JSON_B64) - 1L
-  nfull <- length(v) %/% 4L
-  rem <- length(v) %% 4L
-  out <- integer(0)
-  if (nfull) {
-    m <- matrix(v[seq_len(nfull * 4L)], nrow = 4L)
-    w <- m[1L, ] * 262144L + m[2L, ] * 4096L + m[3L, ] * 64L + m[4L, ]
-    out <- as.vector(rbind(w %/% 65536L, w %/% 256L %% 256L, w %% 256L))
-  }
-  if (rem == 2L) {
-    w <- v[nfull * 4L + 1L] * 262144L + v[nfull * 4L + 2L] * 4096L
-    out <- c(out, w %/% 65536L)
-  } else if (rem == 3L) {
-    w <- v[nfull * 4L + 1L] *
-      262144L +
-      v[nfull * 4L + 2L] * 4096L +
-      v[nfull * 4L + 3L] * 64L
-    out <- c(out, w %/% 65536L, w %/% 256L %% 256L)
-  }
-  as.raw(out)
+  .rmbl_b64_bytes(ch)
 }
 
 #' @rdname b64
@@ -204,22 +196,7 @@ jsb64uenc <- function(input) {
 #' @rdname b64
 #' @export
 jsb64udec <- function(input) {
-  input <- .rmbl_text_input(input, "input", allow_raw = FALSE)
-  if (!is.character(input) || anyNA(input)) {
-    stop("`input` must be base64url text", call. = FALSE)
-  }
-  if (any(grepl("[^A-Za-z0-9_=-]", gsub("[\r\n]", "", input)))) {
-    stop("`input` is not base64url text", call. = FALSE)
-  }
-  if (!length(input)) {
-    return(jsb64dec(input))
-  }
-  text <- paste(gsub("[\r\n]", "", chartr("-_", "+/", input)), collapse = "")
-  mod <- nchar(text) %% 4L
-  if (mod > 0L) {
-    text <- paste0(text, strrep("=", 4L - mod))
-  }
-  jsb64dec(text)
+  .rmbl_js_as("jsb64udec", .rmbl_b64udec(input))
 }
 
 #' Encode an R object as JSON (jsonlite's toJSON, natively)
@@ -527,7 +504,11 @@ fromjs <- function(
 #' does in jsonlite.
 #' @param pretty Logical scalar, default \code{FALSE}: indent the output.
 #' @param txt Character scalar: JSON produced by
-#' `jsser()`.
+#' `jsser()`. JSON that `jsser()` would not write is refused, with an error
+#' that starts `jsunser:`: a value not of the type it names, or a class or
+#' attribute that does not fit the data (the class `Date` on text, a factor
+#' whose levels repeat, more or fewer names than values, a time zone that
+#' does not exist).
 #' @param trusted `FALSE` (default) rebuilds data types only (vectors,
 #' lists, factors, matrices, data frames, environments, symbols) and
 #' refuses functions, calls, expressions, namespaces and S4 objects:
@@ -572,12 +553,88 @@ fromjs <- function(
 #' @export
 jsser <- function(x, digits = 8, pretty = FALSE) {
   .rmbl_flag1(pretty, "pretty")
-  tojs(.rmbl_json_pack(x), digits = digits, pretty = pretty)
+  deep <- paste0(
+    "`x` is nested too deeply for jsser(): the JSON would pass the 100 ",
+    "levels jsunser() reads"
+  )
+  packed <- tryCatch(.rmbl_json_pack(x), error = function(e) {
+    # R's own limit comes first for a few thousand levels
+    if (grepl("stack|nested too deeply", conditionMessage(e))) {
+      stop(deep, call. = FALSE)
+    }
+    stop(e)
+  })
+  if (.rmbl_json_depth(packed) > 99L) {
+    stop(deep, call. = FALSE)
+  }
+  # a refusal of the writer names jsser, not tojs (audit of 21478080, P3)
+  .rmbl_js_as("jsser", tojs(packed, digits = digits, pretty = pretty))
 }
 
 #' @rdname jsserdoc
 #' @export
 jsunser <- function(txt, trusted = FALSE) {
+  # every refusal names jsunser, also those of the steps it calls (audit of
+  # 21478080, P8)
+  .rmbl_js_as("jsunser", .rmbl_jsunser(txt, trusted), "`txt`")
+}
+
+#' The bytes that base64 characters stand for.
+#' @param ch The characters of the base64 alphabet, one a piece, with no
+#'   padding.
+#' @return A raw vector.
+#' @noRd
+.rmbl_b64_bytes <- function(ch) {
+  v <- match(ch, .RMBL_JSON_B64) - 1L
+  nfull <- length(v) %/% 4L
+  rem <- length(v) %% 4L
+  out <- integer(0)
+  if (nfull) {
+    m <- matrix(v[seq_len(nfull * 4L)], nrow = 4L)
+    w <- m[1L, ] * 262144L + m[2L, ] * 4096L + m[3L, ] * 64L + m[4L, ]
+    out <- as.vector(rbind(w %/% 65536L, w %/% 256L %% 256L, w %% 256L))
+  }
+  if (rem == 2L) {
+    w <- v[nfull * 4L + 1L] * 262144L + v[nfull * 4L + 2L] * 4096L
+    out <- c(out, w %/% 65536L)
+  } else if (rem == 3L) {
+    w <- v[nfull * 4L + 1L] *
+      262144L +
+      v[nfull * 4L + 2L] * 4096L +
+      v[nfull * 4L + 3L] * 64L
+    out <- c(out, w %/% 65536L, w %/% 256L %% 256L)
+  }
+  as.raw(out)
+}
+
+#' The work of jsb64udec(), whose refusals it names.
+#' @param input As for jsb64udec().
+#' @return The bytes.
+#' @noRd
+.rmbl_b64udec <- function(input) {
+  input <- .rmbl_text_input(input, "input", allow_raw = FALSE)
+  if (!is.character(input) || anyNA(input)) {
+    stop("`input` must be base64url text", call. = FALSE)
+  }
+  if (any(grepl("[^A-Za-z0-9_=-]", gsub("[\r\n]", "", input)))) {
+    stop("`input` is not base64url text", call. = FALSE)
+  }
+  if (!length(input)) {
+    return(jsb64dec(input))
+  }
+  text <- paste(gsub("[\r\n]", "", chartr("-_", "+/", input)), collapse = "")
+  mod <- nchar(text) %% 4L
+  if (mod > 0L) {
+    text <- paste0(text, strrep("=", 4L - mod))
+  }
+  jsb64dec(text)
+}
+
+#' The work of jsunser(), whose refusals it names.
+#' @param txt,trusted As for jsunser().
+#' @return As for jsunser().
+#' @noRd
+.rmbl_jsunser <- function(txt, trusted) {
   if (!is.character(txt) || length(txt) != 1L || is.na(txt)) {
     stop("`txt` must be one string of JSON from jsser()", call. = FALSE)
   }
@@ -588,7 +645,141 @@ jsunser <- function(txt, trusted = FALSE) {
       call. = FALSE
     )
   }
-  .rmbl_json_unpack(obj, trusted = .rmbl_flag1(trusted, "trusted"))
+  trusted <- .rmbl_flag1(trusted, "trusted")
+  # a type jsser() does not write, or a value R cannot make into its type,
+  # is refused in the same words (the package's own refusals pass as they
+  # are)
+  not <- function(c) {
+    stop(
+      "`txt` is not JSON written by jsser() (",
+      conditionMessage(c),
+      ")",
+      call. = FALSE
+    )
+  }
+  tryCatch(
+    .rmbl_json_unpack(obj, trusted = trusted),
+    error = function(e) if (is.null(conditionCall(e))) stop(e) else not(e)
+  )
+}
+
+#' How deep the lists of a packed object nest (a vector inside the last
+#' list is one JSON level more).
+#' @param x A list.
+#' @return A count of levels.
+#' @noRd
+.rmbl_json_depth <- function(x) {
+  d <- 0L
+  cur <- list(x)
+  while (length(cur)) {
+    cur <- Filter(is.list, cur)
+    if (!length(cur)) {
+      break
+    }
+    d <- d + 1L
+    cur <- unlist(cur, recursive = FALSE, use.names = FALSE)
+  }
+  d
+}
+
+#' Converts a packed value to its type, refusing a value that is not one
+#' jsser() writes for it.
+#'
+#' Each value must be of the type the JSON names: true or false for a logical,
+#' a whole number within R's integers for an integer, a number or "NaN",
+#' "Inf" or "-Inf" for a double, text for a character vector and text R reads
+#' as a complex number for a complex one; null, and "NA", stand for NA. Only a
+#' conversion that warned was refused: "x" became NA as a logical, 3.7 the
+#' integer 3, "7" the integer 7 and `[1, true]` the text "1" "1" (audit of
+#' 716154bd, N7).
+#' @param vals The packed value.
+#' @param as The conversion (as.double and the like).
+#' @param mode The type's name, for the message.
+#' @return The converted vector.
+#' @noRd
+.rmbl_json_typed <- function(vals, as, mode) {
+  bad <- function() {
+    stop(
+      "`txt` is not JSON written by jsser() (a value that is not ",
+      mode,
+      ")",
+      call. = FALSE
+    )
+  }
+  if (!.rmbl_json_fits(vals, mode)) {
+    bad()
+  }
+  # "NA" made complex warns "NAs introduced by coercion", in jsonlite too: the
+  # values fit, and the warning is left as jsonlite gives it
+  if (identical(mode, "complex")) {
+    return(as(.rmbl_json_list_to_vec(vals)))
+  }
+  withCallingHandlers(
+    as(.rmbl_json_list_to_vec(vals)),
+    warning = function(w) bad()
+  )
+}
+
+#' Says whether every packed value is one jsser() writes for a type.
+#' @param vals The packed value, a list of scalars (or one vector).
+#' @param mode The type's name.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_json_fits <- function(vals, mode) {
+  v <- if (is.list(vals)) vals else as.list(vals)
+  len <- lengths(v)
+  if (any(len > 1L) || any(vapply(v, is.list, NA))) {
+    return(FALSE)
+  }
+  v <- v[len == 1L]
+  chr <- vapply(v, is.character, NA)
+  num <- vapply(v, is.numeric, NA)
+  lgl <- vapply(v, is.logical, NA)
+  s <- unlist(v[chr], use.names = FALSE)
+  na <- chr
+  na[chr] <- s %in% "NA"
+  if (mode %in% c("double", "numeric")) {
+    na[chr] <- s %in% c("NA", "NaN", "Inf", "-Inf")
+  }
+  rest <- !na
+  ok <- switch(
+    mode,
+    logical = lgl[rest],
+    integer = num[rest] & .rmbl_json_whole(v[rest]),
+    double = ,
+    numeric = num[rest],
+    complex = chr[rest] & .rmbl_json_complex_ok(v[rest]),
+    character = chr,
+    TRUE
+  )
+  all(ok)
+}
+
+#' Says which packed numbers are whole and within R's integers.
+#' @param v A list of numbers.
+#' @return A logical vector.
+#' @noRd
+.rmbl_json_whole <- function(v) {
+  x <- suppressWarnings(as.numeric(unlist(v, use.names = FALSE)))
+  if (!length(x)) {
+    return(logical())
+  }
+  !is.na(x) & x == round(x) & abs(x) <= .Machine$integer.max
+}
+
+#' Says which packed strings R reads as complex numbers.
+#' @param v A list of strings.
+#' @return A logical vector.
+#' @noRd
+.rmbl_json_complex_ok <- function(v) {
+  x <- unlist(v, use.names = FALSE)
+  if (!length(x)) {
+    return(logical())
+  }
+  # NaN in a part is a number: is.na() is TRUE for it too, and NaN+0i,
+  # which jsser() writes, was refused (audit of 21478080, P1)
+  y <- suppressWarnings(as.complex(x))
+  !is.na(y) | is.nan(y)
 }
 
 #' Format doubles and integers the way jsonlite's num_to_char() does
@@ -826,7 +1017,7 @@ jsunser <- function(txt, trusted = FALSE) {
   if (!length(x)) {
     return(character(0))
   }
-  x <- .rmbl_as_utf8(x)
+  x <- .rmbl_as_utf8(.rmbl_valid_text(x, "x"))
   x <- gsub("\\", "\\\\", x, fixed = TRUE)
   x <- gsub("\"", "\\\"", x, fixed = TRUE)
   x <- gsub("\n", "\\n", x, fixed = TRUE)
@@ -3334,7 +3525,11 @@ bricklayer_json_unbox <- function(x) {
     }
     if (file.exists(txt)) {
       .rmbl_notdir(txt, "txt", "fromjs")
-      txt <- file(txt)
+      # a bare word that is also the name of a device (nul or con on
+      # Windows) is JSON text for the parser; a path to a device is refused
+      if (.rmbl_isreg(txt)) {
+        txt <- file(.rmbl_file1(txt, "txt"))
+      }
     }
   }
   if (inherits(txt, "connection")) {
@@ -3354,6 +3549,39 @@ bricklayer_json_unbox <- function(x) {
     !bricklayer_json_validate(txt)
 }
 
+#' The lines of a file, from its bytes as they are on disk.
+#'
+#' readLines() of a path, and a connection opened after it was made, inflate
+#' a gzip, bzip2 or xz file as they read: the 32 MiB a reader holds its file
+#' to bounded the size on disk, and a 66 KB file was read as 64 MiB. A NUL
+#' byte is refused, as .rmbl_json_read_con() refuses it.
+#' @param path A regular file, already checked by .rmbl_file1().
+#' @return A character vector, one element per line.
+#' @noRd
+.rmbl_json_file_lines <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con), add = TRUE)
+  # a compressed file is said to be one, not refused for the NUL bytes its
+  # compressed form holds
+  h <- readBin(con, "raw", 6L)
+  kind <- if (length(h) >= 2L && identical(h[1:2], as.raw(c(0x1f, 0x8b)))) {
+    "gzip"
+  } else if (length(h) >= 3L && identical(h[1:3], charToRaw("BZh"))) {
+    "bzip2"
+  } else if (identical(h, as.raw(c(0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00)))) {
+    "xz"
+  }
+  if (!is.null(kind)) {
+    stop(
+      .rmbl_fn(), "the file is compressed (", kind, ") and is read as it is ",
+      "on disk; decompress it first: ", .rmbl_shown(path),
+      call. = FALSE
+    )
+  }
+  seek(con, 0L)
+  .rmbl_json_read_con(con)
+}
+
 #' Reads every line of a connection, opening (and then closing) it when it
 #' is not open.
 #' @param con The connection to read the JSON text from.
@@ -3364,7 +3592,31 @@ bricklayer_json_unbox <- function(x) {
     open(con, "rb")
     on.exit(close(con), add = TRUE)
   }
-  readLines(con, warn = FALSE, encoding = "UTF-8")
+  if (!identical(summary(con)$text, "binary")) {
+    return(readLines(con, warn = FALSE, encoding = "UTF-8"))
+  }
+  # read as bytes: readLines() drops what follows a NUL byte on its line, so
+  # a file could hold text that was never parsed
+  b <- list()
+  repeat {
+    r <- readBin(con, "raw", 65536L)
+    if (!length(r)) {
+      break
+    }
+    b[[length(b) + 1L]] <- r
+  }
+  b <- unlist(b)
+  if (is.null(b)) {
+    return(character())
+  }
+  if (any(b == as.raw(0L))) {
+    stop("the JSON text holds a NUL byte, which JSON does not allow",
+      call. = FALSE
+    )
+  }
+  x <- strsplit(rawToChar(b), "\r\n|\n|\r", useBytes = TRUE)[[1L]]
+  Encoding(x) <- "UTF-8"
+  x
 }
 
 #' Downloads a JSON document through the package's checked transport.
@@ -3560,7 +3812,13 @@ bricklayer_json_validate <- function(txt) {
 #' @return The object.
 #' @noRd
 .rmbl_json_unpack <- function(obj, trusted = FALSE) {
-  mode <- obj$type
+  mode <- if (is.list(obj)) obj[["type"]] else NULL
+  if (!is.character(mode) || length(mode) != 1L || is.na(mode)) {
+    stop(
+      "`txt` is not JSON written by jsser() (an object with a type)",
+      call. = FALSE
+    )
+  }
   if (identical(mode, "NULL")) {
     return(NULL)
   }
@@ -3575,7 +3833,20 @@ bricklayer_json_validate <- function(txt) {
     return(substitute())
   }
   attrs <- lapply(obj$attributes, .rmbl_json_unpack, trusted = trusted)
+  # structure() pads names that are too few with NA (audit of 21478080, P7)
+  nm <- attrs[["names"]]
+  if (!is.null(nm) && length(nm) != length(newdata[[1L]])) {
+    stop(
+      sprintf(
+        "`txt` is not JSON written by jsser() (%d names for %d values)",
+        length(nm),
+        length(newdata[[1L]])
+      ),
+      call. = FALSE
+    )
+  }
   output <- do.call("structure", c(newdata, attrs), quote = TRUE)
+  .rmbl_json_shape(output, mode)
   if (mode == "closure") {
     f <- as.function(output)
     environment(f) <- globalenv()
@@ -3585,6 +3856,115 @@ bricklayer_json_validate <- function(txt) {
     return(as.pairlist(output))
   }
   output
+}
+
+#' Refuses an object whose class says one shape and whose data another: a
+#' data frame that is not a list of columns as long as its row names, a factor
+#' that is not codes into its levels. jsser() writes neither; an integer
+#' vector with class data.frame came back as a corrupt data frame (audit of
+#' 716154bd, N7).
+#' @param x The object rebuilt.
+#' @param mode The type the JSON names (a double given the class factor is
+#'   made integer on the way, 1.5 becoming 1).
+#' @return NULL, invisibly; an error for a refused object.
+#' @noRd
+.rmbl_json_shape <- function(x, mode) {
+  ok <- TRUE
+  if (inherits(x, "data.frame")) {
+    n <- .row_names_info(x, 2L)
+    ok <- is.list(x) && !is.null(attr(x, "row.names")) &&
+      length(names(x)) == length(x) &&
+      all(vapply(unclass(x), NROW, 1L) == n)
+  } else if (inherits(x, "factor")) {
+    lv <- attr(x, "levels")
+    v <- unclass(x)[!is.na(x)]
+    ok <- mode == "integer" && (is.null(lv) || is.character(lv)) &&
+      all(v >= 1L & v <= length(lv))
+  }
+  why <- if (ok) {
+    .rmbl_json_class_fit(x)
+  } else {
+    paste0("a ", class(x)[[1L]], " whose data do not have its shape")
+  }
+  if (!is.null(why)) {
+    stop("`txt` is not JSON written by jsser() (", why, ")", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+#' Says why a class does not fit the data it is given, or NULL when it does.
+#'
+#' jsser() never writes a class on data that cannot hold it, and R takes such
+#' an object without a word: the class Date on text (NA dates and a warning
+#' when printed), "environment" on an integer, a factor whose levels repeat,
+#' a time in a time zone that does not exist, a difftime in no unit (audit of
+#' 21478080, P7).
+#' @param x The object rebuilt.
+#' @return A reason, or NULL.
+#' @noRd
+.rmbl_json_class_fit <- function(x) {
+  cl <- oldClass(x)
+  is_type <- list(
+    environment = is.environment,
+    `function` = is.function,
+    list = is.list,
+    character = is.character,
+    numeric = is.numeric,
+    integer = is.integer,
+    double = is.double,
+    logical = is.logical,
+    complex = is.complex,
+    raw = is.raw
+  )
+  for (b in intersect(cl, names(is_type))) {
+    if (!is_type[[b]](x)) {
+      return(sprintf("the class %s on data of type %s", b, typeof(x)))
+    }
+  }
+  num <- intersect(cl, c("Date", "POSIXct", "difftime"))
+  if (length(num) && !is.double(x) && !is.integer(x)) {
+    return(sprintf("the class %s on data of type %s", num[[1L]], typeof(x)))
+  }
+  .rmbl_json_attr_fit(x)
+}
+
+#' The attribute checks of .rmbl_json_class_fit(): levels, time zone, units.
+#' @param x The object rebuilt.
+#' @return A reason, or NULL.
+#' @noRd
+.rmbl_json_attr_fit <- function(x) {
+  if (inherits(x, "factor") && anyDuplicated(attr(x, "levels"))) {
+    return("a factor whose levels repeat")
+  }
+  if (inherits(x, "POSIXct") && !.rmbl_json_tz_ok(attr(x, "tzone"))) {
+    return("a time in a time zone that does not exist")
+  }
+  u <- attr(x, "units")
+  units <- c("secs", "mins", "hours", "days", "weeks")
+  if (inherits(x, "difftime") && !(is.character(u) && length(u) == 1L &&
+                                     u %in% units)) {
+    return("a difftime whose units are not secs, mins, hours, days or weeks")
+  }
+  NULL
+}
+
+#' Says whether a POSIXct's time zone exists: none, one the time-zone database
+#' names, or a POSIX TZ rule such as EST5EDT; any zone where the database is
+#' not found.
+#' @param tz The `tzone` attribute.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_json_tz_ok <- function(tz) {
+  if (is.null(tz)) {
+    return(TRUE)
+  }
+  if (!is.character(tz) || !length(tz) || is.na(tz[[1L]])) {
+    return(FALSE)
+  }
+  z <- tz[[1L]]
+  known <- OlsonNames()
+  !nzchar(z) || !length(known) || z %in% known ||
+    (!grepl("/", z, fixed = TRUE) && grepl("[0-9]", z))
 }
 
 #' Refuses the code-bearing types of the list `jsser()` wrote unless the JSON
@@ -3635,6 +4015,7 @@ bricklayer_json_validate <- function(txt) {
 #' @noRd
 .rmbl_json_unpack_data <- function(obj, mode, trusted) {
   vals <- obj$value
+  typed <- function(as) .rmbl_json_typed(vals, as, mode)
   list(
     .Data = switch(
       mode,
@@ -3642,12 +4023,13 @@ bricklayer_json_validate <- function(txt) {
       namespace = getNamespace(obj$value$name),
       externalptr = NULL,
       raw = jsb64dec(vals),
-      logical = as.logical(.rmbl_json_list_to_vec(vals)),
-      integer = as.integer(.rmbl_json_list_to_vec(vals)),
+      logical = typed(as.logical),
+      integer = typed(as.integer),
       numeric = ,
-      double = as.double(.rmbl_json_list_to_vec(vals)),
-      character = as.character(.rmbl_json_list_to_vec(vals)),
-      complex = as.complex(.rmbl_json_list_to_vec(vals)),
+      double = typed(as.double),
+      character = typed(as.character),
+      # complex values come as text
+      complex = typed(as.complex),
       list = ,
       pairlist = ,
       closure = lapply(vals, .rmbl_json_unpack, trusted = trusted),
@@ -3661,7 +4043,12 @@ bricklayer_json_validate <- function(txt) {
       language = as.call(parse(text = unlist(vals)))[[1L]],
       special = ,
       builtin = unserialize(jsb64dec(vals)),
-      stop("Switch falling through for encode.mode: ", mode, call. = FALSE)
+      stop(
+        "`txt` is not JSON written by jsser() (an unknown type: ",
+        .rmbl_printable(mode),
+        ")",
+        call. = FALSE
+      )
     )
   )
 }
@@ -3707,7 +4094,7 @@ bricklayer_json_validate <- function(txt) {
 #' @return NULL, invisibly.
 #' @noRd
 .rmbl_b64_padding <- function(s) {
-  s <- gsub("[[:space:]]", "", s)
+  s <- gsub("[[:space:]]", "", s, useBytes = TRUE)
   if (grepl("=[^=]", s) || grepl("===", s, fixed = TRUE)) {
     stop(
       "jsb64dec: `input` has `=` padding before its end; decode each ",
@@ -3716,4 +4103,30 @@ bricklayer_json_validate <- function(txt) {
     )
   }
   invisible(NULL)
+}
+
+#' Runs a decoder under the name of the function the user called.
+#'
+#' A refusal raised by a step (jsb64dec() inside jsgzdec(), the JSON parser
+#' inside jsunser()) is said as the called function's, its argument named as
+#' the caller names it.
+#' @param fn The function the user called.
+#' @param expr Its work.
+#' @param arg What the step's `input` is called in `fn`, or NULL.
+#' @return The value of `expr`.
+#' @noRd
+.rmbl_js_as <- function(fn, expr, arg = NULL) {
+  tryCatch(expr, error = function(e) {
+    m <- conditionMessage(e)
+    # R's own time limits pass as they are (.rmbl_or() tests their start), and
+    # so does a refusal that already names the function
+    if (startsWith(m, paste0(fn, "()")) || grepl("time limit", m)) {
+      stop(e)
+    }
+    m <- sub("^(fromjs|tojs|js[a-z0-9]+): ", "", m)
+    if (!is.null(arg)) {
+      m <- gsub("`input`", arg, m, fixed = TRUE)
+    }
+    stop(fn, ": ", m, call. = FALSE)
+  })
 }

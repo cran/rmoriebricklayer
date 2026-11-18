@@ -159,7 +159,7 @@ drvkey <- function(pass, salt, iter = 100000L, length = 32L) {
   .bl_busy(
     sprintf(
       "deriving a key (%s PBKDF2 iterations)",
-      format(iter, big.mark = ",")
+      .rmbl_ntxt(iter)
     ),
     .Call(C_rmbl_pbkdf2, pass, salt, iter, length)
   )
@@ -428,8 +428,9 @@ dgstobj <- function(
 #' @noRd
 .rmbl_b2_key <- function(key) {
   if (!is.null(key) && !is.raw(key)) {
-    key <- as.character(key)
-    if (length(key) != 1L || is.na(key)) {
+    # a number or a data frame is not a key: as.character() made Inf the
+    # key "Inf"
+    if (!is.character(key) || length(key) != 1L || is.na(key)) {
       stop(
         "cblake2b: `key` must be a length-1 character vector or a raw vector",
         call. = FALSE

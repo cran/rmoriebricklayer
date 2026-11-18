@@ -325,7 +325,11 @@ test_that("#10 and the CSV parity items: the reader matches read.csv()", {
   # a line of NULs
   same(c(charToRaw("a,b\n1,2\n"), as.raw(c(0, 0)), charToRaw("\n3,4\n")))
   same(c(charToRaw("a,b\n1,2\n"), as.raw(c(0, 0, 0)))) # NULs at the end
-  same(charToRaw("a\n00000000000012\n7\n")) # leading zeros: integer
+  # leading zeros are part of a code: the column is text, as written
+  expect_identical(
+    ns(".bl_csv_from_bytes")(charToRaw("a\n00000000000012\n7\n"))$a,
+    c("00000000000012", "7")
+  )
   same(charToRaw("\"\"\n1\n2\n")) # a header of "" alone
   same(charToRaw(" \"a\" ,b\n1,2\n")) # blanks outside header quotes
   same(charToRaw("a\n\"x\"y\"z\"\n")) # quotes after a closing one
@@ -810,7 +814,9 @@ test_that(
     )
     code <- .Call(ns_$C_rmbl_fetch_fallback, closed, "", tempfile(), 10L, base)
     expect_lt(code, 0L)
-    expect_identical(code %% 10L, 0L) # no snapshot was found
+    # the code's value: it now carries why the live address was not reached
+    expect_identical(as.integer(code) %% 10L, 0L) # no snapshot was found
+    expect_match(attr(code, "why"), "connect|refused", ignore.case = TRUE)
     port2 <- port + 7L
     found <- paste0(
       '{"archived_snapshots":{"closest":{"available": true,',

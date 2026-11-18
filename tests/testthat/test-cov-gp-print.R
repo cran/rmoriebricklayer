@@ -10,7 +10,7 @@ test_that("an analysis prints its missing columns and its suppression", {
     note = c(NA, "x", "y", "z", "p", "q", "r", "s"),
     stringsAsFactors = FALSE
   )
-  a <- anltab(d, "n", "year", by = "g", rnd = 5, suplim = 5)
+  a <- anytab(d, "n", "year", by = "g", rnd = 5, suplim = 5)
   out <- capture.output(print(a))
   expect_true(any(grepl("Rows +8", out)))
   expect_true(any(grepl("Columns +4", out)))
@@ -379,13 +379,12 @@ test_that("a null setting in the config file is an error that says null", {
   )
 })
 
-test_that("doctor reports no data key when the key state cannot be read", {
+test_that("doctor says the curated tables need no data key", {
   got <- new.env()
   got$out <- character()
-  local_mocked_bindings(.bl_hosted_key_state = function() stop("broken"))
   .bl_doctor_key(function(s) got$out <- c(got$out, s), "rmbl")
   expect_identical(
     got$out,
-    "\n  data key: none (`rmbl login` opens the curated tables)\n"
+    "\n  data key: none (the curated tables need none)\n"
   )
 })

@@ -162,7 +162,7 @@
 ) {
   f <- tempfile(fileext = ".html")
   on.exit(unlink(f), add = TRUE)
-  yoyhtml(yoy(c(1, 2)), f)
+  yoyhtml(yoychg(c(1, 2)), f)
   page <- paste(readLines(f, warn = FALSE), collapse = "\n")
   style <- regmatches(
     page,
@@ -381,7 +381,7 @@
 #'   the code.
 #' @noRd
 .bl_cps_view <- function(dir) {
-  dir <- .rmbl_string1(dir, "dir")
+  dir <- .rmbl_fspath(.rmbl_string1(dir, "dir"))
   if (!dir.exists(dir)) {
     stop(
       "rmblapp: the capsule is not an existing directory: ",

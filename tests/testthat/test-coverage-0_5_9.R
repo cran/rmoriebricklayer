@@ -30,7 +30,7 @@ test_that("rptanl names the columns added and removed against the prior", {
     individuals = c(10, 20, 12, 22, 15, 25),
     stringsAsFactors = FALSE
   )
-  a <- anltab(
+  a <- anytab(
     d,
     value = "individuals",
     prd = "year",
@@ -116,6 +116,7 @@ test_that(
     # touched
     f <- tempfile()
     writeLines("  answer  ", f)
+    skip_if_lowmem()
     out <- system2(
       file.path(R.home("bin"), "Rscript"),
       c("-e", shQuote("cat(rmoriebricklayer:::.bl_readline('p> '))")),
@@ -187,7 +188,7 @@ test_that(
     local_mocked_bindings(.bl_launcher = function() "")
     expect_error(instcli(tempfile("bin")), "launcher is missing")
     # the destination directory is fine but the table cannot be written as CSV
-    local_mocked_bindings(dload = function(key) {
+    local_mocked_bindings(dload = function(key, ...) {
       df <- data.frame(a = 1:2)
       df$e <- list(new.env(), new.env())
       df
@@ -195,7 +196,8 @@ test_that(
     got <- new.env()
     got$out <- character(0)
     dest <- tempfile(fileext = ".csv")
-    rc <- .bl_cli_data(c("pull", "tbl"), function(f) dest, function(s) {
+    flag <- function(f) if (f == "--out") dest
+    rc <- .bl_cli_data(c("pull", "db/tbl"), flag, function(s) {
       got$out <- c(got$out, s)
     })
     expect_identical(rc, 1L)
@@ -285,24 +287,6 @@ test_that(
     expect_identical(standalone(f), want)
     local_mocked_bindings(.rmbl_has_stringi = function() FALSE)
     expect_identical(toascii("Prof. Ángela"), "Prof. Angela")
-  }
-)
-
-test_that(
-  paste0(
-    "the sign-in address falls back to the built-in default when the ",
-    "services document has none"
-  ),
-  {
-    withr::local_envvar(
-      MORIE_HOSTED_AUTH_URL = "",
-      MORIE_HOSTED_MODEL = "",
-      MORIE_HOSTED_BASE_URL = ""
-    )
-    local_mocked_bindings(.rmbl_services_llm = function() list())
-    expect_match(.bl_hosted_auth(), "^https://.*/auth$")
-    expect_error(.bl_login_email(""), "email address is required")
-    expect_error(.bl_login_email("   "), "email address is required")
   }
 )
 
@@ -539,12 +523,12 @@ test_that("cnttrnd refuses an infinite x", {
 
 test_that(
   paste0(
-    "yoy: a label function must give one label per row; grouped print; PDF ",
+    "yoychg: a label function must give one label per row; grouped print; PDF ",
     "colours and page breaks"
   ),
   {
     d <- data.frame(year = 2019:2022, n = c(10, 12, 9, 15))
-    y <- yoy(d, value = "n", prd = "year")
+    y <- yoychg(d, value = "n", prd = "year")
     expect_error(yoylbl(y, function(p) "one"), "one label per row")
     seg <- data.frame(
       year = rep(2019:2021, each = 2),
@@ -552,7 +536,7 @@ test_that(
       n = c(31, 402, 28, 377, 12, 190),
       stringsAsFactors = FALSE
     )
-    g <- yoy(seg, value = "n", prd = "year", by = "gender", minbase = 0)
+    g <- yoychg(seg, value = "n", prd = "year", by = "gender", minbase = 0)
     out <- utils::capture.output(print(g))
     expect_true(any(grepl("Female", out, fixed = TRUE)))
     f <- tempfile(fileext = ".pdf")
@@ -561,7 +545,7 @@ test_that(
       year = 2000:2070,
       n = c(seq(100L, 450L, by = 10L), seq(440L, 100L, by = -10L))
     )
-    yl <- yoy(long, value = "n", prd = "year")
+    yl <- yoychg(long, value = "n", prd = "year")
     expect_silent(yoypdf(yl, f, title = "Up then down"))
     expect_gt(file.size(f), 1000)
   }

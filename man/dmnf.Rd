@@ -10,7 +10,16 @@ dmnf(refresh = FALSE)
 
 dtabs(refresh = FALSE)
 
-dload(key, refresh = FALSE, token = NULL)
+dload(
+  key,
+  refresh = FALSE,
+  token = NULL,
+  cols = NULL,
+  n = Inf,
+  keep = NULL,
+  file = FALSE,
+  names = c("R", "asis")
+)
 }
 \arguments{
 \item{refresh}{Logical scalar, default \code{FALSE}: fetch again even when a
@@ -20,13 +29,40 @@ table) is cached.}
 \item{key}{Character scalar, a \code{db/table} key from the manifest (the
 \code{key} column of \code{dtabs()}).}
 
-\item{token}{For \code{dload()}: the MORIE key to use for this call,
-in place of the one \code{\link{dlogin}} stored; \code{NULL} (the
-default) uses the stored key. It is never printed or written to disk.}
+\item{token}{Ignored, with a warning: the tables need no key, and none is
+sent. Kept so that calls written for earlier versions still run.}
+
+\item{cols}{Character vector, default \code{NULL} (every column): the
+columns to read, by the names in the manifest or as \code{dload()}
+returns them. The others are skipped as the file is read. The columns
+come back in the order of the file, whatever the order of \code{cols},
+and a column named twice comes back once.}
+
+\item{n}{A whole number, default \code{Inf}: at most this many rows are
+kept, and reading stops there.}
+
+\item{keep}{\code{NULL}, or a function of one data frame that returns
+\code{TRUE} for the rows to keep. The table is read a piece at a time
+and \code{keep} is called on each piece, so a table too large for
+memory can be reduced to the part that is wanted (one province, one
+year) without ever being held whole. It sees every column, whatever
+\code{cols} says is returned.}
+
+\item{file}{Logical scalar, default \code{FALSE}. \code{TRUE} downloads
+and verifies the table and returns the path of its gzip-compressed CSV
+without reading it, for tools that query a file in place; it cannot be
+combined with \code{cols}, \code{n} or \code{keep}.}
+
+\item{names}{\code{"R"} (the default) for the column names
+\code{read.csv()} gives (syntactic, from \code{make.names()}),
+\code{"asis"} for the names as the table's header writes them (see
+Details). \code{cols} takes either form, and \code{keep} sees the
+names the call returns.}
 }
 \value{
 \code{dmnf()}: the manifest as a list (element
-\code{datasets}, one list per table with at least \code{key}, and as the
+\code{datasets}, one list per table served with at least \code{key},
+attribute \code{unserved} the number of tables left out; and as the
 service provides them \code{rows}, \code{columns}, sizes, the SHA-256 of
 the compressed file and the BigQuery \code{source});
 \code{dtabs()}: a data frame with \code{key},
@@ -40,11 +76,9 @@ table, cut to the console width);
 The MORIE project keeps databases materialised from Google BigQuery
 public datasets (Chicago crime, EPA air quality, US census, FEC, FDA,
 NOAA, NHTSA, Hacker News, Ethereum, World Bank, ...) and serves their
-tables from the edge, under the data access terms at
-\code{www.rmorie.com/data-license/}. They open with the key
-\code{\link{dlogin}} stores, the same key rmorie and morie
-use; keys are personal: sign in with GitHub or an emailed code, or ask at
-\code{www.rmorie.com/access/}. The service address comes from
+tables from the edge. They need no sign-in and no key, and there are no
+terms of the service's own: each table keeps the licence of its source,
+which the manifest names. The service address comes from
 \code{\link{svcs}}.
 \code{dmnf()} returns the gateway's manifest
 (every table with rows, columns, size, SHA-256 and its BigQuery source),
@@ -54,7 +88,8 @@ under \code{tempdir()} (or the directory in
 \code{options(rmoriebricklayer.dcache = )}) so later calls are
 local.
 From the shell: \code{rmoriebricklayer data list} and
-\code{rmoriebricklayer data pull db/table [--out FILE.csv]}.
+\code{rmoriebricklayer data pull db/table [--out FILE.csv]
+[--names R|asis]}.
 }
 \details{
 The manifest is cached as \code{manifest.json} in the cache folder and
@@ -70,40 +105,81 @@ deleted and refused (after one refresh of the manifest, since a table
 rebuilt upstream has a new digest). When the manifest cannot be fetched,
 the last copy on disk, however old, supplies the digest; with none, a fresh
 download is not kept and a cached file is kept but not used. The CSV is
-read in compiled code with the same result as
-\code{read.csv(gzfile(f), stringsAsFactors = FALSE)}, two malformed shapes
-apart, which are refused with the record they are in where \code{read.csv()}
-changes the data without a word: a record with more fields than the header
-(\code{read.csv()} turns the first column into row names) and a quote mark
-inside an unquoted field (\code{read.csv()} takes the rest of the file as one
-quoted run). Tables that inflate
-past 512 MiB are read by \code{read.csv()} itself, a piece at a time. A
-table whose SHA-256 matches the manifest is the file the service holds, so
+read in compiled code. Its records are read as
+\code{read.csv(gzfile(f), stringsAsFactors = FALSE)} reads them, two
+malformed shapes apart, which are refused with the record they are in
+where \code{read.csv()} changes the data without a word: a record with
+more fields than the header (\code{read.csv()} turns the first column into
+row names) and a quote mark inside an unquoted field (\code{read.csv()}
+takes the rest of the file as one quoted run). Tables that inflate past
+512 MiB are read by \code{read.csv()} as text, a piece at a time, and
+typed the same way.
+
+The values are not always those \code{read.csv()} gives. A column is a
+number only when every value in it is a number R gives back as it is
+written: a plain integer or decimal (an exponent allowed, as in
+\code{1e5}; trailing zeros after the point, as in \code{6.0}, too) with
+no leading zero other than \code{0} itself or \code{0.} before the
+decimals, no leading \code{+} and at most 17 significant digits; or
+\code{Inf}, \code{-Inf} or \code{NaN}. A column holding a value such as
+\code{046}, \code{+1}, \code{0x1A}, \code{1+2i} or a number of 20
+digits is text, every value as written: \code{read.csv()} made the codes
+\code{046} and \code{007} the numbers 46 and 7. Blanks around a number do
+not stop it being one. \code{TRUE}, \code{FALSE}, \code{T} and \code{F}
+make a logical column. A text column keeps every value as written: the
+text \code{NA} there is the text \code{"NA"} (\code{read.csv()} made it
+missing) and an empty field is \code{""}. In a number or logical column
+an empty field and \code{NA} are both missing, as before. A column with no
+value at all is logical \code{NA}; one whose only values are the text
+\code{NA} is text. Numbers are read correctly rounded, the same double on
+every machine: R's own reading of decimal text can differ in the last bit
+between processors (\code{1.239042694} did between x86-64 and ARM64).
+
+The column names are by default those \code{read.csv()} gives:
+\code{make.names(unique = TRUE)} of the header, each name trimmed of the
+blanks around it unless it is quoted, so \code{Offence Description}
+becomes \code{Offence.Description}, \code{\% share} \code{X..share} and
+a second \code{x} \code{x.1}. \code{names = "asis"} returns the names as
+the header writes them (the same trimming, a byte-order mark dropped,
+duplicates and empty names kept), which are the names of the published
+table and its manifest. The default may change in a later major version.
+
+A table whose SHA-256 matches the manifest is the file the service holds, so
 it is read whatever its size; one the manifest lists without a digest may
 decompress to at most the option \code{rmoriebricklayer.maxcsvbytes}
 (1 GiB by default). A large table needs memory for all of it: a 1 GB
 decompressed CSV takes a few GB of RAM as a data frame.
 
-The key is sent only to the address of the signed services document. With
-\code{MORIE_DATA_URL} set to another address the key is not sent and the
-download fails with a message saying so. Some tables (ICPSR studies, the NCVS
-38604 extract, the A2AJ case law) open only after their terms are accepted on
-the terms page, \code{data.rmorie.com/terms}. Downloads draw a progress bar
-when \code{options(morie.progress)} allows it.
+A table the manifest lists without any digest is used with a warning, once
+per session and table.
 
-Errors: \code{refresh} not \code{TRUE} or \code{FALSE}; no key stored (the
-message says how to sign in); the service unavailable, or the key rejected;
-a \code{key} that is not of the form \code{db/table}, or not listed in the
-manifest; a \code{token} that is not one non-empty string; a digest
-mismatch; a restricted table whose terms were not accepted.
+\code{MORIE_DATA_URL} sets another address for the service (https and
+public). No key is sent to either. Tables whose source terms do not allow
+redistribution (ICPSR studies, among them the NCVS 38604 extract, and any
+table the manifest marks restricted, with \code{access} other than
+\code{"open"} or \code{"public"} or \code{restricted: true}) are not served:
+\code{dmnf()} and \code{dtabs()} leave them out (the listing counts them in
+one line), and \code{dload()} refuses them before any request, saying
+where to get them. Downloads draw a progress bar when
+\code{options(morie.progress)} allows it.
+
+With \code{cols}, \code{n} or \code{keep} the table is read a piece of
+about 8 MB of text at a time, twice: the first pass checks every record as
+a whole read checks it and settles each column's type over the whole
+table, the second reads the pieces in those types. The names, types and
+refusals are those of \code{dload(key)}, and \code{keep} sees the values
+it holds: \code{dload(key, keep = f)} gives the rows of \code{dload(key)}
+that \code{f} keeps, numbered from 1. Even \code{n = 1} reads the file
+once whole, for the types.
+
+Errors: \code{refresh} not \code{TRUE} or \code{FALSE}; the service
+unavailable; a \code{key} that is not of the form \code{db/table}, not
+listed in the manifest, or a table that is not served; a digest mismatch.
 }
 \examples{
 \dontshow{if (isTRUE(getOption("rmbl.examples"))) withAutoprint(\{ # examplesIf}
 # Offline, against a cache folder holding a manifest and one table made
-# here (no key is stored and nothing is fetched).
-oldenv <- Sys.getenv(c("XDG_CONFIG_HOME", "MORIE_HOSTED_KEY"), unset = NA)
-Sys.setenv(XDG_CONFIG_HOME = tempfile())
-Sys.unsetenv("MORIE_HOSTED_KEY")
+# here (nothing is fetched).
 cache <- file.path(tempdir(), "data-hub-example")
 dir.create(cache)
 old <- options(rmoriebricklayer.dcache = cache)
@@ -140,21 +216,13 @@ file.exists(f)
 
 options(old)
 unlink(cache, recursive = TRUE)
-for (v in names(oldenv)) {
-  if (is.na(oldenv[[v]])) {
-    Sys.unsetenv(v)
-  } else {
-    do.call(Sys.setenv, as.list(oldenv[v]))
-  }
-}
 \dontshow{\}) # examplesIf}
 \dontshow{if (interactive()) withAutoprint(\{ # examplesIf}
-# the real service: needs a key and the network
-dlogin(token = "sk-...")  # a key issued at www.rmorie.com/access/
+# the real service: needs the network, no sign-in
 head(dtabs())
 df <- dload("chicago_crime/incidents")
 \dontshow{\}) # examplesIf}
 }
 \seealso{
-\code{\link{dlogin}}, \code{\link{svcs}}.
+\code{\link{svcs}}.
 }

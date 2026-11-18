@@ -10,7 +10,7 @@
 #' A local web app over the package's analyses: every tab opens on a
 #' demonstration dataset ([rmbldemo()]) with its first analysis
 #' already run, and you can load a CSV file, the pinned data of a capsule, or a
-#' table from data.rmorie.com (after `rmbl login`) instead. Everything runs on
+#' table from data.rmorie.com (no sign-in) instead. Everything runs on
 #' this machine in this R session; nothing is sent anywhere except the
 #' data.rmorie.com requests you make.
 #'
@@ -33,19 +33,19 @@
 #' [profcols()], [freqtbl()],
 #' [cortbl()], [mahaoutl()],
 #' [missgrid()] and the distribution plots
-#' ([plotrdg()], [plotecdf()],
+#' ([plotrdg()], [plotcdfs()],
 #' [plotvln()], [plothex()],
 #' [plotgain()]); click a column of the profile to see its
 #' distribution. Distributions: [dstfit()] with its density, QQ, PP
 #' and tail plots, and a synthetic sample from a fit through
 #' [mksyncol()].} \item{Over time}{Year over year:
-#' [yoy()] (hover a period of its plot for the period's rows) and the
+#' [yoychg()] (hover a period of its plot for the period's rows) and the
 #' [yoyhtml()] page to download. Rates:
 #' [rtcalc()], [ratechg()] and
 #' [shrs()]. Trends: [trndtst()] (Mann-Kendall
 #' with the Theil-Sen slope), [stepchg()],
 #' [cnttrnd()], and [plotcal()],
-#' [plothrz()], [plotsm()] and
+#' [plothrz()], [plotmult()] and
 #' [plotbump()].} \item{Causal and survey}{Survey:
 #' [svydes()] with weights, strata, clusters or replicate weights,
 #' then [svyest()] or [svycmp()]. Policy:
@@ -80,7 +80,7 @@
 #' report readers [siuprs()] and [siuso()] on
 #' pasted text. Air pollution: [plmfld()] and
 #' [gplume()] for a Gaussian plume, the monitors of the demo series
-#' ([plotsm()]), [crfpm25()],
+#' ([plotmult()]), [crfpm25()],
 #' [crfno2()], [polbrdn()] and
 #' [vrfpol()]. Hawkes: [chwkfit()] with
 #' [plothwk()] (intensity, time-rescaling QQ, branching tree),
@@ -94,9 +94,8 @@
 #' one self-contained HTML page (plots as inline SVG, year-over-year tables as
 #' [yoyhtml()] draws them), as Markdown, or as a GitHub comment to
 #' copy.} \item{Settings}{light, dark or the system's theme (also the switch in
-#' the navbar), digits, and the seed of the seeded analyses.} } The data key of
-#' data.rmorie.com is never held by the app: [dload()] reads it from
-#' where `rmbl login` stored it.
+#' the navbar), digits, and the seed of the seeded analyses.} } The tables of
+#' data.rmorie.com need no key and no sign-in.
 #'
 #' The dashboard needs the shiny package (Suggests), and with it bslib, which
 #' shiny installs; without shiny `rmblapp()` refuses.
@@ -224,7 +223,7 @@ rmblapp <- function(data = NULL, capsule = NULL, ...) {
 #' @return A list: data, code, label, capsule.
 #' @noRd
 .bl_app_capsule <- function(dir) {
-  dir <- .rmbl_string1(dir, "capsule")
+  dir <- .rmbl_fspath(.rmbl_string1(dir, "capsule"))
   if (!dir.exists(dir)) {
     stop(
       "rmblapp: `capsule` is not an existing directory: ",
@@ -1146,7 +1145,8 @@ rmblapp <- function(data = NULL, capsule = NULL, ...) {
   if (test) !is.null(t) else as.data.frame(t)
 }
 
-#' Writes a downloaded result: a yoy() table as yoyhtml() draws it, a table as
+#' Writes a downloaded result: a yoychg() table as yoyhtml() draws it, a table
+#' as
 #' CSV, else the print.
 #' @param x The result to write: as HTML, as CSV or as printed text.
 #' @param file The path the download is written to.
@@ -1156,7 +1156,9 @@ rmblapp <- function(data = NULL, capsule = NULL, ...) {
   if (inherits(x, "rmbl_yoy")) {
     yoyhtml(x, file)
   } else if (.bl_dl_table(x, TRUE)) {
-    utils::write.csv(.bl_dl_table(x), file, row.names = FALSE)
+    .rmbl_wfile(file, function(con) {
+      utils::write.csv(.bl_dl_table(x), con, row.names = FALSE)
+    }, binary = FALSE)
   } else {
     .rmbl_wlines(utils::capture.output(print(x)), file)
   }
@@ -1509,7 +1511,9 @@ rmblapp <- function(data = NULL, capsule = NULL, ...) {
   output$csv <- shiny::downloadHandler(
     paste0("rmbl-", id, ".csv"),
     function(file) {
-      utils::write.csv(.bl_main_table(res()$value), file, row.names = FALSE)
+      .rmbl_wfile(file, function(con) {
+        utils::write.csv(.bl_main_table(res()$value), con, row.names = FALSE)
+      }, binary = FALSE)
     }
   )
   invisible(NULL)
@@ -1821,15 +1825,7 @@ rmblapp <- function(data = NULL, capsule = NULL, ...) {
 #' @noRd
 .bl_data_outputs <- function(output, session, st) {
   output$signin <- shiny::renderUI({
-    # whether a key is stored, never the key
-    shiny::tags$p(
-      class = "bl-about",
-      if (is.null(.bl_hosted_key())) {
-        "Not signed in: run `rmbl login` in a terminal, then list the tables."
-      } else {
-        "Signed in: the data key stays where `rmbl login` stored it."
-      }
-    )
+    shiny::tags$p(class = "bl-about", "The tables need no sign-in; list them.")
   })
   output$status <- shiny::renderUI(.bl_data_status(st$msg(), st$cur()))
   output$cols <- shiny::renderTable(.bl_app_types(st$cur()$data))
@@ -1864,7 +1860,7 @@ rmblapp <- function(data = NULL, capsule = NULL, ...) {
     shiny::tags$strong(d$label),
     sprintf(
       ": %s rows, %d columns",
-      format(nrow(d$data), big.mark = ","),
+      .rmbl_ntxt(nrow(d$data)),
       ncol(d$data)
     )
   )

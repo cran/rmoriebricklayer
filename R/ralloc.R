@@ -181,7 +181,8 @@ rallocvrf <- function(x, digest = NULL, seed = NULL) {
   same <- identical(as_chr(again), as_chr(x)) &&
     identical(nrow(again), nrow(x))
   ids <- !anyDuplicated(x$id) && identical(nrow(x), as.integer(set$n))
-  checks <- .ralloc_checks(identical(got, tolower(want)), same, ids, nrow(x))
+  checks <- .ralloc_checks(identical(got, .rmbl_lower(want)), same, ids,
+      nrow(x))
   .rmbl_cls(
     list(ok = all(checks$ok), checks = checks, digest = got),
     "rmbl_alloc_check"
@@ -468,6 +469,8 @@ plot.rmbl_alloc <- function(x, ...) {
       call. = FALSE
     )
   }
+  # bytes that are not text warned in grepl() before they were refused
+  .rmbl_valid_text(seed, "seed")
   if (is.character(seed) && length(seed) == 1L &&
         grepl("^[0-9a-fA-F]{96}$", seed)) {
     seed <- as.raw(strtoi(substring(seed, seq(1, 95, 2), seq(2, 96, 2)), 16L))
@@ -478,10 +481,10 @@ plot.rmbl_alloc <- function(x, ...) {
     }
   } else {
     s <- .rmbl_string1(as.character(seed), "seed")
-    seed <- c(
-      .rmbl_sha256_raw(charToRaw(paste0("ralloc seed 1:", s))),
-      .rmbl_sha256_raw(charToRaw(paste0("ralloc seed 2:", s)))
-    )[1:48]
+    # the compiled SHA-256: the pure-R one (kept for standalone bundles) took
+    # 0.15 ms a character, 211 s for a seed word of 1 MB
+    h <- function(i) .bl_hex_raw(csha256(charToRaw(paste0(i, s))))
+    seed <- c(h("ralloc seed 1:"), h("ralloc seed 2:"))[1:48]
   }
   list(raw = seed, hex = paste(format(as.hexmode(as.integer(seed)),
                                       width = 2L), collapse = ""))

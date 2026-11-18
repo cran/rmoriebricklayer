@@ -29,7 +29,25 @@
 #' worst over all capsules: \code{ok}, \code{warn}, \code{drift} or
 #' \code{error}. Each failed row adds a note, and one more from
 #' \code{\link{explerr}} where it finds what the row means or where its
-#' message is raised.
+#' message is raised. When no capsule is found under \code{path} (outside
+#' the skipped folders, and matching \code{glob}), nothing was checked: the
+#' result is one failed \code{no_capsule} row, no capsules and the status
+#' \code{error}, also with \code{pubkey} given.
+#'
+#' Links: a link to a folder inside \code{path} is followed, each real
+#' folder checked once; a link to a folder on the way down or above it (a
+#' loop) is not followed. A link to any other folder outside \code{path} is
+#' not followed, and is not passed over in silence: one
+#' \code{links_not_followed} row, of severity \code{warn}, names every such
+#' link (\code{rmbl verify --fail-on warn} exits 1 on it). A capsule
+#' behind one is not checked here: check that folder where it lies. It is a
+#' warning, not an error, because ordinary project trees hold such links
+#' (a project library that links each package to a cache, a shared data
+#' folder) beside capsules that are sound. A folder under
+#' \code{path} that cannot be read stops the check, named.
+#'
+#' A data file is found to read as a table, and its rows counted, as
+#' \code{\link{vrfcps}} does: a block of rows at a time, in bounded memory.
 #'
 #' Drift: when the fetched source's SHA-256 differs from the pin and the
 #' pinned data file is a CSV, \code{cpsdrft()} runs with
@@ -61,18 +79,21 @@
 #' (the network for http(s) ones), as \code{snapshot = TRUE} asks the
 #' Wayback Machine once per capsule (\code{\link{wbsnpurl}});
 #' \code{"refresh"} writes the capsules; a cache folder is written to.
-#' Errors: \code{path} is not a directory; a bad argument. A capsule whose
-#' checks stop is one failed row, not an error.
+#' Errors: \code{path} is not a directory; a bad argument; a folder under
+#' \code{path} that cannot be read. A capsule whose checks stop is one
+#' failed row, not an error.
 #'
 #' @param path Character scalar, the folder searched recursively
-#'   (\code{.git} and \code{.rmbl-cache} folders skipped).
+#'   (\code{.git} and \code{.rmbl-cache} folders skipped; links as the
+#'   details say).
 #' @param mode \code{"verify"} (the default), \code{"drift"},
 #'   \code{"refresh"} or \code{"report"} (the verify checks).
 #' @param key Character scalar: the shared secret of HMAC bundles, or
 #'   \code{""}.
 #' @param pubkey Character scalar: the public key (hex) every bundle must be
 #'   signed with (for an HMAC bundle, its key id), or \code{""}. Given, a
-#'   capsule with no signed bundle fails: there is nothing the key checks.
+#'   capsule with no signed bundle fails: there is nothing the key checks,
+#'   as a path holding no capsule fails.
 #' @param psiwarn,psifail Non-negative numbers, \code{psiwarn} at most
 #'   \code{psifail}: the PSI bands, by default 0.1 and 0.25, the bands
 #'   \code{\link{drftpsi}} documents.
@@ -96,15 +117,13 @@
 #' @param wayback Logical: with \code{"refresh"}, capture each changed
 #'   http(s) source in the Wayback Machine first (archive.org keys, as
 #'   \code{wbsave()} reads them).
-#' @param archive Logical: use archive.rmorie.com when a source cannot be
-#'   fetched. In \code{"drift"} and \code{"refresh"}, a source that neither
-#'   answers nor has its pinned Wayback snapshot is fetched from a copy kept
-#'   there with the pinned SHA-256 (public copies need no key); with
-#'   \code{wayback = TRUE}, a changed source the Wayback Machine refuses is
-#'   saved there instead (\code{wbsave(fallback = "rmorie")}, which needs a
-#'   key: \code{dlogin()} or \env{MORIE_HOSTED_KEY}).
+#' @param archive Ignored, with a warning when \code{TRUE}: the hosted copy of
+#'   sources it fell back to is gone. Kept so that callers written for
+#'   earlier versions (the rmbl GitHub Action passes it) still run; use
+#'   \code{cache} for a copy kept by an earlier run.
 #' @param glob Character scalar: check only the capsule files whose path
-#'   matches this glob (\code{*} also matches \code{/}), or \code{""}.
+#'   matches this glob (\code{*} also matches \code{/}), or \code{""}; at
+#'   most 4,096 bytes.
 #' @param fp Logical: measure the footprint of the checks
 #'   (\code{\link{co2fp}}) for the last lines of the report.
 #' @param seenlog Character scalar: an XMSS seen-log (\code{\link{xmssidxseen}};
@@ -184,39 +203,8 @@ cpschk <- function(
   seenlog = "",
   archive = FALSE
 ) {
-  path <- .rmbl_string1(path, "path")
-  if (!dir.exists(path)) {
-    stop(
-      .rmbl_fn(),
-      "`path` is not an existing directory: ",
-      .rmbl_printable(path),
-      call. = FALSE
-    )
-  }
-  o <- .bl_cpschk_opts(
-    list(path = path, mode = .rmbl_arg(mode)),
-    key,
-    pubkey,
-    psiwarn,
-    psifail,
-    base,
-    list(allowfile = allowfile, snapshot = snapshot, wayback = wayback),
-    archive
-  )
-  glob <- .bl_str0(glob, "glob")
-  fp <- .rmbl_flag1(fp, "fp")
-  o$cache <- .bl_cache_arg(cache)
-  seenlog <- .bl_str0(seenlog, "seenlog")
-  # every XMSS signature under the path and in the log, for the index-reuse row
-  # of each bundle
-  o$seen <- xmssidxseen(path, if (nzchar(seenlog)) seenlog)
-  dirs <- .bl_capsule_dirs(path, glob)
-  foot <- if (fp) co2fp(.bl_cpschk_run(dirs, o))
-  caps <- lapply(
-    if (fp) foot$value else .bl_cpschk_run(dirs, o),
-    .bl_cps_finish
-  )
-  .bl_cpschk_result(o, glob, caps, base, foot[names(foot) != "value"])
+  a <- .bl_cpschk_args(as.list(environment()))
+  .bl_cpschk_do(a$o, a$glob, a$fp, a$seenlog, base)
 }
 
 #' @rdname cpschk
@@ -268,7 +256,7 @@ format.rmbl_cpschk <- function(
 #' @export
 print.rmbl_cpschk <- function(x, ...) {
   rows <- x$rows
-  verdict <- if (length(x$capsules)) {
+  verdict <- if (NROW(rows)) {
     list(
       ok = identical(x$status, "ok"),
       checks = data.frame(ok = rows$ok | rows$severity == "note")
@@ -370,6 +358,7 @@ ghcmt <- function(
     stop("ghcmt: `failon` must be NULL or check names (text)",
          call. = FALSE)
   }
+  .rmbl_valid_text(failon, "failon")
   marker <- .rmbl_string1(marker, "marker")
   limit <- .rmbl_scalar(limit, "limit", 100, integer = TRUE)
   if (!is.null(runurl)) {
@@ -425,7 +414,7 @@ ghout <- function(x, report = "", json = "", comment = "off") {
     changed = paste(changed, collapse = ","),
     verified = sum(st != "error"),
     failed = sum(st == "error"),
-    `manifest-changed` = tolower(any(vapply(
+    `manifest-changed` = .rmbl_lower(any(vapply(
       ms,
       function(m) isTRUE(m$changed),
       NA
@@ -451,12 +440,60 @@ ghout <- function(x, report = "", json = "", comment = "off") {
 #' @details
 #' A provenance already pinned (one with \code{resource$sha256}) is left as
 #' it is. Side effects: writes \code{data_provenance.json} (first run) and
-#' \code{capsule_bundle.json} in each capsule. Errors, before anything is
-#' written: no provenance under \code{path}; a capsule that already has a
-#' bundle, unless \code{overwrite}; then, per capsule, a
-#' \code{resource$filename} that is not a plain relative path to a file in
-#' the capsule, and the refusals of \code{cpsbndl()} (a key it cannot sign
-#' with).
+#' \code{capsule_bundle.json} in each capsule.
+#'
+#' Capsules are searched for as \code{cpschk()} searches: a link to a
+#' folder inside \code{path} is followed, each real folder once; a link to
+#' a folder on the way down or above it (a loop) is not followed; a link to
+#' any other folder outside \code{path} is not followed and is warned of,
+#' named, since a capsule behind it is neither sealed nor checked: seal
+#' that folder where it is.
+#'
+#' Errors, before anything is written: no provenance under \code{path}, a
+#' folder under it that cannot be read; a
+#' capsule that already has a
+#' bundle, unless \code{overwrite}; a key that cannot sign (a public key,
+#' or anything \code{\link{cpsatst}} refuses: a key other than an XMSS key
+#' signs a throwaway manifest first, which changes nothing), or an XMSS key
+#' whose next index was already used or that has fewer unused indices than
+#' there are capsules (checked without spending one); then, for every
+#' capsule, a \code{resource$filename} that is not a plain relative path to
+#' a file in the capsule, a provenance that cannot be pinned or that is no
+#' JSON (the file named), a \code{manifest.json} that does not hold a JSON
+#' object, a provenance or bundle file that cannot be written to, every
+#' refusal of \code{cpsbndl()} short of the signature (links, names, files
+#' that cannot be read, a folder that cannot be written to, a link whose
+#' target does not exist, a temporary left by a write that was cut short:
+#' every such \code{.rmbl-*.tmp} file in the tree is named, however many),
+#' each headed by the capsule's folder, and anything \code{cpschk()} would
+#' report
+#' as an error once the capsule is sealed (a \code{manifest.json} that fails
+#' its schema, a data file that does not read as a table, the checks of
+#' \code{\link{vrfcps}}), found by the check's own code. Each pinned
+#' provenance is worked out in memory first. So a tree \code{cpsseal()}
+#' has sealed passes \code{cpschk()}, but for what depends on the check's
+#' options (\code{allowfile}, a source that has drifted).
+#'
+#' The data file is found to read as a table as \code{cpschk()} reads it:
+#' its header and first rows by \code{read.csv()}, the rest a block of
+#' 65,536 rows at a time, so memory stays at about that many fields and the
+#' longest line whatever the file's size, and a refusal gives
+#' \code{read.csv()}'s reason. Only a provenance that pins a schema has the
+#' table read whole, for the schema's checks.
+#'
+#' What cannot be known before writing (the disk filling up, a file or a
+#' link that changes or stops being readable during the seal, as
+#' \code{cpsbndl()} finds it, a signature that fails) stops the seal, as an
+#' error or Ctrl-C (an interrupt) does: every file it had written is then
+#' put back as it was (each is copied aside before it is replaced and
+#' renamed back, which needs no room on the disk), and the error says which
+#' files, if any, could not be. A seal killed by a signal R cannot catch
+#' (SIGKILL, SIGTERM, a lost machine) puts nothing back: some capsules may
+#' be sealed and others not, and each capsule it had sealed keeps its copies
+#' as \code{.rmbl-*.tmp} files. The next seal refuses the tree and names
+#' every one of them; delete exactly those and seal again with
+#' \code{overwrite = TRUE} (\code{rmbl sign --overwrite}). XMSS indices a
+#' failed seal signed with stay used, as they must.
 #'
 #' @param path Character scalar, the folder searched recursively.
 #' @param key The signing key, as \code{cpsbndl()} takes it: a shared
@@ -466,7 +503,8 @@ ghout <- function(x, report = "", json = "", comment = "off") {
 #'   consecutive indices (each reserved as \code{\link{cpssign}} reserves it).
 #' @param overwrite Logical: sign a capsule that already has a bundle again.
 #' @param glob Character scalar: only the provenance files whose path
-#'   matches this glob (\code{*} also matches \code{/}), or \code{""}.
+#'   matches this glob (\code{*} also matches \code{/}), or \code{""}; at
+#'   most 4,096 bytes.
 #' @return A data frame, one row per capsule: \code{capsule},
 #'   \code{pinned} (whether the provenance was pinned now), \code{files}
 #'   (the number signed) and \code{public} (the HMAC key id or the public
@@ -494,53 +532,195 @@ ghout <- function(x, report = "", json = "", comment = "off") {
 #' @export
 cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   dirs <- .bl_seal_dirs(path, overwrite, glob)
+  plans <- .bl_seal_ahead(dirs, key)
+  undo <- new.env(parent = emptyenv())
+  undo$old <- list()
   rows <- list()
-  for (d in dirs) {
-    pf <- file.path(d, "data_provenance.json")
-    prov <- loadprov(pf)
-    pinned <- is.null(prov[["resource"]][["sha256"]])
-    if (pinned) {
-      fn <- .bl_s1(prov[["resource"]][["filename"]])
-      df <- .rmbl_safe_rel(fn, d)
-      if (is.null(df) || !file.exists(df) || dir.exists(df)) {
-        stop(
-          .rmbl_fn(),
-          pf,
-          ": resource$filename must name the data file, relative to the ",
-          "capsule",
-          call. = FALSE
-        )
-      }
-      .rmbl_wlines(
-        tojs(
-          .bl_pin(prov, df, fn),
-          auto_unbox = TRUE,
-          pretty = TRUE,
-          null = "null",
-          digits = NA
-        ),
-        pf
-      )
+  # what fails during the writes (a full disk, a file changed meanwhile) puts
+  # every file this call wrote back as it was
+  tryCatch(
+    for (i in seq_along(dirs)) {
+      r <- .bl_seal_one(dirs[[i]], plans[[i]], key, undo)
+      key <- r$key
+      rows[[i]] <- r$row
+    },
+    error = function(e) .bl_seal_undo(undo, conditionMessage(e), key),
+    interrupt = function(e) .bl_seal_undo(undo, "cpsseal: interrupted", key)
+  )
+  bak <- vapply(undo$old, `[[`, "", 2L)
+  unlink(bak[!is.na(bak)])
+  do.call(rbind, rows)
+}
+
+#' Seals one capsule as planned: pins its provenance, then bundles it,
+#' keeping a copy of each file before it is replaced.
+#' @param d The capsule folder.
+#' @param plan Its plan, from .bl_seal_plan().
+#' @param key The signing key, moved past each XMSS index it signs with.
+#' @param undo Where the copies are kept (.bl_seal_keep()).
+#' @return A list: the `key` (an XMSS key moved past the index it signed
+#'   with, for the next capsule) and the capsule's `row`.
+#' @noRd
+.bl_seal_one <- function(d, plan, key, undo) {
+  if (!is.null(plan$pin)) {
+    .bl_seal_keep(undo, plan$pf)
+    .rmbl_wlines(plan$pin, plan$pf)
+  }
+  .bl_seal_keep(undo, file.path(d, "capsule_bundle.json"))
+  b <- cpsbndl(d, plan$man, key, files = plan$files)
+  if (inherits(key, "bricklayer_signing_key")) {
+    key$next_index <- b$attestation$signature$index + 1L
+  }
+  row <- data.frame(
+    capsule = d,
+    pinned = !is.null(plan$pin),
+    files = length(b$files),
+    public = b$attestation$public,
+    stringsAsFactors = FALSE
+  )
+  list(key = key, row = row)
+}
+
+#' Keeps a copy of a file cpsseal() is about to replace, beside it, to be
+#' renamed back if the seal fails: a rename needs no room on the disk, so a
+#' full disk cannot stop it.
+#' @param undo The seal's record of files written.
+#' @param f The file.
+#' @return NULL, invisibly.
+#' @noRd
+.bl_seal_keep <- function(undo, f) {
+  bak <- NA_character_
+  if (file.exists(f)) {
+    # named as a temporary of the package's writes, so no bundle lists it
+    bak <- tempfile(".rmbl-", tmpdir = dirname(f), fileext = ".tmp")
+    if (!isTRUE(file.copy(f, bak))) {
+      unlink(bak)
+      stop(.rmbl_fn(), "could not keep a copy of ", .bl_names(f),
+           " to put back if the seal fails", call. = FALSE)
     }
-    mf <- file.path(d, "manifest.json")
-    b <- cpsbndl(
-      d,
-      if (file.exists(mf)) loadprov(mf) else mkmnf(list(), env = FALSE),
-      key
-    )
-    # an XMSS key moves past the index it just signed with, for the next capsule
-    if (inherits(key, "bricklayer_signing_key")) {
-      key$next_index <- b$attestation$signature$index + 1L
+  }
+  undo$old[[length(undo$old) + 1L]] <- c(f, bak)
+  invisible(NULL)
+}
+
+#' Puts back every file a failed seal wrote, then stops with its reason.
+#' @param undo The seal's record of files written (.bl_seal_keep()).
+#' @param why The reason the seal failed.
+#' @param key The key as far as the seal had moved it.
+#' @return Does not return.
+#' @noRd
+.bl_seal_undo <- function(undo, why, key) {
+  left <- character()
+  for (o in rev(undo$old)) {
+    back <- if (is.na(o[[2L]])) {
+      !file.exists(o[[1L]]) || unlink(o[[1L]]) == 0L
+    } else {
+      file.rename(o[[2L]], o[[1L]])
     }
-    rows[[length(rows) + 1L]] <- data.frame(
-      capsule = d,
-      pinned = pinned,
-      files = length(b$files),
-      public = b$attestation$public,
-      stringsAsFactors = FALSE
+    if (!isTRUE(back)) {
+      left <- c(left, o[[1L]])
+    }
+  }
+  stop(
+    why,
+    if (length(left)) {
+      paste0("; these could not be put back as they were: ", .bl_names(left))
+    } else if (length(undo$old)) {
+      "; every file the seal had written was put back as it was"
+    },
+    if (inherits(key, "bricklayer_signing_key") && length(undo$old)) {
+      sprintf(paste0(
+        "; the XMSS indices the seal used stay used (the key's next ",
+        "index is now at least %d)"
+      ), key$next_index)
+    },
+    call. = FALSE
+  )
+}
+
+#' cpschk()'s arguments, checked: what `rmbl verify` calls a usage error
+#' (exit status 2) stops here, and nothing else does.
+#' @param a cpschk()'s arguments as a list.
+#' @return A list: the options `o`, `glob`, `fp` and `seenlog`.
+#' @noRd
+.bl_cpschk_args <- function(a) {
+  if (isTRUE(a$archive)) {
+    warning(
+      "cpschk(): `archive` is ignored: there is no hosted copy to fall back ",
+      "to; `cache` keeps a copy from an earlier run",
+      call. = FALSE
     )
   }
-  do.call(rbind, rows)
+  path <- .rmbl_fspath(.rmbl_string1(a$path, "path"))
+  if (!dir.exists(path)) {
+    stop(
+      .rmbl_fn(),
+      "`path` is not an existing directory: ",
+      .rmbl_printable(path),
+      call. = FALSE
+    )
+  }
+  mode <- a$mode
+  mode <- .rmbl_arg(mode, c("verify", "drift", "refresh", "report"))
+  o <- .bl_cpschk_opts(
+    list(path = path, mode = mode),
+    a$key,
+    a$pubkey,
+    a$psiwarn,
+    a$psifail,
+    a$base,
+    list(allowfile = a$allowfile, snapshot = a$snapshot, wayback = a$wayback)
+  )
+  o$cache <- .bl_cache_arg(a$cache)
+  seenlog <- .bl_str0(a$seenlog, "seenlog")
+  # a seen-log that cannot be read is a bad value of the option
+  if (nzchar(seenlog)) {
+    .rmbl_xmss_seen_read(seenlog)
+  }
+  list(o = o, glob = .bl_str0(a$glob, "glob"), fp = .rmbl_flag1(a$fp, "fp"),
+       seenlog = seenlog)
+}
+
+#' cpschk() on checked arguments: what stops here is a failed check (exit
+#' status 1 for `rmbl verify`), not a usage error.
+#' @param o,glob,fp,seenlog As .bl_cpschk_args() gives them.
+#' @param base As for cpschk().
+#' @return The cpschk() result.
+#' @noRd
+.bl_cpschk_do <- function(o, glob, fp, seenlog, base) {
+  # every XMSS signature under the path and in the log, for the index-reuse row
+  # of each bundle
+  o$seen <- .rmbl_xmss_seen(o$path, if (nzchar(seenlog)) seenlog,
+                            strict = FALSE)
+  dirs <- .bl_capsule_dirs(o$path, glob, strict = FALSE)
+  foot <- if (fp) co2fp(.bl_cpschk_run(dirs, o))
+  caps <- lapply(
+    c(if (fp) foot$value else .bl_cpschk_run(dirs, o),
+      .bl_link_cap(o$path, attr(dirs, "outside"))),
+    .bl_cps_finish
+  )
+  .bl_cpschk_result(o, glob, caps, base, foot[names(foot) != "value"])
+}
+
+#' The links a check's search did not follow, as one failed entry: a
+#' capsule behind one is not checked, so the result cannot be "ok".
+#' @param path The folder searched.
+#' @param out The links not followed.
+#' @return A list of one capsule entry, or an empty list.
+#' @noRd
+.bl_link_cap <- function(path, out) {
+  if (!length(out)) {
+    return(list())
+  }
+  list(list(
+    capsule = path,
+    source = "",
+    pinned_sha256 = "",
+    fetched_sha256 = "",
+    changed = FALSE,
+    rows = .bl_check_row(path, "capsule", path, "links_not_followed", FALSE,
+                         .bl_link_out(path, out), severity = "warn")
+  ))
 }
 
 #' The console summary of a capsule check: one titled block.
@@ -670,7 +850,10 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 #' @noRd
 .bl_cpschk_reading <- function(x, caps) {
   if (!length(caps)) {
-    return(sprintf("No manifests were found under %s.", x$path))
+    return(sprintf(
+      "No capsule was found under %s: nothing was checked, which fails.",
+      x$path
+    ))
   }
   switch(
     x$status,
@@ -688,7 +871,8 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 .bl_pubkey_arg <- function(x) {
   # " " or "x" pinned nothing and the capsule passed as if a key had been
   # checked (network review of 1.0.3)
-  if (nzchar(x) && !grepl("^[0-9a-fA-F]{16,}$", x)) {
+  # matched as bytes: text that is not valid warned in grepl()
+  if (nzchar(x) && !grepl("^[0-9a-fA-F]{16,}$", x, useBytes = TRUE)) {
     stop(
       .rmbl_fn(),
       "`pubkey` must be the expected public key or key id in hexadecimal ",
@@ -733,7 +917,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   if (is.null(base) || is.function(base)) {
     return(base)
   }
-  base <- .rmbl_string1(base, "base")
+  base <- .rmbl_fspath(.rmbl_string1(base, "base"))
   if (!file.exists(base)) {
     stop(
       .rmbl_fn(),
@@ -768,7 +952,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   if (isFALSE(cache)) {
     return(NULL)
   }
-  cache <- .rmbl_string1(cache, "cache")
+  cache <- .rmbl_fspath(.rmbl_string1(cache, "cache"))
   dir.create(cache, showWarnings = FALSE, recursive = TRUE)
   cache
 }
@@ -784,10 +968,10 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 .bl_source_row <- function(d, src, o) {
   # drift and refresh refuse it themselves, as they fetch
   if (!o$mode %in% c("verify", "report") || !nzchar(src) ||
-        grepl("^https?://", src, ignore.case = TRUE)) {
+        grepl(.rmbl_ci("^https?://"), src, perl = TRUE, useBytes = TRUE)) {
     return(NULL)
   }
-  is_file <- grepl("^file://", src, ignore.case = TRUE)
+  is_file <- grepl(.rmbl_ci("^file://"), src, perl = TRUE, useBytes = TRUE)
   # the folder resolved, which exists, so a ../ is taken out even when the
   # file is not there
   raw <- .bl_local_path(src, is_file, d)
@@ -903,8 +1087,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
       d,
       o$allowfile,
       o$cache,
-      root = o$path,
-      archive = isTRUE(o$archive)
+      root = o$path
     ),
     error = function(e) e
   )
@@ -1054,7 +1237,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 #' @noRd
 .bl_rel_dir <- function(d, root) {
   a <- normalizePath(d, winslash = "/")
-  r <- sub("/+$", "", normalizePath(root, winslash = "/"))
+  r <- sub("/+$", "", normalizePath(root, winslash = "/"), useBytes = TRUE)
   if (a == r) "." else substring(a, nchar(r) + 2L)
 }
 
@@ -1212,8 +1395,8 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
     md <- c(
       md,
       sprintf(
-        "%s No manifests found under `%s`%s.",
-        mark[["ok"]],
+        "%s No capsule found under `%s`%s: nothing was checked.",
+        mark[["error"]],
         x$path,
         if (nzchar(x$glob)) sprintf(" matching `%s`", x$glob) else ""
       )
@@ -1241,8 +1424,24 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 #' @return Text.
 #' @noRd
 .bl_md_esc <- function(x) {
-  x <- .rmbl_ctl_escape(gsub("\n", " ", x, fixed = TRUE))
-  gsub("|", "\\|", x, fixed = TRUE)
+  .yoy_md_esc(x)
+}
+
+#' A code span for a table cell: one line, the pipe escaped, fenced with two
+#' backticks when the text has one of its own (which would end a span fenced
+#' with one). No HTML escaping: inside a code span Markdown shows `&amp;` as
+#' written.
+#' @param x The text shown as code.
+#' @return The span, backticks included.
+#' @noRd
+.bl_md_code <- function(x) {
+  x <- .rmbl_ctl_escape(gsub("[\r\n]+", " ", x, useBytes = TRUE))
+  x <- gsub("|", "\\|", x, fixed = TRUE, useBytes = TRUE)
+  ifelse(
+    grepl("`", x, fixed = TRUE),
+    paste0("`` ", x, " ``"),
+    paste0("`", x, "`")
+  )
 }
 
 #' A number for the report: three significant digits, \code{"-"} for NA.
@@ -1251,7 +1450,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 #' @return Text.
 #' @noRd
 .bl_md_num <- function(x, digits = 3) {
-  ifelse(is.na(x), "-", trimws(formatC(x, digits = digits, format = "g")))
+  ifelse(is.na(x), "-", trimws(.rmbl_fc(x, digits = digits, format = "g")))
 }
 
 #' A list of names after a lead, or \code{""} when there are none.
@@ -1340,7 +1539,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 #' @return The capsule directories.
 #' @noRd
 .bl_seal_dirs <- function(path, overwrite, glob) {
-  path <- .rmbl_string1(path, "path")
+  path <- .rmbl_fspath(.rmbl_string1(path, "path"))
   if (!dir.exists(path)) {
     stop(
       .rmbl_fn(),
@@ -1370,12 +1569,16 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
       call. = FALSE
     )
   }
-  dirs
+  # a capsule inside another is sealed first: sealing it pins its
+  # provenance and writes its bundle, which the outer bundle must cover
+  # (sealed after the outer one, it left a tree that failed its own check)
+  depth <- lengths(strsplit(dirs, "/", fixed = TRUE, useBytes = TRUE))
+  dirs[order(-depth, .rmbl_bytes(dirs), method = "radix")]
 }
 
 #' cpschk()'s options, checked.
 #' @param o A list with the checked `path` and `mode`.
-#' @param key,pubkey,psiwarn,psifail,base,archive As for cpschk().
+#' @param key,pubkey,psiwarn,psifail,base As for cpschk().
 #' @param flags A list with cpschk()'s `allowfile`, `snapshot` and `wayback`.
 #' @return The options list.
 #' @noRd
@@ -1386,8 +1589,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   psiwarn,
   psifail,
   base,
-  flags,
-  archive
+  flags
 ) {
   o <- c(
     o,
@@ -1399,8 +1601,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
       base = .bl_base_arg(base),
       allowfile = .bl_allowfile_arg(flags$allowfile),
       snapshot = .rmbl_flag1(flags$snapshot, "snapshot"),
-      wayback = .rmbl_flag1(flags$wayback, "wayback"),
-      archive = .rmbl_flag1(archive, "archive")
+      wayback = .rmbl_flag1(flags$wayback, "wayback")
     )
   )
   if (o$psiwarn > o$psifail) {
@@ -1508,11 +1709,6 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 .bl_cps_drift_note <- function(f) {
   if (f$cached) {
     "source unreachable: used the copy cached by an earlier run"
-  } else if (isTRUE(f$archived)) {
-    paste0(
-      "source unreachable: used the copy kept on archive.rmorie.com ",
-      "with the pinned SHA-256"
-    )
   }
 }
 
@@ -1530,7 +1726,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   local <- .rmbl_safe_rel(.bl_s1(f$old[["resource"]][["filename"]]), d) %||% ""
   if (
     nrow(ch) &&
-      grepl("\\.csv$", local, ignore.case = TRUE) &&
+      grepl(.rmbl_ci("\\.csv$"), local, perl = TRUE, useBytes = TRUE) &&
       file.exists(local)
   ) {
     tryCatch(.bl_column_drift(local, f$path, o), error = function(e) e)
@@ -1644,7 +1840,7 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
 #' @noRd
 .bl_drift_summary <- function(cols, dr) {
   hit <- cols[cols$verdict != "ok", , drop = FALSE]
-  g <- function(v) formatC(v, digits = 3, format = "g")
+  g <- function(v) .rmbl_fc(v, digits = 3, format = "g")
   paste0(
     sprintf("%d of %d columns past a band", nrow(hit), nrow(cols)),
     if (nrow(hit)) {
@@ -1673,27 +1869,18 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   )
 }
 
-#' Saves a refreshed capsule's source to the Wayback Machine (and, when it
-#' is refused, to archive.rmorie.com if asked), noting what happened.
+#' Saves a refreshed capsule's source to the Wayback Machine, noting what
+#' happened.
 #' @param d The capsule folder.
 #' @param f The fetch.
-#' @param o The options of cpschk(); `archive` allows the rmorie fallback.
+#' @param o The options of cpschk().
 #' @param out The capsule's drift result so far.
 #' @return A list with `f` (its snapshot recorded when saved) and `out` (with
 #'   the notes).
 #' @noRd
 .bl_refresh_wayback <- function(d, f, o, out) {
-  why <- sprintf(
-    "Source of the data capsule %s, refreshed by cpschk()",
-    basename(d)
-  )
   wb <- tryCatch(
-    wbsave(
-      f$src,
-      quiet = TRUE,
-      fallback = if (isTRUE(o$archive)) "rmorie",
-      reason = if (isTRUE(o$archive)) why
-    ),
+    wbsave(f$src, quiet = TRUE),
     error = function(e) e
   )
   if (inherits(wb, "error")) {
@@ -1704,29 +1891,10 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   } else {
     out$notes <- c(
       out$notes,
-      paste("wayback: capture", wb$status[1L], wb$message[1L]),
-      .bl_archive_note(attr(wb, "archive"))
+      paste("wayback: capture", wb$status[1L], wb$message[1L])
     )
   }
   list(f = f, out = out)
-}
-
-#' The note on the archive.rmorie.com fallback of a refused Wayback capture.
-#' @param ar The `archive` attribute of the wbsave() result.
-#' @return A string, or `NULL` when there is nothing to say.
-#' @noRd
-.bl_archive_note <- function(ar) {
-  if (inherits(ar, "rmbl_fail")) {
-    return(paste("archive.rmorie.com:", ar))
-  }
-  if (!is.null(ar) && nrow(as.data.frame(unclass(ar)))) {
-    a1 <- as.data.frame(unclass(ar))[1L, ]
-    if (identical(a1$status, "archived")) {
-      paste("archive.rmorie.com: saved instead,", a1$archive)
-    } else {
-      paste("archive.rmorie.com:", a1$status)
-    }
-  }
 }
 
 #' The report's status line and its table of capsules.
@@ -1762,8 +1930,8 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
     md <- c(
       md,
       sprintf(
-        "| `%s` | %s | `%s` | %s | %s | %s | %s %s |",
-        .bl_md_esc(cp$capsule),
+        "| %s | %s | `%s` | %s | %s | %s | %s %s |",
+        .bl_md_code(cp$capsule),
         .bl_md_esc(i$host),
         i$sha,
         i$size,
@@ -1984,8 +2152,8 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
       .bl_md_list("; removed ", dr$removed),
       dr$psiwarn,
       dr$psifail,
-      format(dr$nref, big.mark = ","),
-      format(dr$ncur, big.mark = ","),
+      .rmbl_ntxt(dr$nref),
+      .rmbl_ntxt(dr$ncur),
       dr$alpha
     )
   )
@@ -2040,9 +2208,18 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   rows <- .bl_cpschk_rows(caps)
   dc <- .bl_cpschk_drifts(caps, rows)
   caps <- dc$caps
+  # nothing found is nothing checked, not a pass: a capsule renamed into a
+  # skipped folder (.git, .rmbl-cache) or deleted passed as "ok"
+  if (!length(caps)) {
+    rows <- .bl_no_capsule_row(o$path, glob)
+  }
   structure(
     list(
-      status = .bl_worst(vapply(caps, `[[`, "", "result")),
+      status = if (length(caps)) {
+        .bl_worst(vapply(caps, `[[`, "", "result"))
+      } else {
+        "error"
+      },
       mode = o$mode,
       path = o$path,
       glob = glob,
@@ -2059,6 +2236,29 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
     ),
     class = "rmbl_cpschk",
     drifts = dc$drifts
+  )
+}
+
+#' cpschk()'s one row when no capsule is found under the path: a failure.
+#' @param path The folder searched.
+#' @param glob The checked glob, or "".
+#' @return One failed check row.
+#' @noRd
+.bl_no_capsule_row <- function(path, glob) {
+  .bl_check_row(
+    path,
+    "capsule",
+    path,
+    "no_capsule",
+    FALSE,
+    sprintf(
+      paste0(
+        "no capsule (data_provenance.json or capsule_bundle.json) under ",
+        "%s%s, outside folders named .git and .rmbl-cache: nothing was checked"
+      ),
+      .rmbl_printable(path),
+      if (nzchar(glob)) sprintf(" matching %s", .rmbl_printable(glob)) else ""
+    )
   )
 }
 
@@ -2103,4 +2303,153 @@ cpsseal <- function(path = ".", key, overwrite = FALSE, glob = "") {
   } else {
     "ok"
   }
+}
+
+#' Works out every capsule's seal before cpsseal() writes the first.
+#'
+#' A refusal at the third capsule left the first two pinned and bundled,
+#' and a look-ahead that listed refusals one at a time missed some (a
+#' public key, a spent or exhausted XMSS key, a manifest that is no object,
+#' a file that cannot be read). So the look-ahead is the seal's own code
+#' with nothing written: each provenance is pinned in memory
+#' (.bl_seal_plan()), each capsule goes through cpsbndl()'s own checks
+#' (.bl_bnd_prep()), and the key signs a throwaway manifest by cpsbndl()'s
+#' own signer, or, for a stateful XMSS key, which a signature would spend,
+#' is checked for as many unused indices as there are capsules.
+#' @param dirs The capsule folders about to be sealed.
+#' @param key The signing key cpsseal() was given.
+#' @return The plans, one per capsule.
+#' @noRd
+.bl_seal_ahead <- function(dirs, key) {
+  if (inherits(key, "bricklayer_signing_key")) {
+    .rmbl_xmss_ready(key, length(dirs))
+  } else {
+    cpsatst(mkmnf(list(), env = FALSE), key)
+  }
+  # every capsule's temporaries named at once, so one deletion lets the
+  # seal run again
+  .bl_left_stop(unique(unlist(lapply(dirs, function(d) {
+    f <- .bl_walk(d)$files
+    normalizePath(.rmbl_jpath(d, f[.rmbl_leftover(f)]), winslash = "/",
+                  mustWork = FALSE)
+  }))))
+  lapply(dirs, function(d) {
+    plan <- .bl_seal_plan(d)
+    prep <- .bl_bnd_prep(d, NULL, file.path(d, "capsule_bundle.json"),
+                         plan$man)
+    .bl_seal_verify(d, plan)
+    # bundled as walked here, with the bundles of the capsules inside it,
+    # which the seal writes first: the folder then holds the copies the seal
+    # keeps of what it replaces, which are no content
+    plan$files <- .rmbl_bsort(unique(c(prep$files, .bl_seal_inner(d, dirs))))
+    plan
+  })
+}
+
+#' The bundles cpsseal() writes in the capsules inside a capsule.
+#' @param d The capsule folder.
+#' @param dirs Every capsule folder sealed.
+#' @return Their paths, relative to `d`.
+#' @noRd
+.bl_seal_inner <- function(d, dirs) {
+  pre <- sub("/*$", "/", d, useBytes = TRUE)
+  inner <- dirs[.rmbl_bstarts(dirs, pre)]
+  n <- seq_along(charToRaw(pre))
+  .rmbl_jpath(vapply(inner, function(x) rawToChar(charToRaw(x)[-n]), "",
+                     USE.NAMES = FALSE), "capsule_bundle.json")
+}
+
+#' Stops when the check would fail a capsule right after it is sealed.
+#'
+#' The check's own rows (.bl_verify_files()) on the capsule as the seal
+#' leaves it, its provenance as the seal will write it; the bundle, which
+#' the seal writes, aside. A row the check counts as an error refuses the
+#' seal, so whatever cpsseal() seals passes cpschk().
+#' @param d The capsule folder.
+#' @param plan Its plan, from .bl_seal_plan().
+#' @return NULL, invisibly.
+#' @noRd
+.bl_seal_verify <- function(d, plan) {
+  r <- .bl_verify_files(d, ahead = TRUE, pin = plan$pin)
+  bad <- r[!r$ok & r$severity == "error", , drop = FALSE]
+  if (nrow(bad)) {
+    stop(
+      .rmbl_fn(), .bl_names(d), ": the check would fail this capsule once ",
+      "it is sealed, so nothing was sealed: ",
+      paste0(bad$check, ": ", bad$detail, collapse = "; "),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
+#' What sealing one capsule writes, worked out without writing it: the
+#' pinned provenance's JSON (NULL when it is pinned already) and the
+#' manifest the bundle is signed over.
+#' @param d The capsule folder.
+#' @return A list: `pf` (the provenance file), `pin` and `man`.
+#' @noRd
+.bl_seal_plan <- function(d) {
+  pf <- file.path(d, "data_provenance.json")
+  prov <- .bl_seal_read(pf)
+  pin <- NULL
+  if (is.null(prov[["resource"]][["sha256"]])) {
+    fn <- .bl_s1(prov[["resource"]][["filename"]])
+    df <- .rmbl_safe_rel(fn, d)
+    if (is.null(df) || !file.exists(df) || dir.exists(df)) {
+      stop(
+        .rmbl_fn(), .bl_names(pf), ": resource$filename must name the ",
+        "data file, relative to the capsule",
+        call. = FALSE
+      )
+    }
+    pin <- tojs(
+      .bl_pin(prov, df, fn),
+      auto_unbox = TRUE,
+      pretty = TRUE,
+      null = "null",
+      digits = NA
+    )
+    # the writer's own check: a provenance that cannot be written to was
+    # found only after the capsules before it were signed
+    .rmbl_wtarget(path.expand(pf))
+  }
+  list(pf = pf, pin = pin, man = .bl_seal_man(d))
+}
+
+#' A capsule's JSON file read for the seal, its path named when it is no
+#' JSON: in a tree of many capsules "not JSON" said not which.
+#' @param f The file.
+#' @return As loadprov().
+#' @noRd
+.bl_seal_read <- function(f) {
+  tryCatch(loadprov(f), error = function(e) {
+    stop(.rmbl_fn(), .bl_names(f), ": ",
+         sub("^loadprov: ", "", conditionMessage(e), useBytes = TRUE),
+         call. = FALSE)
+  })
+}
+
+#' The manifest a capsule's bundle is signed over: its manifest.json, which
+#' must hold a JSON object, or an empty manifest.
+#' @param d The capsule folder.
+#' @return The manifest.
+#' @noRd
+.bl_seal_man <- function(d) {
+  mf <- file.path(d, "manifest.json")
+  if (!file.exists(mf)) {
+    return(mkmnf(list(), env = FALSE))
+  }
+  man <- .bl_seal_read(mf)
+  # 1, "x" or [1, 2] parse, and were refused only after the capsules before
+  # it had been sealed; [] parses as {} does, so the text is looked at
+  h <- readBin(mf, "raw", 4096L)
+  h <- h[!h %in% as.raw(c(0x20, 0x09, 0x0a, 0x0d, 0xef, 0xbb, 0xbf))]
+  if (!is.list(man) || !length(h) || h[[1L]] != charToRaw("{")) {
+    stop(
+      .rmbl_fn(), .bl_names(mf), ": manifest.json must hold a JSON object",
+      call. = FALSE
+    )
+  }
+  man
 }

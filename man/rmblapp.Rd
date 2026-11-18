@@ -24,7 +24,7 @@ A shiny app object; printing it (or
 A local web app over the package's analyses: every tab opens on a
 demonstration dataset (\code{\link[=rmbldemo]{rmbldemo()}}) with its first analysis
 already run, and you can load a CSV file, the pinned data of a capsule, or a
-table from data.rmorie.com (after \verb{rmbl login}) instead. Everything runs on
+table from data.rmorie.com (no sign-in) instead. Everything runs on
 this machine in this R session; nothing is sent anywhere except the
 data.rmorie.com requests you make.
 }
@@ -48,19 +48,19 @@ The menus and their tabs: \describe{ \item{Data}{Describe:
 \code{\link[=profcols]{profcols()}}, \code{\link[=freqtbl]{freqtbl()}},
 \code{\link[=cortbl]{cortbl()}}, \code{\link[=mahaoutl]{mahaoutl()}},
 \code{\link[=missgrid]{missgrid()}} and the distribution plots
-(\code{\link[=plotrdg]{plotrdg()}}, \code{\link[=plotecdf]{plotecdf()}},
+(\code{\link[=plotrdg]{plotrdg()}}, \code{\link[=plotcdfs]{plotcdfs()}},
 \code{\link[=plotvln]{plotvln()}}, \code{\link[=plothex]{plothex()}},
 \code{\link[=plotgain]{plotgain()}}); click a column of the profile to see its
 distribution. Distributions: \code{\link[=dstfit]{dstfit()}} with its density, QQ, PP
 and tail plots, and a synthetic sample from a fit through
 \code{\link[=mksyncol]{mksyncol()}}.} \item{Over time}{Year over year:
-\code{\link[=yoy]{yoy()}} (hover a period of its plot for the period's rows) and the
+\code{\link[=yoychg]{yoychg()}} (hover a period of its plot for the period's rows) and the
 \code{\link[=yoyhtml]{yoyhtml()}} page to download. Rates:
 \code{\link[=rtcalc]{rtcalc()}}, \code{\link[=ratechg]{ratechg()}} and
 \code{\link[=shrs]{shrs()}}. Trends: \code{\link[=trndtst]{trndtst()}} (Mann-Kendall
 with the Theil-Sen slope), \code{\link[=stepchg]{stepchg()}},
 \code{\link[=cnttrnd]{cnttrnd()}}, and \code{\link[=plotcal]{plotcal()}},
-\code{\link[=plothrz]{plothrz()}}, \code{\link[=plotsm]{plotsm()}} and
+\code{\link[=plothrz]{plothrz()}}, \code{\link[=plotmult]{plotmult()}} and
 \code{\link[=plotbump]{plotbump()}}.} \item{Causal and survey}{Survey:
 \code{\link[=svydes]{svydes()}} with weights, strata, clusters or replicate weights,
 then \code{\link[=svyest]{svyest()}} or \code{\link[=svycmp]{svycmp()}}. Policy:
@@ -95,7 +95,7 @@ and CARE principles and the source tables. Courts and corrections:
 report readers \code{\link[=siuprs]{siuprs()}} and \code{\link[=siuso]{siuso()}} on
 pasted text. Air pollution: \code{\link[=plmfld]{plmfld()}} and
 \code{\link[=gplume]{gplume()}} for a Gaussian plume, the monitors of the demo series
-(\code{\link[=plotsm]{plotsm()}}), \code{\link[=crfpm25]{crfpm25()}},
+(\code{\link[=plotmult]{plotmult()}}), \code{\link[=crfpm25]{crfpm25()}},
 \code{\link[=crfno2]{crfno2()}}, \code{\link[=polbrdn]{polbrdn()}} and
 \code{\link[=vrfpol]{vrfpol()}}. Hawkes: \code{\link[=chwkfit]{chwkfit()}} with
 \code{\link[=plothwk]{plothwk()}} (intensity, time-rescaling QQ, branching tree),
@@ -109,9 +109,8 @@ and any figure of Frost's The Theory of Search through
 one self-contained HTML page (plots as inline SVG, year-over-year tables as
 \code{\link[=yoyhtml]{yoyhtml()}} draws them), as Markdown, or as a GitHub comment to
 copy.} \item{Settings}{light, dark or the system's theme (also the switch in
-the navbar), digits, and the seed of the seeded analyses.} } The data key of
-data.rmorie.com is never held by the app: \code{\link[=dload]{dload()}} reads it from
-where \verb{rmbl login} stored it.
+the navbar), digits, and the seed of the seeded analyses.} } The tables of
+data.rmorie.com need no key and no sign-in.
 
 The dashboard needs the shiny package (Suggests), and with it bslib, which
 shiny installs; without shiny \code{rmblapp()} refuses.

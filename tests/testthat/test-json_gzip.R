@@ -41,11 +41,19 @@ test_that("jsgzdec() refuses what is not one small gzip member", {
   )
   expect_error(jsgzdec(as.raw(rep(0, 20))), "starting 1f 8b, got 20 byte")
   expect_error(jsgzdec("abc", raw = TRUE), "must be a raw vector")
-  # a trailer that declares more than 64 MiB is refused before inflating
+  # a trailer that declares a length its data does not have is damage (it
+  # was called an oversized member from the trailer alone)
   r <- jsgzenc(list(a = 1), raw = TRUE)
   n <- length(r)
   r[(n - 3L):n] <- as.raw(c(0, 0, 0, 0x10))
-  expect_error(jsgzdec(r), "refusing to inflate more than 64 MiB")
+  expect_error(jsgzdec(r), "jsgzdec: `txt` has a length trailer that does")
+  # a member that does hold more than 64 MiB is refused at the limit
+  big <- .rmbl_gzip_member(raw(65 * 1024^2))
+  expect_error(jsgzdec(big), "refusing to inflate more than 64 MiB")
+  # a truncated member, and bytes after the member
+  ok <- jsgzenc(list(a = 1:50), raw = TRUE)
+  expect_error(jsgzdec(ok[1:20]), "jsgzdec: `txt` is truncated")
+  expect_error(jsgzdec(c(ok, charToRaw("JUNK"))), "bytes after the end")
 })
 
 test_that("jsgzenc and jsgzdec check raw and take one string", {
@@ -54,4 +62,25 @@ test_that("jsgzenc and jsgzdec check raw and take one string", {
   g <- jsgzenc(list(a = 1))
   expect_error(jsgzdec(c(g, g)), "jsgzdec: `txt` must be a single string")
   expect_identical(jsgzdec(g), list(a = 1L))
+})
+
+test_that("jsgzdec() gives the JSON reader's own refusal for damaged JSON", {
+  # one gzip member whose content is not JSON: the refusal is the reader's,
+  # under jsgzdec's name, not the one for two members joined
+  f <- tempfile()
+  on.exit(unlink(f), add = TRUE)
+  z <- gzfile(f, "wb")
+  writeBin(charToRaw("{bad"), z)
+  close(z)
+  b <- readBin(f, "raw", file.size(f))
+  expect_error(
+    jsgzdec(b, raw = TRUE),
+    "jsgzdec: expected a string key at character 2",
+    fixed = TRUE
+  )
+  expect_error(
+    jsgzdec(jsb64enc(b)),
+    "jsgzdec: expected a string key at character 2",
+    fixed = TRUE
+  )
 })

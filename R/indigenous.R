@@ -40,9 +40,8 @@
 #' @param x A data frame read from a Statistics Canada table (English-language
 #'   full-table CSV), or a key of the data service
 #'   (\code{"statcan_indigenous/tbl_13100924"}, or the eight-digit table id
-#'   alone). A key needs a data service key: sign in once with
-#'   \code{\link{dlogin}} (see \code{\link{dload}}); a data frame you read
-#'   yourself needs none.
+#'   alone), downloaded with \code{\link{dload}} (no sign-in); a data frame
+#'   you read yourself needs no network.
 #' @return The data frame with \code{VALUE} numeric and a factor column
 #'   \code{quality} with levels \code{"ok"}, \code{"E"}, \code{"F"}, \code{"x"},
 #'   \code{".."}, \code{"..."}, of class \code{c("rmbl_statcan", "data.frame")}.
@@ -59,10 +58,11 @@
 #' sctidy(d)
 #'
 #' @examplesIf interactive()
-#' # needs a data service key: sign in once with dlogin()
+#' # downloads the table from data.rmorie.com
 #' t924 <- sctidy("13100924")
 #' @export
 sctidy <- function(x) {
+  .rmbl_valid_text(x, "x")
   if (is.character(x) && length(x) == 1L && !is.na(x)) {
     key <- if (grepl("^[0-9]{8}$", x)) {
       paste0("statcan_indigenous/tbl_", x)
@@ -130,10 +130,10 @@ qltyrcd <- function(x, suppr = c("F", "x", "..", "..."), caution = "E") {
   .qr_check_x(x)
   for (nm in c("suppr", "caution")) {
     v <- get(nm)
-    if (!is.character(v) || anyNA(v)) {
+    if (!is.character(v) || anyNA(v) || any(.rmbl_nontext(v))) {
       stop(
         .rmbl_fn(),
-        sprintf("`%s` must be flags (character)", nm),
+        sprintf("`%s` must be flags (character, valid text)", nm),
         call. = FALSE
       )
     }
@@ -194,20 +194,21 @@ limfrom <- function(
   }
   conflvl <- .rmbl_conf_level(conflvl)
   moelev <- .rmbl_conf_level(moelev, "moelev")
-  s <- if (given[1L]) {
-    .rmbl_num(se, "se")
-  } else if (given[2L]) {
-    est * .rmbl_num(cv, "cv") / 100
-  } else {
-    .rmbl_num(moe, "moe") / stats::qnorm(1 - (1 - moelev) / 2)
-  }
-  if (length(s) != length(est) && length(s) != 1L) {
+  nm <- c("se", "cv", "moe")[given]
+  v <- .rmbl_num(list(se, cv, moe)[[which(given)]], nm)
+  # checked before `est * cv` recycled a shorter `cv` with only R's warning
+  if (length(v) != length(est) && length(v) != 1L) {
     stop(
       .rmbl_fn(),
-      "the standard errors must be one per estimate",
+      sprintf("`%s` must be one per estimate, or one for all", nm),
       call. = FALSE
     )
   }
+  s <- switch(nm,
+    se = v,
+    cv = est * v / 100,
+    moe = v / stats::qnorm(1 - (1 - moelev) / 2)
+  )
   if (any(s < 0, na.rm = TRUE)) {
     stop(
       .rmbl_fn(),
@@ -885,7 +886,7 @@ trcprog <- function(
 #' @param refresh Fetch the manifest again (default \code{FALSE}).
 #' @return A data frame: \code{key}, \code{rows}, \code{description},
 #'   \code{license}, \code{source}.
-#' @details Needs a data service key: sign in once with \code{\link{dlogin}}.
+#' @details Needs the network; no sign-in.
 #' Only openly licensed aggregate tables are mirrored. First Nations Information
 #' Governance Centre data (the First Nations Regional Health Survey and its
 #' companions) are governed by the OCAP(R) principles and are not; ask the
@@ -927,7 +928,8 @@ indtabs <- function(pat = NULL, refresh = FALSE) {
     stringsAsFactors = FALSE
   )
   if (!is.null(pat)) {
-    out <- out[grepl(pat, out$description, ignore.case = TRUE), , drop = FALSE]
+    # the user's own pattern: every letter, accented ones too, in either case
+    out <- out[.rmbl_grepl_ci(pat, out$description), , drop = FALSE]
   }
   rownames(out) <- NULL
   out
@@ -1229,7 +1231,7 @@ format.rmbl_trc_progress <- function(x, ...) {
       "^total|^indigenous identity|^aboriginal identity|^total ",
       "indigenous|^indigenous population"
     ),
-    trimws(tolower(g))
+    trimws(.rmbl_lower(g))
   )
 }
 
@@ -1238,6 +1240,7 @@ format.rmbl_trc_progress <- function(x, ...) {
 #' @return NULL, invisibly.
 #' @noRd
 .qr_check_x <- function(x) {
+  .rmbl_valid_text(x, "x")
   if (!.rmbl_is_atomic(x)) {
     stop(.rmbl_fn(), "`x` must be a vector of flags", call. = FALSE)
   }
@@ -1409,7 +1412,7 @@ format.rmbl_trc_progress <- function(x, ...) {
 #' @noRd
 .rmbl_gap_ref_warn <- function(ref, pooled) {
   if (
-    grepl("^total", trimws(ref), ignore.case = TRUE) ||
+    grepl(.rmbl_ci("^total"), trimws(ref), perl = TRUE, useBytes = TRUE) ||
       .rmbl_pan_indigenous(ref, pooled)
   ) {
     warning(
@@ -1540,7 +1543,7 @@ format.rmbl_trc_progress <- function(x, ...) {
 #' @return NULL, invisibly.
 #' @noRd
 .rmbl_dsr_check <- function(events, pop, std) {
-  if (!length(std) || anyNA(std) || any(std < 0) || sum(std) <= 0) {
+  if (!length(std) || !all(is.finite(std)) || any(std < 0) || sum(std) <= 0) {
     stop(
       "agestd: `std` must be non-negative counts, one per age group, ",
       "not all zero",
@@ -1555,7 +1558,8 @@ format.rmbl_trc_progress <- function(x, ...) {
     )
   }
   if (
-    anyNA(events) || any(events < 0) || any(abs(events - round(events)) > 1e-8)
+    !all(is.finite(events)) || any(events < 0) ||
+      any(abs(events - round(events)) > 1e-8)
   ) {
     stop(
       .rmbl_fn(),
@@ -1563,8 +1567,8 @@ format.rmbl_trc_progress <- function(x, ...) {
       call. = FALSE
     )
   }
-  if (anyNA(pop) || any(pop <= 0)) {
-    stop("agestd: `pop` must be positive", call. = FALSE)
+  if (!all(is.finite(pop)) || any(pop <= 0)) {
+    stop("agestd: `pop` must be positive and finite", call. = FALSE)
   }
   invisible(NULL)
 }

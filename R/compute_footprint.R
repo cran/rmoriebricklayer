@@ -71,6 +71,7 @@
 #' try(co2int("Atlantis"))
 #' @export
 co2int <- function(loc = "WORLD") {
+  .rmbl_valid_text(loc, "loc")
   if (is.numeric(loc)) {
     return(.rmbl_cls(.rmbl_ci_user(loc), "rmbl_co2int"))
   }
@@ -683,13 +684,13 @@ format.rmbl_co2eqv <- function(x, digits = 4L, ...) {
 #' @return The row index, or NA.
 #' @noRd
 .rmbl_ci_match <- function(key, tab) {
-  key <- toupper(trimws(key))
+  key <- .rmbl_upper(trimws(key))
   i <- match(key, tab$location)
   if (is.na(i)) {
     i <- match(key, tab$iso3)
   }
   if (is.na(i)) {
-    i <- match(key, toupper(tab$name))
+    i <- match(key, .rmbl_upper(tab$name))
   }
   i
 }
@@ -843,7 +844,9 @@ format.rmbl_co2eqv <- function(x, digits = 4L, ...) {
     d,
     function(p) {
       nm <- tryCatch(
-        readLines(file.path(p, "name"), n = 1L, warn = FALSE),
+        suppressWarnings(
+          readLines(file.path(p, "name"), n = 1L, warn = FALSE)
+        ),
         error = function(e) ""
       )
       file.exists(file.path(p, "energy_uj")) &&
@@ -1323,7 +1326,7 @@ format.rmbl_co2eqv <- function(x, digits = 4L, ...) {
   if (!is.na(i)) {
     note <- sprintf(
       "no row for zone %s; its country %s used",
-      toupper(loc),
+      .rmbl_upper(loc),
       tab$location[i]
     )
   }
@@ -1340,6 +1343,7 @@ format.rmbl_co2eqv <- function(x, digits = 4L, ...) {
     if (!is.null(v) && !(is.character(v) && length(v) <= 1L)) {
       stop(sprintf("`%s` must be one string (or NULL)", nm), call. = FALSE)
     }
+    .rmbl_valid_text(v, nm)
   }
   invisible(NULL)
 }

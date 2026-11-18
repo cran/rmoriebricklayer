@@ -117,6 +117,12 @@
 blprog <- function(label, total, quiet = NULL, color = "blue", delay = NULL) {
   .rmbl_no_fn(label = label)
   label <- as.character(label)
+  # bytes that are not text are shown as <ff>: drawing them warned "input
+  # string 1 is invalid" in base R's words
+  bad <- .rmbl_nontext(label)
+  if (any(bad)) {
+    label[bad] <- .rmbl_esc8(label[bad])
+  }
   delay <- .bl_prog_args(label, total, quiet, color, delay)
   creator <- parent.frame()
   live <- .bl_prog_live()
@@ -1133,7 +1139,7 @@ print.rmbl_progress <- function(x, ...) {
 #' @param x A count to format with thousands separators.
 #' @return One string.
 #' @noRd
-.bl_n <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+.bl_n <- function(x) .rmbl_ntxt(x)
 
 #' The frame of a bar with no count: the spinner, the label, the time so far
 #' and the stage.

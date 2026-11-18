@@ -29,8 +29,9 @@ licence that were actually pinned.
 \details{
 The fields used, with their fallbacks: \itemize{ \item author:
 \code{dataset$publisher}, else \code{"Unknown publisher"}; \item title:
-\code{resource$name}, else \code{dataset$package_slug}, else \code{"Untitled
-dataset"}; \item year: the first four characters of \code{captured_at_utc},
+\code{resource$name}, else \code{dataset$package_slug}, else
+\code{"Untitled dataset"}; \item year: the first four characters of
+\code{captured_at_utc},
 else the current year; retrieval date: its first ten characters (omitted if
 absent); \item link: \code{https://doi.org/<dataset$doi>} if a DOI is
 recorded, else \code{resource$direct_url}, else
@@ -48,7 +49,7 @@ prov <- list(
   captured_at_utc = "2026-06-23T04:41:40Z",
   dataset = list(publisher = "Ontario Ministry of the Solicitor General",
                  licence_short = "OGL-Ontario",
-                 package_slug = "data-on-inmates-in-ontario"),
+                 package_slug = "jahn-settlement-data-inmates-ontario"),
   resource = list(name = "Restrictive Confinement - Detailed Dataset",
                   direct_url = "https://data.ontario.ca/example.csv")
 )
@@ -68,6 +69,6 @@ cat(citecps(prov)$text)
 citecps(NULL)
 
 # anything else that is not a list is an error
-try(citecps("data-on-inmates-in-ontario"))
+try(citecps("jahn-settlement-data-inmates-ontario"))
 \dontshow{\}) # examplesIf}
 }

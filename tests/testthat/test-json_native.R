@@ -132,3 +132,45 @@ test_that("jsb64dec refuses NA and padding inside the text", {
   long <- jsb64enc(strrep("x", 200))
   expect_identical(rawToChar(jsb64dec(long)), strrep("x", 200))
 })
+
+test_that("jsunser() rebuilds a time with no zone, refuses a missing one", {
+  # no tzone attribute: the session's zone, as R itself reads it
+  x <- .POSIXct(0)
+  expect_null(attr(x, "tzone"))
+  y <- jsunser(jsser(x))
+  expect_s3_class(y, "POSIXct")
+  expect_identical(unclass(y), unclass(x))
+  # a tzone that is a missing string is not a zone
+  s <- sub("\"UTC\"", "null", jsser(.POSIXct(0, tz = "UTC")), fixed = TRUE)
+  expect_error(
+    jsunser(s),
+    "a time in a time zone that does not exist",
+    fixed = TRUE
+  )
+})
+
+test_that("jsb64dec() refuses a nul byte as outside the alphabet", {
+  expect_error(
+    jsb64dec(as.raw(c(0x61, 0, 0x62))),
+    "jsb64dec: `input` holds characters outside the base64 alphabet"
+  )
+})
+
+test_that("fromjs() refuses a socket as no regular file, not a folder", {
+  # base R's dir.exists() is TRUE for a Unix socket (its mode shares the
+  # directory bit); stat() says it is neither a file nor a folder. A folder
+  # stands in for the socket, stat() made to say "other" as it does for one.
+  d <- withr::local_tempdir()
+  local_mocked_bindings(
+    .rmbl_path_kind = function(path) "other",
+    .package = "rmoriebricklayer"
+  )
+  e <- tryCatch(fromjs(d), error = conditionMessage)
+  expect_match(
+    e,
+    "`txt` is not a regular file (a device, a pipe or a socket)",
+    fixed = TRUE
+  )
+  # the path is left out: a macOS temporary folder is under /var/folders
+  expect_false(grepl("folder|directory", gsub("[/\\\\][^ ]*", "", e)))
+})

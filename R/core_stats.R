@@ -334,7 +334,8 @@ cqnt <- function(x, probs = c(0, 0.25, 0.5, 0.75, 1)) {
     stop("`probs` must lie in [0, 1]", call. = FALSE)
   }
   out <- .Call(C_rmbl_quantile, as.numeric(x), probs)
-  names(out) <- paste0(format(100 * probs, trim = TRUE), "%")
+  # the names stats::quantile() gives ("0.1%", "50%"), from quantile() itself
+  names(out) <- names(stats::quantile(0, probs))
   out
 }
 
@@ -449,14 +450,17 @@ cwinsmean <- function(x, trim = 0.1) {
 #'
 #' Refusals: `x` and `w` of different lengths
 #' (`"must have the same length"`), any negative weight
-#' (`"must be non-negative"`), and a character, factor or list argument
-#' (`"must be numeric"`). All-zero weights, or an `NA` in either vector,
-#' give `NaN` for both entries.
+#' (`"must be non-negative"`), an infinite weight or all-zero weights
+#' (`"must be non-negative and finite, not all zero"`), and a character,
+#' factor or list argument (`"must be numeric"`). An `NA` in either
+#' vector gives `NaN` for both entries, and so does a variance with a
+#' single positive weight. The result does not depend on the scale of the
+#' weights: equal weights of any size give [stats::var()].
 #'
 #' @param x Numeric vector of observations.
 #' @param w Numeric vector of non-negative weights, the same length as
-#'   `x`. Only their relative sizes matter for the mean; the variance's
-#'   correction uses them as given.
+#'   `x`. Only their relative sizes matter, for the mean and for the
+#'   variance.
 #' @return A named length-2 numeric vector: `mean` (units of `x`) and
 #'   `variance` (squared units of `x`).
 #' @seealso [cmom()] for the unweighted moments,
@@ -858,6 +862,8 @@ cipw <- function(treat, ps, trimlo = 0.01, trimhi = 0.99) {
 #' (`"shape must be a single positive number"`). A negative `x` gives 0,
 #' a missing `x` gives `NA`, and `Inf` gives 1, as in
 #' [stats::pgamma()].
+#' `shape = Inf` gives the limit, 0 for every finite `x` and 1 for `Inf`, as
+#' `pgamma()` does.
 #'
 #' @param shape Shape parameter \eqn{a}, a single positive number.
 #' @param x Numeric vector of quantiles at which the gamma CDF is evaluated.
@@ -884,6 +890,11 @@ cgamcdf <- function(shape, x) {
   shape <- .rmbl_num(shape, "shape")
   if (length(shape) != 1L || is.na(shape) || shape <= 0) {
     stop("`shape` must be a single positive number", call. = FALSE)
+  }
+  if (is.infinite(shape)) {
+    # the limit, as pgamma(x, Inf): 0 below Inf, 1 at Inf (NaN in the kernel)
+    x <- .rmbl_num(x, "x")
+    return(ifelse(is.na(x), x, as.numeric(x == Inf)))
   }
   .Call(C_rmbl_gamma_cdf, shape, .rmbl_num(x, "x"))
 }

@@ -97,7 +97,7 @@ blfetch <- function(url, dest, wb = "", tmout = 120L) {
   if (code == 1L) {
     return(invisible("wayback"))
   }
-  .bl_fetch_fail(code, url, dest)
+  .bl_fetch_fail(code, url, dest, attr(code, "why"))
 }
 
 #' Resolve a Wayback Machine snapshot URL (C++/libcurl)
@@ -162,7 +162,7 @@ wbsnpnat <- function(url, tmout = 30L) {
 #' @noRd
 .bl_fetch_check_url <- function(url) {
   # what can be told before any download: the URL, the destination, the timeout
-  if (!grepl("^https?://", url, ignore.case = TRUE)) {
+  if (!grepl(.rmbl_ci("^https?://"), url, perl = TRUE, useBytes = TRUE)) {
     stop(sprintf("blfetch: '%s' is not an http(s) URL", url), call. = FALSE)
   }
   # the same gate every other entry point has (the compiled layer checks
@@ -206,9 +206,22 @@ wbsnpnat <- function(url, tmout = 30L) {
   ) {
     stop("`dest` must be one non-empty file path", call. = FALSE)
   }
+  .rmbl_valid_text(url, "url")
+  .rmbl_valid_text(dest, "dest")
   .bl_fetch_check_url(url)
   .bl_fetch_check_dest(dest)
-  tmout <- suppressWarnings(as.integer(tmout))
+  .bl_fetch_tmout(tmout)
+}
+
+#' blfetch()'s timeout, checked: a function or a list stopped as.integer()
+#' in base R's words.
+#' @param tmout The timeout given, in seconds.
+#' @return It as an integer.
+#' @noRd
+.bl_fetch_tmout <- function(tmout) {
+  tmout <- if (is.numeric(tmout) || is.logical(tmout)) {
+    suppressWarnings(as.integer(tmout))
+  }
   if (length(tmout) != 1L || is.na(tmout) || tmout < 1L) {
     stop("`tmout` must be a positive number of seconds", call. = FALSE)
   }
@@ -219,8 +232,9 @@ wbsnpnat <- function(url, tmout = 30L) {
 #' Wayback fallback was tried.
 #' @param code The compiled layer's code.
 #' @param url,dest As for blfetch().
+#' @param why The transport's reason the live address was not reached, or NULL.
 #' @noRd
-.bl_fetch_fail <- function(code, url, dest) {
+.bl_fetch_fail <- function(code, url, dest, why = NULL) {
   # the destination could not be written: a local failure, and no Wayback lookup
   # was made
   if (code == -2L) {
@@ -238,7 +252,13 @@ wbsnpnat <- function(url, tmout = 30L) {
     sprintf(
       "blfetch: %s; %s",
       if (live == 1L) {
-        sprintf("could not reach %s", url)
+        # the transport's own reason (a TLS error, a refused address)
+        paste0(
+          sprintf("could not reach %s", url),
+          if (length(why) == 1L && nzchar(why)) {
+            sprintf(" (%s)", .rmbl_ctl_escape(why))
+          }
+        )
       } else {
         sprintf("%s answered HTTP %d", url, live)
       },

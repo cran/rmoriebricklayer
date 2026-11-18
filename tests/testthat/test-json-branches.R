@@ -334,7 +334,7 @@ test_that("serializer covers every storage mode digest of an R object needs", {
   )
   expect_error(
     jsunser('{"type":"weird","attributes":{},"value":[]}'),
-    "encode.mode"
+    "an unknown type: weird"
   )
 })
 
@@ -362,4 +362,25 @@ test_that("unbox edge cases", {
     )),
     '{"d":{"a":1,"b":"x"}}'
   )
+})
+
+test_that("text that is also the name of a device is parsed, not opened", {
+  # on Windows `nul` and `con` exist as devices in every folder; here the
+  # probe is told that an existing path is no regular file
+  d <- withr::local_tempdir()
+  withr::local_dir(d)
+  writeLines("[1, 2]", "tok")
+  expect_identical(fromjs("tok"), 1:2)
+  local_mocked_bindings(.rmbl_path_kind = function(path) "other")
+  # a bare word is text, a path to the same thing is refused as a device
+  expect_error(fromjs("tok", simplifyVector = FALSE),
+               "at character|end of input")
+  expect_error(fromjs(file.path(d, "tok")), "is not a regular file")
+  for (b in c("nul", "NUL", "con", "aux")) {
+    expect_error(
+      fromjs(b, simplifyVector = FALSE),
+      "at character|end of input",
+      label = b
+    )
+  }
 })

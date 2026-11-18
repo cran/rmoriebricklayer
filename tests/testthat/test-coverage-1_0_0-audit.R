@@ -82,7 +82,7 @@ test_that("audit coverage: refusals in words across the input guards", {
     "`health` must be a data frame of indicators"
   )
   seg <- data.frame(EndFiscalYear = 2019:2023, n = c(402, 377, 190, 268, 331))
-  y <- yoy(seg, value = n, prd = EndFiscalYear)
+  y <- yoychg(seg, value = n, prd = EndFiscalYear)
   expect_error(
     yoylbl(y, list()),
     "`labels` must be a function of the periods or a vector"
@@ -508,7 +508,6 @@ test_that(
   ),
   {
     expect_error(blcli("version", out = 1), "`out` must be a function")
-    expect_error(dlogin(token = function(x) x), "`token` must be one string")
     cp <- structure(
       data.frame(),
       class = c("rmbl_census_profile", "data.frame")

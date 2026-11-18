@@ -1,26 +1,16 @@
 # Curated datasets at data.rmorie.com (the address comes from the signed
-# services document), opened by the MORIE key this package stores with dlogin()
-# (GitHub or an emailed code), or one asked for at www.rmorie.com/access/. The
-# same tables rmorie and morie pull; a manifest lists every table with its rows,
-# columns, SHA-256 and the BigQuery public dataset it was built from.
-
-#' The MORIE key a call to dload() was given, held only while that call runs.
-#'
-#' An environment, not a variable of the process environment: a child process
-#' never inherits it.
-#' @noRd
-.bl_data_token <- new.env(parent = emptyenv())
+# services document), with no sign-in and no key. The same tables rmorie and
+# morie pull; a manifest lists every table with its rows, columns, SHA-256
+# and the BigQuery public dataset it was built from.
 
 #' Curated datasets at data.rmorie.com
 #'
 #' The MORIE project keeps databases materialised from Google BigQuery
 #' public datasets (Chicago crime, EPA air quality, US census, FEC, FDA,
 #' NOAA, NHTSA, Hacker News, Ethereum, World Bank, ...) and serves their
-#' tables from the edge, under the data access terms at
-#' \code{www.rmorie.com/data-license/}. They open with the key
-#' \code{\link{dlogin}} stores, the same key rmorie and morie
-#' use; keys are personal: sign in with GitHub or an emailed code, or ask at
-#' \code{www.rmorie.com/access/}. The service address comes from
+#' tables from the edge. They need no sign-in and no key, and there are no
+#' terms of the service's own: each table keeps the licence of its source,
+#' which the manifest names. The service address comes from
 #' \code{\link{svcs}}.
 #' \code{dmnf()} returns the gateway's manifest
 #' (every table with rows, columns, size, SHA-256 and its BigQuery source),
@@ -30,7 +20,8 @@
 #' \code{options(rmoriebricklayer.dcache = )}) so later calls are
 #' local.
 #' From the shell: \code{rmoriebricklayer data list} and
-#' \code{rmoriebricklayer data pull db/table [--out FILE.csv]}.
+#' \code{rmoriebricklayer data pull db/table [--out FILE.csv]
+#' [--names R|asis]}.
 #'
 #' @details
 #' The manifest is cached as \code{manifest.json} in the cache folder and
@@ -46,43 +37,109 @@
 #' rebuilt upstream has a new digest). When the manifest cannot be fetched,
 #' the last copy on disk, however old, supplies the digest; with none, a fresh
 #' download is not kept and a cached file is kept but not used. The CSV is
-#' read in compiled code with the same result as
-#' \code{read.csv(gzfile(f), stringsAsFactors = FALSE)}, two malformed shapes
-#' apart, which are refused with the record they are in where \code{read.csv()}
-#' changes the data without a word: a record with more fields than the header
-#' (\code{read.csv()} turns the first column into row names) and a quote mark
-#' inside an unquoted field (\code{read.csv()} takes the rest of the file as one
-#' quoted run). Tables that inflate
-#' past 512 MiB are read by \code{read.csv()} itself, a piece at a time. A
-#' table whose SHA-256 matches the manifest is the file the service holds, so
+#' read in compiled code. Its records are read as
+#' \code{read.csv(gzfile(f), stringsAsFactors = FALSE)} reads them, two
+#' malformed shapes apart, which are refused with the record they are in
+#' where \code{read.csv()} changes the data without a word: a record with
+#' more fields than the header (\code{read.csv()} turns the first column into
+#' row names) and a quote mark inside an unquoted field (\code{read.csv()}
+#' takes the rest of the file as one quoted run). Tables that inflate past
+#' 512 MiB are read by \code{read.csv()} as text, a piece at a time, and
+#' typed the same way.
+#'
+#' The values are not always those \code{read.csv()} gives. A column is a
+#' number only when every value in it is a number R gives back as it is
+#' written: a plain integer or decimal (an exponent allowed, as in
+#' \code{1e5}; trailing zeros after the point, as in \code{6.0}, too) with
+#' no leading zero other than \code{0} itself or \code{0.} before the
+#' decimals, no leading \code{+} and at most 17 significant digits; or
+#' \code{Inf}, \code{-Inf} or \code{NaN}. A column holding a value such as
+#' \code{046}, \code{+1}, \code{0x1A}, \code{1+2i} or a number of 20
+#' digits is text, every value as written: \code{read.csv()} made the codes
+#' \code{046} and \code{007} the numbers 46 and 7. Blanks around a number do
+#' not stop it being one. \code{TRUE}, \code{FALSE}, \code{T} and \code{F}
+#' make a logical column. A text column keeps every value as written: the
+#' text \code{NA} there is the text \code{"NA"} (\code{read.csv()} made it
+#' missing) and an empty field is \code{""}. In a number or logical column
+#' an empty field and \code{NA} are both missing, as before. A column with no
+#' value at all is logical \code{NA}; one whose only values are the text
+#' \code{NA} is text. Numbers are read correctly rounded, the same double on
+#' every machine: R's own reading of decimal text can differ in the last bit
+#' between processors (\code{1.239042694} did between x86-64 and ARM64).
+#'
+#' The column names are by default those \code{read.csv()} gives:
+#' \code{make.names(unique = TRUE)} of the header, each name trimmed of the
+#' blanks around it unless it is quoted, so \code{Offence Description}
+#' becomes \code{Offence.Description}, \code{\% share} \code{X..share} and
+#' a second \code{x} \code{x.1}. \code{names = "asis"} returns the names as
+#' the header writes them (the same trimming, a byte-order mark dropped,
+#' duplicates and empty names kept), which are the names of the published
+#' table and its manifest. The default may change in a later major version.
+#'
+#' A table whose SHA-256 matches the manifest is the file the service holds, so
 #' it is read whatever its size; one the manifest lists without a digest may
 #' decompress to at most the option \code{rmoriebricklayer.maxcsvbytes}
 #' (1 GiB by default). A large table needs memory for all of it: a 1 GB
 #' decompressed CSV takes a few GB of RAM as a data frame.
 #'
-#' The key is sent only to the address of the signed services document. With
-#' \code{MORIE_DATA_URL} set to another address the key is not sent and the
-#' download fails with a message saying so. Some tables (ICPSR studies, the NCVS
-#' 38604 extract, the A2AJ case law) open only after their terms are accepted on
-#' the terms page, \code{data.rmorie.com/terms}. Downloads draw a progress bar
-#' when \code{options(morie.progress)} allows it.
+#' A table the manifest lists without any digest is used with a warning, once
+#' per session and table.
 #'
-#' Errors: \code{refresh} not \code{TRUE} or \code{FALSE}; no key stored (the
-#' message says how to sign in); the service unavailable, or the key rejected;
-#' a \code{key} that is not of the form \code{db/table}, or not listed in the
-#' manifest; a \code{token} that is not one non-empty string; a digest
-#' mismatch; a restricted table whose terms were not accepted.
+#' \code{MORIE_DATA_URL} sets another address for the service (https and
+#' public). No key is sent to either. Tables whose source terms do not allow
+#' redistribution (ICPSR studies, among them the NCVS 38604 extract, and any
+#' table the manifest marks restricted, with \code{access} other than
+#' \code{"open"} or \code{"public"} or \code{restricted: true}) are not served:
+#' \code{dmnf()} and \code{dtabs()} leave them out (the listing counts them in
+#' one line), and \code{dload()} refuses them before any request, saying
+#' where to get them. Downloads draw a progress bar when
+#' \code{options(morie.progress)} allows it.
+#'
+#' With \code{cols}, \code{n} or \code{keep} the table is read a piece of
+#' about 8 MB of text at a time, twice: the first pass checks every record as
+#' a whole read checks it and settles each column's type over the whole
+#' table, the second reads the pieces in those types. The names, types and
+#' refusals are those of \code{dload(key)}, and \code{keep} sees the values
+#' it holds: \code{dload(key, keep = f)} gives the rows of \code{dload(key)}
+#' that \code{f} keeps, numbered from 1. Even \code{n = 1} reads the file
+#' once whole, for the types.
+#'
+#' Errors: \code{refresh} not \code{TRUE} or \code{FALSE}; the service
+#' unavailable; a \code{key} that is not of the form \code{db/table}, not
+#' listed in the manifest, or a table that is not served; a digest mismatch.
 #'
 #' @param refresh Logical scalar, default \code{FALSE}: fetch again even when a
 #'   day-old copy (of the manifest, or for \code{dload()} of the
 #'   table) is cached.
 #' @param key Character scalar, a \code{db/table} key from the manifest (the
 #'   \code{key} column of \code{dtabs()}).
-#' @param token For \code{dload()}: the MORIE key to use for this call,
-#'   in place of the one \code{\link{dlogin}} stored; \code{NULL} (the
-#'   default) uses the stored key. It is never printed or written to disk.
+#' @param cols Character vector, default \code{NULL} (every column): the
+#'   columns to read, by the names in the manifest or as \code{dload()}
+#'   returns them. The others are skipped as the file is read. The columns
+#'   come back in the order of the file, whatever the order of \code{cols},
+#'   and a column named twice comes back once.
+#' @param n A whole number, default \code{Inf}: at most this many rows are
+#'   kept, and reading stops there.
+#' @param keep \code{NULL}, or a function of one data frame that returns
+#'   \code{TRUE} for the rows to keep. The table is read a piece at a time
+#'   and \code{keep} is called on each piece, so a table too large for
+#'   memory can be reduced to the part that is wanted (one province, one
+#'   year) without ever being held whole. It sees every column, whatever
+#'   \code{cols} says is returned.
+#' @param file Logical scalar, default \code{FALSE}. \code{TRUE} downloads
+#'   and verifies the table and returns the path of its gzip-compressed CSV
+#'   without reading it, for tools that query a file in place; it cannot be
+#'   combined with \code{cols}, \code{n} or \code{keep}.
+#' @param names \code{"R"} (the default) for the column names
+#'   \code{read.csv()} gives (syntactic, from \code{make.names()}),
+#'   \code{"asis"} for the names as the table's header writes them (see
+#'   Details). \code{cols} takes either form, and \code{keep} sees the
+#'   names the call returns.
+#' @param token Ignored, with a warning: the tables need no key, and none is
+#'   sent. Kept so that calls written for earlier versions still run.
 #' @return \code{dmnf()}: the manifest as a list (element
-#'   \code{datasets}, one list per table with at least \code{key}, and as the
+#'   \code{datasets}, one list per table served with at least \code{key},
+#'   attribute \code{unserved} the number of tables left out; and as the
 #'   service provides them \code{rows}, \code{columns}, sizes, the SHA-256 of
 #'   the compressed file and the BigQuery \code{source});
 #'   \code{dtabs()}: a data frame with \code{key},
@@ -91,13 +148,10 @@
 #'   \code{dtabs}, which prints one left-aligned line per
 #'   table, cut to the console width);
 #'   \code{dload()}: the table as a data frame.
-#' @seealso \code{\link{dlogin}}, \code{\link{svcs}}.
+#' @seealso \code{\link{svcs}}.
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' # Offline, against a cache folder holding a manifest and one table made
-#' # here (no key is stored and nothing is fetched).
-#' oldenv <- Sys.getenv(c("XDG_CONFIG_HOME", "MORIE_HOSTED_KEY"), unset = NA)
-#' Sys.setenv(XDG_CONFIG_HOME = tempfile())
-#' Sys.unsetenv("MORIE_HOSTED_KEY")
+#' # here (nothing is fetched).
 #' cache <- file.path(tempdir(), "data-hub-example")
 #' dir.create(cache)
 #' old <- options(rmoriebricklayer.dcache = cache)
@@ -134,71 +188,32 @@
 #'
 #' options(old)
 #' unlink(cache, recursive = TRUE)
-#' for (v in names(oldenv)) {
-#'   if (is.na(oldenv[[v]])) {
-#'     Sys.unsetenv(v)
-#'   } else {
-#'     do.call(Sys.setenv, as.list(oldenv[v]))
-#'   }
-#' }
 #'
 #' @examplesIf interactive()
-#' # the real service: needs a key and the network
-#' dlogin(token = "sk-...")  # a key issued at www.rmorie.com/access/
+#' # the real service: needs the network, no sign-in
 #' head(dtabs())
 #' df <- dload("chicago_crime/incidents")
 #' @export
 dmnf <- function(refresh = FALSE) {
-  .bl_check_flag(refresh, "refresh")
-  p <- file.path(.bl_data_cache_dir(), "manifest.json")
-  age <- if (file.exists(p)) {
-    as.numeric(difftime(Sys.time(), file.mtime(p), units = "secs"))
-  } else {
-    Inf
-  }
-  fresh <- age < 86400
-  if (refresh || !fresh) {
-    # fetched beside the cached copy and moved over it only once it is a
-    # manifest: a refresh that fails leaves the last good one in place, and the
-    # digest check falls back on it. The temporary name is this process's own:
-    # one shared `manifest.json.part` let parallel refreshes delete each other's
-    # file (11 of 12 workers failed; review of 02a38be, C8).
-    dir.create(dirname(p), recursive = TRUE, showWarnings = FALSE)
-    tmp <- tempfile(
-      pattern = "manifest-",
-      tmpdir = dirname(p),
-      fileext = ".part"
-    )
-    on.exit(unlink(tmp), add = TRUE)
-    # the manifest is a list of tables (well under 1 MiB): 32 MiB is far past
-    # any real one, and a 300 MiB reply (a gzip bomb) was read whole, then
-    # failed to allocate (CRAN stress test of 0.5.14)
-    .bl_data_get("/manifest.json", tmp, timeout = 60, max_bytes = 32 * 2^20)
-    m <- .rmbl_json_text(
-      .bl_read_text_capped(tmp, 32 * 2^20),
-      simplifyVector = FALSE
-    )
-    .bl_manifest_check(m, p)
-    if (!isTRUE(file.rename(tmp, p))) {
-      stop(sprintf("could not store the manifest in %s", p), call. = FALSE)
-    }
-    return(m)
-  }
-  .rmbl_json_text(.bl_read_text_capped(p, 32 * 2^20), simplifyVector = FALSE)
+  .bl_data_served(.bl_dmnf_raw(refresh))
 }
 
 #' @rdname dmnf
 #' @export
 dtabs <- function(refresh = FALSE) {
-  ds <- dmnf(refresh = refresh)$datasets
-  if (!length(ds)) {
-    return(.bl_data_tables_df(character(), character(), integer(), character()))
+  m <- dmnf(refresh = refresh)
+  ds <- m$datasets
+  if (length(ds)) {
+    keys <- vapply(ds, function(d) d[["key"]], "")
+    names <- vapply(ds, .bl_data_name, "")
+    rows <- vapply(ds, function(d) as.integer(d[["rows"]] %||% NA), 1L)
+    sources <- vapply(ds, function(d) (d[["source"]] %||% "")[[1L]], "")
+    out <- .bl_data_tables_df(keys, names, rows, sources)
+  } else {
+    out <- .bl_data_tables_df(character(), character(), integer(), character())
   }
-  keys <- vapply(ds, function(d) d$key, "")
-  names <- vapply(ds, .bl_data_name, "")
-  rows <- vapply(ds, function(d) as.integer(d$rows %||% NA), 1L)
-  sources <- vapply(ds, function(d) (d$source %||% "")[[1L]], "")
-  .bl_data_tables_df(keys, names, rows, sources)
+  attr(out, "unserved") <- attr(m, "unserved")
+  out
 }
 
 #' @export
@@ -226,12 +241,30 @@ format.bricklayer_data_tables <- function(x, ...) {
 
 #' @rdname dmnf
 #' @export
-dload <- function(key, refresh = FALSE, token = NULL) {
+dload <- function(
+  key,
+  refresh = FALSE,
+  token = NULL,
+  cols = NULL,
+  n = Inf,
+  keep = NULL,
+  file = FALSE,
+  names = c("R", "asis")
+) {
   .bl_data_check_keyarg(key)
   .bl_check_flag(refresh, "refresh")
+  .bl_check_flag(file, "file")
+  names <- .rmbl_arg(names)
+  part <- .bl_csv_part_args(cols, n, keep, file)
+  # a table that is not served is refused before any request
+  if (.bl_data_restricted(key)) {
+    .bl_data_unserved_stop(key)
+  }
   if (!is.null(token)) {
-    .bl_data_token$key <- trimws(.rmbl_string1(token, "token"))
-    on.exit(assign("key", NULL, envir = .bl_data_token), add = TRUE)
+    warning(
+      "dload(): `token` is ignored: the curated tables need no key",
+      call. = FALSE
+    )
   }
   .bl_data_known(key)
   dest <- file.path(
@@ -243,6 +276,13 @@ dload <- function(key, refresh = FALSE, token = NULL) {
     .bl_data_get(.bl_data_path(key), dest)
   }
   how <- .bl_data_check_sha(key, dest, cached = cached)
+  if (file) {
+    return(dest)
+  }
+  if (part) {
+    return(.bl_csv_part(dest, cols, n, keep, names = names))
+  }
+  .bl_data_big_note(key)
   # a file whose digest matches the manifest is the service's own, not a
   # decompression bomb, so the size cap for untrusted CSVs does not apply:
   # tables of 95 MB gzip and more inflate past 1 GiB and were refused
@@ -252,8 +292,649 @@ dload <- function(key, refresh = FALSE, token = NULL) {
       Inf
     } else {
       .rmbl_max_csv_bytes()
+    },
+    names = names
+  )
+}
+
+#' The manifest as the service sends it, the tables that are not served
+#' included (dmnf() leaves them out).
+#'
+#' A cached copy that cannot be read as a manifest (cut short or damaged on
+#' disk) is fetched again at once, as a stale one is: it stopped dmnf() with
+#' the parser's message, and dload() then threw away the table it had just
+#' downloaded for want of a digest (audit of 716154bd, N12). A cached copy
+#' that lists no tables is damaged too: it was kept for a day, and every table
+#' was "not at data.rmorie.com" (audit of 21478080, P6).
+#' @param refresh Whether to fetch it again.
+#' @return The manifest, a list.
+#' @noRd
+.bl_dmnf_raw <- function(refresh = FALSE) {
+  .bl_check_flag(refresh, "refresh")
+  p <- file.path(.bl_data_cache_dir(), "manifest.json")
+  age <- if (file.exists(p)) {
+    as.numeric(difftime(Sys.time(), file.mtime(p), units = "secs"))
+  } else {
+    Inf
+  }
+  if (!refresh && age < 86400) {
+    m <- .bl_manifest_read(p)
+    if (!is.null(m) && length(m$datasets)) {
+      return(m)
+    }
+    return(.bl_dmnf_fetch(
+      p,
+      damaged = if (is.null(m)) "is damaged" else "lists no tables"
+    ))
+  }
+  .bl_dmnf_fetch(p)
+}
+
+#' The cached manifest, or NULL when it cannot be read as one.
+#' @param p Its path.
+#' @return The manifest, or NULL.
+#' @noRd
+.bl_manifest_read <- function(p) {
+  m <- tryCatch(
+    .rmbl_json_text(.bl_read_text_capped(p, 32 * 2^20), simplifyVector = FALSE),
+    error = function(e) .bl_unless_interrupted(e)
+  )
+  ok <- !is.null(m) &&
+    is.null(tryCatch(.bl_manifest_check(m, p), error = function(e) e))
+  if (ok) m else NULL
+}
+
+#' Fetches the manifest and stores it in place of the cached copy.
+#' @param p The cached copy's path.
+#' @param damaged FALSE, or what is wrong with the cached copy ("is
+#'   damaged", "lists no tables"), said when no fresh one could be had.
+#' @return The manifest, a list.
+#' @noRd
+.bl_dmnf_fetch <- function(p, damaged = FALSE) {
+  # fetched beside the cached copy and moved over it only once it is a
+  # manifest: a refresh that fails leaves the last good one in place, and the
+  # digest check falls back on it. The temporary name is this process's own:
+  # one shared `manifest.json.part` let parallel refreshes delete each other's
+  # file (11 of 12 workers failed; review of 02a38be, C8).
+  dir.create(dirname(p), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = "manifest-", tmpdir = dirname(p), fileext = ".part")
+  on.exit(unlink(tmp), add = TRUE)
+  m <- tryCatch(
+    {
+      # the manifest is a list of tables (well under 1 MiB): 32 MiB is far
+      # past any real one, and a 300 MiB reply (a gzip bomb) was read whole,
+      # then failed to allocate (CRAN stress test of 0.5.14)
+      .bl_data_get("/manifest.json", tmp, timeout = 60, max_bytes = 32 * 2^20)
+      m <- .rmbl_json_text(
+        .bl_read_text_capped(tmp, 32 * 2^20),
+        simplifyVector = FALSE
+      )
+      .bl_manifest_check(m, p)
+      m
+    },
+    error = function(e) {
+      if (isFALSE(damaged)) stop(e)
+      stop(
+        sprintf(
+          paste(
+            "the cached manifest %s %s, and a fresh one could not",
+            "be had: %s"
+          ),
+          p,
+          damaged,
+          conditionMessage(e)
+        ),
+        call. = FALSE
+      )
     }
   )
+  if (!isTRUE(suppressWarnings(file.rename(tmp, p)))) {
+    .bl_data_wfail(p, "could not store the manifest")
+  }
+  m
+}
+
+#' Checks dload()'s `cols`, `n` and `keep`, and says whether any asks for
+#' part of the table.
+#' @param cols,n,keep,file As for dload().
+#' @return TRUE when part of the table is asked for.
+#' @noRd
+.bl_csv_part_args <- function(cols, n, keep, file = FALSE) {
+  if (
+    !is.null(cols) &&
+      (!is.character(cols) || !length(cols) || anyNA(cols) ||
+        !all(nzchar(cols)))
+  ) {
+    stop("`cols` must be column names (or NULL for all)", call. = FALSE)
+  }
+  if (
+    !is.numeric(n) || length(n) != 1L || is.na(n) || n < 1 ||
+      (is.finite(n) && n != floor(n))
+  ) {
+    stop("`n` must be one whole number of rows, at least 1", call. = FALSE)
+  }
+  if (!is.null(keep) && !is.function(keep)) {
+    stop("`keep` must be a function of a data frame (or NULL)", call. = FALSE)
+  }
+  part <- !is.null(cols) || is.finite(n) || !is.null(keep)
+  # the path is all `file = TRUE` gives: `cols`, `n` and `keep` were ignored
+  if (isTRUE(file) && part) {
+    stop(
+      "dload(): `file = TRUE` returns the file's path without reading it, ",
+      "so `cols`, `n` and `keep` cannot go with it",
+      call. = FALSE
+    )
+  }
+  part
+}
+
+#' Says, before a table too large for most computers is read whole, how to
+#' read part of it. A data frame takes at least 8 bytes a cell.
+#' @param key The table's key.
+#' @return NULL, invisibly.
+#' @noRd
+.bl_data_big_note <- function(key) {
+  d <- tryCatch(
+    Filter(function(e) identical(e$key, key), dmnf()$datasets),
+    error = function(e) list()
+  )
+  if (!length(d)) {
+    return(invisible(NULL))
+  }
+  rows <- suppressWarnings(as.numeric(d[[1L]]$rows %||% NA)[1L])
+  nc <- length(d[[1L]]$columns)
+  gb <- rows * nc * 8 / 2^30
+  if (is.finite(gb) && gb > 2) {
+    message(sprintf(
+      paste0(
+        "%s has %s rows and %d columns: about %.0f GB in memory. To read ",
+        "part of it, pass `cols`, `n` or `keep`; `file = TRUE` gives the ",
+        "file's path."
+      ),
+      key,
+      .rmbl_ntxt(rows),
+      nc,
+      gb
+    ))
+  }
+  invisible(NULL)
+}
+
+#' The decompressed bytes the part reader takes at a time (internal option
+#' `rmoriebricklayer.dpiece`, 8 MiB by default; the tests make it small).
+#' @return A number of bytes.
+#' @noRd
+.bl_csv_piece_bytes <- function() {
+  .rmbl_getopt_ok(
+    "dpiece",
+    2^23,
+    function(v) is.numeric(v) && length(v) == 1L && is.finite(v) && v >= 1,
+    "a number of bytes, at least 1"
+  )
+}
+
+#' Reads part of a gzip-compressed CSV, a piece at a time: some columns, the
+#' rows a function keeps, at most `n` of them, with the names, types and
+#' record rules of a whole read (.bl_read_csv_gz()).
+#'
+#' Two passes over the file. The first checks every record as the whole
+#' reader checks it and settles each column's type over the whole table; the
+#' second reads each piece in those types, so `keep` sees what a whole read
+#' gives. Each piece went through read.csv(fill = TRUE) before, with types
+#' guessed piece by piece: a record with too many fields became an extra row,
+#' a quote inside an unquoted field dropped one, and `code == "007"` missed
+#' the rows of a piece that read "007" as the number 7 (audit of 716154bd, N1
+#' and N2). Memory holds one piece and what has been kept.
+#' @param path The CSV file, gzipped or plain.
+#' @param cols,n,keep As for dload().
+#' @param piece Decompressed bytes read at a time.
+#' @param names "R" or "asis", as for dload().
+#' @return A data frame.
+#' @noRd
+.bl_csv_part <- function(
+  path,
+  cols,
+  n,
+  keep,
+  piece = .bl_csv_piece_bytes(),
+  names = "R"
+) {
+  path <- .rmbl_file1(path, "path")
+  ty <- .bl_csv_types(path, piece, cols, keep)
+  if (is.null(ty)) {
+    # a header of no columns: such a table holds nothing but a row count
+    return(.bl_csv_part_small(.bl_read_csv_gz(path), cols, n, keep))
+  }
+  if (identical(names, "asis")) {
+    ty$nm <- ty$raw
+  }
+  use <- if (is.null(keep)) ty$want else rep(TRUE, length(ty$want))
+  acc <- new.env(parent = emptyenv())
+  acc$kept <- list()
+  acc$have <- 0
+  .bl_csv_each(path, piece, function(cols, rows) {
+    # keep sees the names the call returns
+    names(cols) <- ty$nm
+    df <- .bl_csv_frame(cols[use], ty$types[use])
+    idx <- seq_len(nrow(df))
+    if (!is.null(keep)) {
+      idx <- .bl_csv_keep(keep, df)
+    }
+    idx <- idx[seq_len(min(length(idx), n - acc$have))]
+    acc$kept[[length(acc$kept) + 1L]] <- lapply(df[ty$want[use]], `[`, idx)
+    acc$have <- acc$have + length(idx)
+    acc$have < n
+  })
+  .bl_csv_bind(acc$kept, ty$types[ty$want], ty$nm[ty$want])
+}
+
+#' The rows `keep` keeps of one piece.
+#' @param keep The function.
+#' @param df The piece, typed.
+#' @return Row numbers.
+#' @noRd
+.bl_csv_keep <- function(keep, df) {
+  sel <- keep(df)
+  if (!is.logical(sel) || length(sel) != nrow(df)) {
+    stop(
+      "`keep` must return TRUE or FALSE for each row of its data frame",
+      call. = FALSE
+    )
+  }
+  which(sel)
+}
+
+#' The pieces kept, joined into one data frame.
+#' @param kept A list of pieces, each a list of columns.
+#' @param types The columns' types.
+#' @param nm Their names.
+#' @return A data frame.
+#' @noRd
+.bl_csv_bind <- function(kept, types, nm) {
+  out <- lapply(seq_along(nm), function(j) {
+    do.call(c, c(list(vector(types[[j]], 0L)), lapply(kept, `[[`, j)))
+  })
+  names(out) <- nm
+  structure(
+    out,
+    class = "data.frame",
+    row.names = c(NA_integer_, -length(out[[1L]]))
+  )
+}
+
+#' Part of a table of no columns, read whole (it holds only its row count).
+#' @param df The table of no columns, read whole.
+#' @param cols,n,keep As for dload().
+#' @return A data frame.
+#' @noRd
+.bl_csv_part_small <- function(df, cols, n, keep) {
+  .bl_csv_want(names(df), names(df), cols)
+  rows <- seq_len(nrow(df))
+  if (!is.null(keep)) {
+    rows <- .bl_csv_keep(keep, df)
+  }
+  rows <- rows[seq_len(min(length(rows), n))]
+  if (identical(rows, seq_len(nrow(df)))) {
+    return(df)
+  }
+  df <- df[rows, , drop = FALSE]
+  rownames(df) <- NULL
+  df
+}
+
+#' Which columns `cols` asks for: by the names a whole read gives, by the
+#' header's own names, or by those without blanks around them (as the manifest
+#' may list them).
+#' @param nm The data frame's column names.
+#' @param raw The header's names.
+#' @param cols As for dload().
+#' @return A logical vector over the columns.
+#' @noRd
+.bl_csv_want <- function(nm, raw, cols) {
+  if (is.null(cols)) {
+    return(rep(TRUE, length(nm)))
+  }
+  hit <- match(cols, nm)
+  hit[is.na(hit)] <- match(cols[is.na(hit)], raw)
+  hit[is.na(hit)] <- match(trimws(cols[is.na(hit)]), raw)
+  if (anyNA(hit)) {
+    stop(
+      sprintf(
+        "`cols`: no column %s (the table has: %s)",
+        toString(cols[is.na(hit)]),
+        toString(nm)
+      ),
+      call. = FALSE
+    )
+  }
+  seq_along(nm) %in% hit
+}
+
+#' The first pass of the part reader: every record checked, and the type of
+#' each column needed settled over the whole table.
+#'
+#' Each piece adds what its values are (.bl_csv_kinds()) to what the pieces
+#' before it held, and the type is decided from all of it as a whole read
+#' decides it (.bl_csv_kind_type()).
+#' @param path,piece As for .bl_csv_part().
+#' @param cols,keep As for dload().
+#' @return NULL for a header of no columns, else list(nm, want, types).
+#' @noRd
+.bl_csv_types <- function(path, piece, cols, keep) {
+  acc <- new.env(parent = emptyenv())
+  h <- .bl_csv_each(path, piece, function(txt, rows) {
+    if (is.null(acc$seen)) {
+      acc$seen <- rep(list(logical(5L)), length(txt))
+      acc$want <- .bl_csv_want(names(txt), attr(txt, "raw"), cols)
+    }
+    need <- which(acc$want | !is.null(keep))
+    for (j in need[!vapply(acc$seen[need], `[[`, NA, 4L)]) {
+      acc$seen[[j]] <- acc$seen[[j]] | .bl_csv_kinds(txt[[j]])
+    }
+    TRUE
+  })
+  if (is.null(h)) {
+    return(NULL)
+  }
+  types <- vapply(acc$seen, .bl_csv_kind_type, "")
+  list(nm = h$nm, raw = h$raw, want = acc$want, types = types)
+}
+
+#' What the values of a column of CSV text are.
+#'
+#' A value is a number only when R gives it back as it is written: a plain
+#' integer or decimal, with no leading zero (but "0" and "0.5"), no "+" and at
+#' most 17 significant digits; or Inf, -Inf or NaN. "046" read as 46 and
+#' "+1" as 1 changed what the file holds, so such a value is text, and with it
+#' its column (audit of the sibling package, P9). A value with blanks around
+#' it is judged without them. TRUE, FALSE, T and F are logical. An empty field
+#' (NA here) is missing; the text NA is missing in a number or logical column
+#' and is the text "NA" in a text column.
+#' @param v A character vector, NA for an empty field.
+#' @return Five flags: logical, integer, double, text, the text NA seen.
+#' @noRd
+.bl_csv_kinds <- function(v) {
+  v <- v[!is.na(v)]
+  na <- v == "NA"
+  v <- trimws(v[!na])
+  lgl <- v %in% c("TRUE", "FALSE", "T", "F")
+  int <- grepl("^-?(0|[1-9][0-9]*)$", v)
+  int[int] <- abs(as.numeric(v[int])) <= 2147483647
+  num <- !lgl & !int & .bl_csv_plain_num(v)
+  c(any(lgl), any(int), any(num), any(!lgl & !int & !num), any(na))
+}
+
+#' Says which text values are numbers R gives back as written (see
+#' .bl_csv_kinds()).
+#' @param v The fields of one column, as text.
+#' @return A logical vector.
+#' @noRd
+.bl_csv_plain_num <- function(v) {
+  ok <- grepl(
+    "^-?(0|[1-9][0-9]*)?([.][0-9]*)?([eE][+-]?[0-9]+)?$",
+    v
+  )
+  mant <- sub("[eE].*$", "", v[ok])
+  dig <- gsub("^0+|0+$", "", gsub("[^0-9]", "", mant))
+  ok[ok] <- grepl("[0-9]", mant) & nchar(dig) <= 17L
+  ok | v %in% c("Inf", "-Inf", "NaN")
+}
+
+#' A column's type from the flags of .bl_csv_kinds(): text when any value is
+#' text or logical words mix with numbers; else double, integer or logical;
+#' a column holding only the text NA is text, and one with no value at all is
+#' logical NA.
+#' @param k The five flags.
+#' @return The type's name.
+#' @noRd
+.bl_csv_kind_type <- function(k) {
+  if (k[[4L]] || (k[[1L]] && (k[[2L]] || k[[3L]]))) {
+    return("character")
+  }
+  if (k[[3L]]) {
+    return("double")
+  }
+  if (k[[2L]]) {
+    return("integer")
+  }
+  if (k[[1L]] || !k[[5L]]) "logical" else "character"
+}
+
+#' A column of CSV text in a type (.bl_csv_kind_type()).
+#' @param v A character vector, NA for an empty field.
+#' @param type The type, by default the column's own.
+#' @return The typed vector.
+#' @noRd
+.bl_csv_as <- function(v, type = .bl_csv_kind_type(.bl_csv_kinds(v))) {
+  if (type == "character") {
+    # a text column is as written: an empty field is "", never missing
+    v[is.na(v)] <- ""
+    return(v)
+  }
+  v[!is.na(v) & v == "NA"] <- NA
+  v <- trimws(v)
+  if (type == "logical") {
+    return(v %in% c("TRUE", "T") | ifelse(v %in% c("FALSE", "F"), FALSE, NA))
+  }
+  if (type == "integer") {
+    return(as.integer(v))
+  }
+  # correctly rounded by the package's exact converter, as the compiled
+  # splitter reads its numbers: as.numeric() (R_strtod) put "1.239042694" one
+  # bit apart on x86-64 and ARM64 (P9)
+  .rmbl_strtod(v)
+}
+
+#' One piece in the table's types, as a data frame.
+#' @param cols The piece's columns, as text.
+#' @param types Their types over the whole table.
+#' @return A data frame.
+#' @noRd
+.bl_csv_frame <- function(cols, types) {
+  for (j in seq_along(cols)) {
+    cols[[j]] <- .bl_csv_as(cols[[j]], types[[j]])
+  }
+  structure(
+    cols,
+    class = "data.frame",
+    row.names = c(NA_integer_, -length(cols[[1L]]))
+  )
+}
+
+#' Reads a CSV a piece of whole records at a time and hands each to `fun`.
+#'
+#' Each piece goes to the compiled splitter that reads a whole table, as the
+#' header, a row of "x" in every column and the piece's records, cut at a line
+#' end outside quotes: the splitter refuses what a whole read refuses, the row
+#' of "x" keeps every column as text (the types are settled apart) and keeps a
+#' byte-order mark at a piece's start from being taken for the file's.
+#' @param path The CSV file, gzipped or plain.
+#' @param piece Decompressed bytes read at a time.
+#' @param fun A function of a piece's columns (a named list of text, attribute
+#'   `raw` the header's own names) and the rows before it; FALSE stops.
+#' @return NULL for a header of no columns, else list(nm, raw).
+#' @noRd
+.bl_csv_each <- function(path, piece, fun) {
+  con <- gzfile(path, "rb")
+  on.exit(close(con), add = TRUE)
+  st <- new.env(parent = emptyenv())
+  st$buf <- raw()
+  st$eof <- FALSE
+  st$probe <- piece
+  st$rows <- 0
+  st$given <- 0L
+  repeat {
+    if (!st$eof) {
+      b <- readBin(con, "raw", piece)
+      st$eof <- !length(b)
+      st$buf <- c(st$buf, b[b != as.raw(0L)])
+    }
+    if (is.null(st$hdr) && !.bl_csv_take_head(st)) {
+      next
+    }
+    if (!length(st$nm)) {
+      return(NULL)
+    }
+    cut <- if (st$eof) length(st$buf) else .bl_csv_cut(st$buf)
+    if (!cut && !st$eof) {
+      .bl_csv_probe(st)
+      next
+    }
+    # an empty table still gives one piece, of no rows
+    if ((!cut && st$given) || !.bl_csv_give(st, cut, fun)) {
+      break
+    }
+  }
+  list(nm = st$nm, raw = st$raw)
+}
+
+#' Hands the next `cut` bytes to the piece reader's function.
+#' @param st The reader's state.
+#' @param cut The bytes of whole records at the start of the buffer.
+#' @param fun As for .bl_csv_each().
+#' @return FALSE once `fun` asks to stop or the file is done.
+#' @noRd
+.bl_csv_give <- function(st, cut, fun) {
+  txt <- .bl_csv_split(st, st$buf[seq_len(cut)])
+  st$buf <- st$buf[-seq_len(cut)]
+  st$given <- st$given + 1L
+  go <- fun(txt, st$rows)
+  st$rows <- st$rows + length(txt[[1L]])
+  !isFALSE(go) && !(st$eof && !length(st$buf))
+}
+
+#' Takes the header off the front of the piece reader's buffer, once it is
+#' there whole with the start of the first record after it (a byte-order mark
+#' there is dropped, as a whole read drops it).
+#' @param st The reader's state.
+#' @return TRUE when the header was taken.
+#' @noRd
+.bl_csv_take_head <- function(st) {
+  b <- st$buf
+  nl <- as.raw(c(10L, 13L))
+  even <- cumsum(b == as.raw(34L)) %% 2L == 0L
+  first <- match(TRUE, !b %in% nl)
+  ends <- which(b %in% nl & even)
+  e <- if (is.na(first)) NA else ends[ends > first][1L]
+  body <- if (is.na(e)) integer() else seq_len(length(b) - e) + e
+  more <- match(TRUE, !b[body] %in% nl)
+  if (!st$eof && (is.na(e) || is.na(more) || length(body) < more + 4L)) {
+    .bl_csv_probe(st)
+    return(FALSE)
+  }
+  if (is.na(e)) {
+    e <- length(b)
+  }
+  st$hdr <- c(b[seq_len(e)], as.raw(10L))
+  st$buf <- .bl_csv_body_bom(b[-seq_len(e)])
+  h <- .bl_csv_call(st$hdr, 0)
+  st$raw <- h$names
+  st$nm <- make.names(h$names, unique = TRUE)
+  st$fake <- charToRaw(
+    paste0(paste(rep("x", length(st$nm)), collapse = ","), "\n")
+  )
+  TRUE
+}
+
+#' Where the piece reader's buffer ends in whole records: after its last line
+#' end outside quotes (an even count of quote marks before it, as quotes
+#' inside a quoted field are doubled).
+#' @param b The buffer.
+#' @return A byte count, 0 when the buffer holds no whole record.
+#' @noRd
+.bl_csv_cut <- function(b) {
+  even <- cumsum(b == as.raw(34L)) %% 2L == 0L
+  e <- which((b == as.raw(10L) | b == as.raw(13L)) & even)
+  if (length(e)) e[length(e)] else 0L
+}
+
+#' Reads what the piece reader holds when it finds no line end to cut at, each
+#' time the buffer doubles, so a malformed record (a stray quote makes every
+#' line end look quoted) is refused when it is met instead of after the rest
+#' of the file has been read into memory. A quoted field still open is not an
+#' error yet.
+#' @param st The reader's state.
+#' @return NULL, invisibly.
+#' @noRd
+.bl_csv_probe <- function(st) {
+  if (length(st$buf) < st$probe) {
+    return(invisible(NULL))
+  }
+  st$probe <- 2 * st$probe
+  # up to the last line end, quoted or not: a record cut short could have too
+  # many fields already, and be refused with a count it does not have
+  nl <- which(st$buf == as.raw(10L) | st$buf == as.raw(13L))
+  if (!length(nl)) {
+    return(invisible(NULL))
+  }
+  b <- st$buf[seq_len(nl[length(nl)])]
+  if (!is.null(st$hdr)) {
+    b <- c(st$hdr, st$fake, b)
+  }
+  tryCatch(.bl_csv_call(b, st$rows), error = function(e) {
+    if (!grepl("never closes", conditionMessage(e), fixed = TRUE)) {
+      stop(e)
+    }
+  })
+  invisible(NULL)
+}
+
+#' Splits one piece into its columns, as text.
+#' @param st The reader's state.
+#' @param body The piece's records.
+#' @return A named list of character vectors, attribute `raw`.
+#' @noRd
+.bl_csv_split <- function(st, body) {
+  p <- .bl_csv_call(c(st$hdr, st$fake, body), st$rows)
+  cols <- lapply(p$columns, `[`, -1L)
+  names(cols) <- st$nm
+  attr(cols, "raw") <- st$raw
+  cols
+}
+
+#' The compiled splitter on a piece, a record named in its refusal counted
+#' from the start of the file (the piece's own count starts at its header, and
+#' the row of "x" is one more).
+#' @param bytes The header, the row of "x" and the records.
+#' @param rows The rows before the piece.
+#' @return As C_rmbl_csv_split.
+#' @noRd
+.bl_csv_call <- function(bytes, rows) {
+  tryCatch(.Call(C_rmbl_csv_split, bytes, TRUE), error = function(e) {
+    msg <- conditionMessage(e)
+    m <- regexpr("record [0-9]+", msg)
+    if (m < 0L) {
+      stop(e)
+    }
+    r <- as.numeric(substr(msg, m + 7L, m + attr(m, "match.length") - 1L))
+    regmatches(msg, m) <- sprintf("record %.0f", r + rows - 1)
+    stop(msg, call. = FALSE)
+  })
+}
+
+#' Drops a byte-order mark at the start of the first record, after any blank
+#' lines and inside an opening quote too, as the compiled splitter drops it
+#' after the header of a whole table.
+#' @param b The bytes after the header.
+#' @return The bytes.
+#' @noRd
+.bl_csv_body_bom <- function(b) {
+  q <- match(TRUE, !b %in% as.raw(c(10L, 13L)))
+  if (is.na(q)) {
+    return(b)
+  }
+  bom <- as.raw(c(0xef, 0xbb, 0xbf))
+  for (k in c(0L, 2L, 1L)) {
+    at <- q + k + 0:2
+    if (
+      max(at) <= length(b) &&
+        all(b[q + seq_len(k) - 1L] == as.raw(34L)) &&
+        identical(b[at], bom)
+    ) {
+      return(b[-at])
+    }
+  }
+  b
 }
 
 #' Reads a gzip-compressed CSV as read.csv() reads it, faster.
@@ -283,7 +964,8 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 .bl_read_csv_gz <- function(
   path,
   in_memory = 512 * 2^20,
-  lim = .rmbl_max_csv_bytes()
+  lim = .rmbl_max_csv_bytes(),
+  names = "R"
 ) {
   # a directory is refused by name: gzfile() on one hung (1.0.3)
   path <- .rmbl_file1(path, "path")
@@ -301,15 +983,18 @@ dload <- function(key, refresh = FALSE, token = NULL) {
       .bl_csv_too_big(path, lim)
     }
     if (file.size(path) > in_memory) {
-      return(.bl_read_csv_streamed(path))
+      return(.bl_read_csv_streamed(path, names))
     }
-    return(.bl_csv_from_bytes(readBin(path, "raw", file.size(path))))
+    return(.bl_csv_from_bytes(
+      readBin(path, "raw", file.size(path)),
+      names = names
+    ))
   }
   # the checked reader takes at most 2 GB of gzip (which inflates past in_memory
   # anyway); a larger file goes the piece-at-a-time way
   bytes <- .bl_gunzip_held(path, in_memory)
   if (!is.null(bytes)) {
-    return(.bl_csv_from_bytes(bytes))
+    return(.bl_csv_from_bytes(bytes, names = names))
   }
   if (in_memory >= lim) {
     .bl_csv_too_big(path, lim)
@@ -317,7 +1002,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   # past what is held in memory: the stream is checked whole (trailers, CRC,
   # size) before read.csv() reads it, which takes a truncated one as short
   .bl_gz_verify(path, lim)
-  .bl_read_csv_streamed(path)
+  .bl_read_csv_streamed(path, names)
 }
 
 #' Checks a gzip file whole before the piece-at-a-time read: refuses a
@@ -349,9 +1034,10 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 #' The large-table path: read.csv() itself, on a gzfile() connection (it reads
 #' plain files too).
 #' @param path The gzipped CSV file, read in chunks.
+#' @inheritParams .bl_csv_from_bytes
 #' @return A data frame.
 #' @noRd
-.bl_read_csv_streamed <- function(path) {
+.bl_read_csv_streamed <- function(path, names = "R") {
   # a directory is refused by name: gzfile() on one hung (1.0.3)
   path <- .rmbl_file1(path, "path")
   # the field count of every record first: read.csv() reads a table whose header
@@ -382,12 +1068,18 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   .bl_csv_same_fields(nf[!is.na(nf)])
   con <- gzfile(path, "rt")
   on.exit(close(con), add = TRUE)
-  utils::read.csv(
+  # read as text and typed as the in-memory path types (.bl_csv_kinds()):
+  # read.csv() made "046" the number 46 and the text NA missing
+  d <- utils::read.csv(
     con,
-    stringsAsFactors = FALSE,
+    colClasses = "character",
+    na.strings = character(),
     skipNul = TRUE,
-    row.names = NULL
+    row.names = NULL,
+    check.names = identical(names, "R")
   )
+  d[] <- lapply(d, function(v) .bl_csv_as(replace(v, !nzchar(v), NA)))
+  d
 }
 
 #' Refuses a table whose records do not all have the header's field count.
@@ -416,9 +1108,11 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 #' Reads a CSV held in memory as read.csv() reads it.
 #' @param bytes The CSV as a raw vector.
 #' @param skip_nul Whether nul bytes are skipped.
+#' @param names "R" for syntactic names (make.names(unique = TRUE)), "asis"
+#'   for the header's own.
 #' @return A data frame.
 #' @noRd
-.bl_csv_from_bytes <- function(bytes, skip_nul = TRUE) {
+.bl_csv_from_bytes <- function(bytes, skip_nul = TRUE, names = "R") {
   parts <- .Call(C_rmbl_csv_split, bytes, skip_nul)
   # a header of no columns ("", blanks, a byte-order mark alone): read.csv()
   # takes each row's one field as its row name, and refuses more; a table of no
@@ -428,17 +1122,17 @@ dload <- function(key, refresh = FALSE, token = NULL) {
     return(.bl_csv_no_columns(bytes, skip_nul))
   }
   # the bytes decided the plain integer, decimal and logical columns; the rest
-  # is text for R to judge
+  # is text for R to judge, by the same rule (.bl_csv_kinds())
   cols <- lapply(parts$columns, function(v) {
-    if (is.character(v)) {
-      utils::type.convert(v, as.is = TRUE, na.strings = character())
-    } else {
-      v
-    }
+    if (is.character(v)) .bl_csv_as(v) else v
   })
   # the splitter gives one column per name, so there is at least one here (a
   # header of no columns returned above)
-  names(cols) <- make.names(parts$names, unique = TRUE)
+  names(cols) <- if (identical(names, "asis")) {
+    parts$names
+  } else {
+    make.names(parts$names, unique = TRUE)
+  }
   structure(
     cols,
     class = "data.frame",
@@ -465,7 +1159,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 .bl_data_url <- function() {
   env <- sub("/+$", "", trimws(Sys.getenv("MORIE_DATA_URL", unset = "")))
   if (nzchar(env)) {
-    # the bearer key goes to this host: https and a public address, or no key
+    # https and a public address only
     return(.rmbl_check_public_url(env, "MORIE_DATA_URL"))
   }
   svc <- .rmbl_services_data()
@@ -476,7 +1170,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
       if (nzchar(notice)) paste0(": ", notice) else "",
       sprintf(
         " (see %s)",
-        svc$request_access %||% "https://www.rmorie.com/access/"
+        svc$request_access %||% "https://data.rmorie.com/"
       ),
       call. = FALSE
     )
@@ -484,48 +1178,83 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   svc$base_url
 }
 
-#' Says whether a table's source licence asks more than attribution.
+#' The keys of the tables data.rmorie.com does not serve.
 #'
-#' The tables whose source licence asks more than attribution (ICPSR studies,
-#' the NCVS 38604 extract, the a2aj case law): data.rmorie.com opens them once
-#' the terms at /terms are accepted.
+#' Their source terms do not allow redistribution: the ICPSR studies, among
+#' them the NCVS 38604 extract. The one list in this package; dmnf() leaves
+#' them out and dload() refuses them before any request. The A2AJ case law is
+#' an open table.
+#' @noRd
+.bl_data_unserved_re <- "^(icpsr_|ncvs_38604)"
+
+#' Says whether a table key is one data.rmorie.com does not serve.
 #' @param key The table's key, with or without its db/ or files/ prefix.
 #' @return TRUE or FALSE for each key.
 #' @noRd
 .bl_data_restricted <- function(key) {
-  grepl("^(icpsr_|ncvs_38604|a2aj_)", sub("^(db|files)/", "", key))
+  grepl(.bl_data_unserved_re, sub("^(db|files)/", "", key))
 }
 
-#' Returns the hosted key to send to the data service, or NULL.
-#'
-#' The hosted key for the data service: to the address the signed services
-#' document names, never to an address set in MORIE_DATA_URL (a key that belongs
-#' to one service does not follow a URL).
-#' @return One string, or NULL.
+#' Says whether a manifest entry is a table that is not served: its key is on
+#' the list, or the manifest marks it (`access` other than "open" or "public",
+#' or `restricted: true`, on the entry or in its `meta`).
+#' @param d One table's entry in the manifest.
+#' @return TRUE or FALSE.
 #' @noRd
-.bl_data_key <- function() {
-  # a key passed to dload(token = ) beats the stored one
-  key <- .bl_data_token$key %||% .bl_hosted_key()
-  if (is.null(key)) {
-    return(NULL)
+.bl_data_unserved <- function(d) {
+  k <- d[["key"]]
+  if (is.character(k) && length(k) == 1L && .bl_data_restricted(k)) {
+    return(TRUE)
   }
-  env <- sub("/+$", "", trimws(Sys.getenv("MORIE_DATA_URL", unset = "")))
-  if (!nzchar(env)) {
-    return(key)
+  for (x in list(d, d[["meta"]])) {
+    a <- if (is.list(x)) x[["access"]]
+    open <- !is.character(a) || length(a) != 1L ||
+      .rmbl_lower(a) %in% c("open", "public")
+    if (!open || (is.list(x) && isTRUE(x[["restricted"]]))) {
+      return(TRUE)
+    }
   }
-  doc <- sub("/+$", "", .rmbl_services_data()$base_url %||% "")
-  if (nzchar(doc) && identical(env, doc)) {
-    return(key)
+  FALSE
+}
+
+#' The manifest without the tables that are not served; attribute
+#' `unserved` counts them.
+#' @param m The manifest, as .bl_dmnf_raw() returns it.
+#' @return The manifest.
+#' @noRd
+.bl_data_served <- function(m) {
+  if (!is.list(m)) {
+    return(m)
   }
-  message(sprintf(
-    paste(
-      "MORIE_DATA_URL=%s is not the curated-data address of the",
-      "services document;",
-      "the stored key is not sent to it"
-    ),
-    env
-  ))
-  NULL
+  ds <- m$datasets
+  off <- vapply(ds, function(d) is.list(d) && .bl_data_unserved(d), NA)
+  if (any(off)) {
+    m$datasets <- ds[!off]
+  }
+  attr(m, "unserved") <- sum(off)
+  m
+}
+
+#' Refuses a table that is not served, before any request.
+#' @param key The table's key.
+#' @noRd
+.bl_data_unserved_stop <- function(key) {
+  stop(
+    key,
+    " is not served by data.rmorie.com: ",
+    if (.bl_data_restricted(key)) {
+      paste(
+        "ICPSR's terms do not allow redistribution; download it from ICPSR",
+        "(https://www.icpsr.umich.edu)"
+      )
+    } else {
+      paste(
+        "its source terms do not allow redistribution; download it from its",
+        "source"
+      )
+    },
+    call. = FALSE
+  )
 }
 
 #' Returns the directory of the data cache, made when missing.
@@ -568,7 +1297,15 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   value
 }
 
-#' Downloads a path from the curated-data service with the hosted key.
+#' Downloads a path from the curated-data service (no key: none is needed).
+#'
+#' A table is downloaded under a lock on `<dest>.lock`, held by this process
+#' alone: R processes downloading one table into one cache folder take turns,
+#' and one that waited finds the file the first finished and keeps it. They
+#' shared the parts folder and the joined file's name, deleted each other's
+#' parts and were told the disk was full (11 of 12 workers failed; audit of
+#' 716154bd, N4). The file is written under a name of this process's own and
+#' moved into place whole.
 #' @param path The path on the service.
 #' @param dest The local file the downloaded table is written to.
 #' @param timeout Seconds before the download gives up.
@@ -576,26 +1313,46 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 #' @return `dest`, invisibly.
 #' @noRd
 .bl_data_get <- function(path, dest, timeout = 600, max_bytes = 2^31) {
-  key <- .bl_data_key()
-  if (is.null(key)) {
-    .bl_data_no_key()
-  }
   old <- options(timeout = max(getOption("timeout", 60), timeout))
   on.exit(options(old), add = TRUE)
-  hdr <- c(
-    Authorization = paste("Bearer", key),
-    "User-Agent" = "rmoriebricklayer/1 (+https://www.rmorie.com)"
-  )
+  hdr <- c("User-Agent" = "rmoriebricklayer/1 (+https://www.rmorie.com)")
   lb <- .bl_data_label(path)
-  label <- lb$label
-  size <- lb$size
+  if (!grepl("\\.csv\\.gz$", path)) {
+    return(.bl_data_get_one(path, dest, hdr, lb, timeout, max_bytes))
+  }
+  .bl_data_locked(dest, function() {
+    part <- .bl_data_part_bytes()
+    size <- lb$size
+    if (!is.null(size) && is.finite(size) && size > 2 * part) {
+      .bl_data_get_parts(path, dest, hdr, lb$label, size, part, timeout)
+    } else {
+      .bl_data_get_one(path, dest, hdr, lb, timeout, max_bytes)
+    }
+  })
+  invisible(dest)
+}
+
+#' Downloads one file whole, under a name of its own beside `dest`, moved
+#' into place once complete.
+#' @param path,dest,timeout,max_bytes As for .bl_data_get().
+#' @param hdr The request headers.
+#' @param lb The label and size, from .bl_data_label().
+#' @return `dest`, invisibly.
+#' @noRd
+.bl_data_get_one <- function(path, dest, hdr, lb, timeout, max_bytes) {
+  tmp <- tempfile(
+    pattern = paste0(basename(dest), "-"),
+    tmpdir = dirname(dest),
+    fileext = ".dl"
+  )
+  on.exit(unlink(tmp), add = TRUE)
   rc <- tryCatch(
     bldl(
       paste0(.bl_data_url(), path),
-      dest,
+      tmp,
       headers = hdr,
-      label = label,
-      size = size,
+      label = lb$label,
+      size = lb$size,
       tmout = timeout,
       maxbytes = max_bytes
     ),
@@ -603,9 +1360,341 @@ dload <- function(key, refresh = FALSE, token = NULL) {
     warning = function(w) w
   )
   if (inherits(rc, "condition")) {
-    .bl_data_get_failed(rc, label)
+    .bl_data_get_failed(rc, lb$label, dest)
+  }
+  .bl_data_move(tmp, dest)
+  invisible(dest)
+}
+
+#' Moves a finished download into place.
+#' @param tmp The download.
+#' @param dest Its name.
+#' @return `dest`, invisibly.
+#' @noRd
+.bl_data_move <- function(tmp, dest) {
+  if (!file.exists(tmp)) {
+    stop(
+      sprintf("data.rmorie.com: the download of %s wrote no file", dest),
+      call. = FALSE
+    )
+  }
+  # refused in words below, so base R's warning is not printed beside it
+  if (!isTRUE(suppressWarnings(file.rename(tmp, dest)))) {
+    .bl_data_wfail(dest, "the download could not be moved into place")
   }
   invisible(dest)
+}
+
+#' Runs a table's download under an operating-system lock on `<dest>.lock`
+#' (rmbl_flock.c, released by the kernel when the process ends), waiting while
+#' another process holds it. A file that appeared or changed under `dest`
+#' while this one waited is the other's finished download, and is kept.
+#' @param dest The table's file.
+#' @param f The download, a function of no arguments.
+#' @return `dest`, invisibly.
+#' @noRd
+.bl_data_locked <- function(dest, f) {
+  m0 <- file.mtime(dest)
+  busy <- new.env(parent = emptyenv())
+  run <- function() {
+    arrived <- file.exists(dest) && (is.na(m0) || file.mtime(dest) > m0)
+    if (!arrived) f()
+    invisible(dest)
+  }
+  said <- FALSE
+  repeat {
+    r <- tryCatch(
+      .Call(C_rmbl_flock_with, paste0(dest, ".lock"), run, busy),
+      error = function(e) {
+        m <- conditionMessage(e)
+        if (!grepl("lock file", m, fixed = TRUE)) stop(e)
+        .bl_data_wfail(dest, m)
+      }
+    )
+    if (!identical(r, busy)) {
+      return(invisible(dest))
+    }
+    if (!said) {
+      message(basename(dest), ": another R process is downloading it; waiting")
+      said <- TRUE
+    }
+    Sys.sleep(0.2)
+  }
+}
+
+#' Stops with the error for a download that could not be written on this
+#' computer (a folder that is missing, read-only or full), which names the
+#' option for another folder: it said "data.rmorie.com:" as if the service
+#' had failed (audit of 716154bd, N5).
+#' @param dest The file being written.
+#' @param why What went wrong on this computer, for the message.
+#' @return Does not return.
+#' @noRd
+.bl_data_wfail <- function(dest, why) {
+  stop(
+    sprintf(
+      paste0(
+        "cannot write %s on this computer (%s). Name a folder that can be ",
+        "written and has room in options(rmoriebricklayer.dcache = ) and run ",
+        "again."
+      ),
+      dest,
+      why
+    ),
+    call. = FALSE
+  )
+}
+
+#' Says whether a failed download failed on this computer: the transport says
+#' it could not write, or the folder takes no file.
+#' @param msg The transport's error message.
+#' @param dest The file being written.
+#' @return TRUE or FALSE.
+#' @noRd
+.bl_data_local_fail <- function(msg, dest) {
+  re <- paste0(
+    "Failure writing|Failed writing|folder for `dest`|No space left|",
+    "Permission denied|Read-only file system|cannot open (the )?(file|conn)"
+  )
+  if (grepl(re, msg)) {
+    return(TRUE)
+  }
+  probe <- tempfile(tmpdir = dirname(dest))
+  on.exit(unlink(probe), add = TRUE)
+  !isTRUE(suppressWarnings(file.create(probe)))
+}
+
+#' The size of one part of a large download (option
+#' `rmoriebricklayer.dpart`, default 90 MB).
+#' @return A number of bytes.
+#' @noRd
+.bl_data_part_bytes <- function() {
+  .rmbl_getopt_ok(
+    "dpart",
+    90 * 2^20,
+    function(v) is.numeric(v) && length(v) == 1L && is.finite(v) && v >= 2^20,
+    "a number of bytes, at least 1 MB"
+  )
+}
+
+#' Downloads a large table in parts, each a byte range of the file.
+#'
+#' A slow or broken connection loses at most one part: each part is retried by
+#' the transport, kept on disk once whole (written under a name of its own and
+#' moved into place), and a later run starts from the first part still
+#' missing. The parts are then joined in place (.bl_data_join()), which a later
+#' run resumes too. The caller checks the SHA-256 of `dest` against the
+#' manifest. The caller holds the table's lock (.bl_data_locked()).
+#' @param path,dest,timeout As for .bl_data_get().
+#' @param hdr The request headers.
+#' @param label The table's key.
+#' @param size The file's size, from the manifest.
+#' @param part The size of one part.
+#' @return `dest`, invisibly.
+#' @noRd
+.bl_data_get_parts <- function(path, dest, hdr, label, size, part, timeout) {
+  starts <- seq(0, size - 1, by = part)
+  n <- length(starts)
+  pdir <- paste0(dest, ".parts")
+  dir.create(pdir, recursive = TRUE, showWarnings = FALSE)
+  pfile <- file.path(pdir, sprintf("%05d", seq_len(n)))
+  # the parts already in the joined file of an earlier run are not fetched
+  j <- file.path(pdir, "joined")
+  done <- if (file.exists(j)) min(n, floor(file.size(j) / part)) else 0
+  for (i in seq_len(n)[seq_len(n) > done]) {
+    a <- starts[i]
+    want <- min(a + part, size) - a
+    if (!identical(file.size(pfile[i]), want)) {
+      .bl_data_get_part(
+        path, pfile[i], hdr, sprintf("%s (part %d of %d)", label, i, n),
+        c(a, want), timeout
+      )
+    }
+  }
+  .bl_data_join(pfile, dest, part)
+  unlink(pdir, recursive = TRUE)
+  invisible(dest)
+}
+
+#' Downloads one part of a large table.
+#' @param path,timeout As for .bl_data_get().
+#' @param pf The part's file.
+#' @param hdr The request headers.
+#' @param label The part's label.
+#' @param rng Its first byte and length.
+#' @return `pf`, invisibly.
+#' @noRd
+.bl_data_get_part <- function(path, pf, hdr, label, rng, timeout) {
+  tmp <- tempfile(
+    pattern = paste0(basename(pf), "-"),
+    tmpdir = dirname(pf),
+    fileext = ".dl"
+  )
+  on.exit(unlink(tmp), add = TRUE)
+  want <- rng[[2L]]
+  rc <- tryCatch(
+    bldl(
+      paste0(.bl_data_url(), path),
+      tmp,
+      headers = c(
+        hdr,
+        Range = sprintf("bytes=%.0f-%.0f", rng[[1L]], rng[[1L]] + want - 1)
+      ),
+      label = label,
+      size = want,
+      tmout = timeout,
+      maxbytes = want
+    ),
+    error = function(e) .bl_unless_interrupted(e, e),
+    warning = function(w) w
+  )
+  if (inherits(rc, "condition")) {
+    .bl_data_get_failed(rc, sub(" \\(part .*", "", label), pf)
+  }
+  if (!identical(file.size(tmp), want)) {
+    stop(
+      sprintf(
+        paste(
+          "data.rmorie.com: %s came back with %.0f bytes, not",
+          "%.0f; run again to resume from that part"
+        ),
+        sub("^(.*) \\(part ([0-9]+) of [0-9]+\\)$", "part \\2 of \\1", label),
+        file.size(tmp),
+        want
+      ),
+      call. = FALSE
+    )
+  }
+  .bl_data_move(tmp, pf)
+}
+
+#' Joins the parts of a download into one file, in place.
+#'
+#' The first part becomes the joined file (`joined`, beside the parts) and the
+#' others are appended to it in order, each deleted once it is in it and
+#' flushed: the parts and the joined file together never hold much more than
+#' the table's size, and a join cut short (a full disk, a killed session)
+#' leaves the joined file holding the start of the table, so the next run goes
+#' on from the first part not yet in it (seeking there, over any part written
+#' halfway) instead of downloading the deleted parts again (audit of
+#' 716154bd, N9). The file is moved to `dest` once whole.
+#' @param pfile The part files, in order.
+#' @param dest The file written.
+#' @param part The size of each part but the last (the joined file's size
+#'   says how many parts it holds).
+#' @return `dest`, invisibly.
+#' @noRd
+.bl_data_join <- function(pfile, dest, part) {
+  j <- file.path(dirname(pfile[[1L]]), "joined")
+  moved <- file.exists(j) ||
+    isTRUE(suppressWarnings(file.rename(pfile[[1L]], j)))
+  if (!moved) {
+    .bl_data_missing(dest, pfile[[1L]])
+  }
+  done <- min(length(pfile), floor(file.size(j) / part))
+  rest <- pfile[seq_along(pfile) > done]
+  total <- done * part + sum(file.size(rest))
+  if (is.na(total)) {
+    .bl_data_missing(dest, rest[is.na(file.size(rest))][[1L]])
+  }
+  full <- function() .bl_data_full(dest, total)
+  out <- file(j, "r+b")
+  open <- TRUE
+  on.exit(if (open) close(out), add = TRUE)
+  seek(out, done * part, rw = "write")
+  for (p in rest) {
+    if (!.bl_data_append(p, out)) {
+      full()
+    }
+    flush(out)
+    unlink(p)
+  }
+  close(out)
+  open <- FALSE
+  # a write that failed only when the file was closed shows in its size
+  if (!identical(as.numeric(file.size(j)), as.numeric(total))) {
+    full()
+  }
+  unlink(dest)
+  if (!isTRUE(suppressWarnings(file.rename(j, dest)))) {
+    full()
+  }
+  invisible(dest)
+}
+
+#' Stops because a part to be joined is missing.
+#' @param dest The file being joined.
+#' @param p The missing part.
+#' @return Does not return.
+#' @noRd
+.bl_data_missing <- function(dest, p) {
+  stop(
+    sprintf(
+      "cannot join the parts of %s: part %s is missing; run again to get it",
+      basename(dest),
+      basename(p)
+    ),
+    call. = FALSE
+  )
+}
+
+#' Stops with the full-disk message of a join.
+#' @param dest The file being written.
+#' @param total Its size in bytes.
+#' @return Does not return.
+#' @noRd
+.bl_data_full <- function(dest, total) {
+  stop(
+    sprintf(
+      paste0(
+        "cannot join the parts of %s: the folder %s is full or cannot be ",
+        "written (the file needs %.0f MB). Name a folder with room in ",
+        "options(rmoriebricklayer.dcache = ) and run again."
+      ),
+      basename(dest),
+      dirname(dest),
+      total / 2^20
+    ),
+    call. = FALSE
+  )
+}
+
+#' Appends one part file to an open connection.
+#' @param p The part file.
+#' @param out The connection written to.
+#' @return TRUE, or FALSE when a write failed (writeBin() only warns when the
+#'   disk is full).
+#' @noRd
+.bl_data_append <- function(p, out) {
+  con <- file(p, "rb")
+  on.exit(close(con), add = TRUE)
+  repeat {
+    buf <- readBin(con, "raw", 2^24)
+    if (!length(buf)) {
+      return(TRUE)
+    }
+    ok <- tryCatch(
+      {
+        .bl_write_raw(buf, out)
+        TRUE
+      },
+      warning = function(w) FALSE,
+      error = function(e) FALSE
+    )
+    if (!ok) {
+      return(FALSE)
+    }
+  }
+}
+
+#' writeBin(), under a name the tests can replace.
+#' @param buf The bytes.
+#' @param out The connection.
+#' @return NULL, invisibly.
+#' @noRd
+.bl_write_raw <- function(buf, out) {
+  writeBin(buf, out)
+  invisible(NULL)
 }
 
 #' A fetched manifest, checked before it replaces the cached one: a JSON
@@ -747,7 +1836,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
         one <- length(v) == 1L && (is.character(v) || is.na(v))
         v <- if (one) sub("^sha256:", "", as.character(v)) else NA_character_
         if (length(v) == 1L && !is.na(v) && grepl("^[0-9a-fA-F]{64}$", v)) {
-          return(tolower(v))
+          return(.rmbl_lower(v))
         }
         # a digest field that is not a digest is not "no digest": the file
         # cannot be trusted
@@ -841,10 +1930,32 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   # about the file, which is refused
   if (is.null(want)) {
     .bl_data_listed(key, dest, cached)
+    .bl_data_warn_nodigest(key)
     return(invisible(structure(TRUE, verified = "listed")))
   }
   .bl_data_digest_match(key, dest, want)
   invisible(structure(TRUE, verified = "digest"))
+}
+
+#' The tables already warned about this session for having no digest.
+#' @noRd
+.bl_data_nodigest <- new.env(parent = emptyenv())
+
+#' Warns, once per session and table, that a table the manifest lists without
+#' a digest is used unverified.
+#' @param key The table's key.
+#' @noRd
+.bl_data_warn_nodigest <- function(key) {
+  if (!isTRUE(.bl_data_nodigest[[key]])) {
+    assign(key, TRUE, envir = .bl_data_nodigest)
+    warning(
+      key,
+      " is listed in the manifest of data.rmorie.com without a SHA-256: ",
+      "it is used unverified",
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
 }
 
 #' Builds the listing of curated tables.
@@ -883,7 +1994,10 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   hint = "dload(\"KEY\") loads one"
 ) {
   if (!nrow(tables)) {
-    return("no curated tables are listed at data.rmorie.com right now\n")
+    return(paste0(
+      "no curated tables are listed at data.rmorie.com right now\n",
+      .bl_data_unserved_note(tables)
+    ))
   }
   if (is.null(width)) {
     width <- suppressWarnings(as.integer(Sys.getenv("COLUMNS", "")))
@@ -894,7 +2008,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   rows <- ifelse(
     is.na(tables$rows),
     "-",
-    formatC(tables$rows, format = "d", big.mark = ",")
+    .rmbl_fc(tables$rows, format = "d", big.mark = ",")
   )
   # the manifest is fetched text: what would not print as itself is removed
   # (.rmbl_printable)
@@ -908,14 +2022,38 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   cut <- nchar(name) > room
   name[cut] <- paste0(trimws(substr(name[cut], 1L, room - 3L)), "...")
   line <- function(k, r, n) {
-    sprintf("%s  %s  %s", formatC(k, width = -kw), formatC(r, width = rw), n)
+    sprintf("%s  %s  %s", .rmbl_fc(k, width = -kw),
+        .rmbl_fc(r, width = rw), n)
   }
   paste0(
     line("key", "rows", "name"),
     "\n",
     paste(line(tables$key, rows, name), collapse = "\n"),
     "\n\n",
-    sprintf("%d tables; %s\n", nrow(tables), hint)
+    sprintf("%d tables; %s\n", nrow(tables), hint),
+    .bl_data_unserved_note(tables)
+  )
+}
+
+#' The line that counts the tables a listing leaves out, or "".
+#' @param tables The listing, with attribute `unserved`.
+#' @return One string.
+#' @noRd
+.bl_data_unserved_note <- function(tables) {
+  n <- attr(tables, "unserved")
+  if (!is.numeric(n) || length(n) != 1L || is.na(n) || n < 1) {
+    return("")
+  }
+  paste0(
+    sprintf(
+      ngettext(
+        n,
+        "%d table is not served: its source terms do not",
+        "%d tables are not served: their source terms do not"
+      ),
+      as.integer(n)
+    ),
+    " allow redistribution\n"
   )
 }
 
@@ -924,8 +2062,14 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 #' @return `key`, invisibly.
 #' @noRd
 .bl_data_check_keyarg <- function(key) {
+  # text that is not valid in this locale, or longer than a file name can be,
+  # is refused before any function reads it as text: grepl() warned "input
+  # string 1 is invalid in this locale" (audit of 716154bd, N6)
   ok <- is.character(key) &&
     length(key) == 1L &&
+    !is.na(key) &&
+    validEnc(key) &&
+    nchar(key, type = "bytes") <= 200L &&
     grepl("/", key, fixed = TRUE) &&
     !startsWith(key, "/") &&
     !endsWith(key, "/")
@@ -935,8 +2079,9 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   invisible(key)
 }
 
-#' Refuses a key the manifest does not list; a manifest that cannot be read
-#' says nothing, and the download decides.
+#' Refuses a key the manifest does not list, or lists as a table that is not
+#' served; a manifest that cannot be read says nothing, and the download
+#' decides.
 #' @param key The table's key.
 #' @return `key`, invisibly.
 #' @noRd
@@ -947,6 +2092,10 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   )
   # an empty list is an answer too: no table is listed, so none is loaded
   if (!is.null(known) && !key %in% known) {
+    # left out because it is not served: said so, before any request
+    if (.bl_data_marked(key)) {
+      .bl_data_unserved_stop(key)
+    }
     stop(
       sprintf(
         "no table %s at data.rmorie.com (`%s data list` shows them)",
@@ -957,6 +2106,30 @@ dload <- function(key, refresh = FALSE, token = NULL) {
     )
   }
   invisible(key)
+}
+
+#' Says whether the manifest copy on disk lists a table as one that is not
+#' served (marked restricted). Nothing is fetched: dmnf() has just refreshed
+#' the copy when it was stale.
+#' @param key The table's key.
+#' @return TRUE or FALSE.
+#' @noRd
+.bl_data_marked <- function(key) {
+  p <- file.path(.bl_data_cache_dir(), "manifest.json")
+  m <- if (file.exists(p)) {
+    tryCatch(
+      .rmbl_json_text(
+        .bl_read_text_capped(p, 32 * 2^20),
+        simplifyVector = FALSE
+      ),
+      error = function(e) NULL
+    )
+  }
+  ds <- if (is.list(m) && is.list(m$datasets)) m$datasets else list()
+  hit <- function(d) {
+    is.list(d) && identical(d[["key"]], key) && .bl_data_unserved(d)
+  }
+  any(vapply(ds, hit, NA))
 }
 
 #' The path of a table's file on the curated-data service.
@@ -982,7 +2155,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
         "raise them to read it"
       ),
       basename(path),
-      format(lim, big.mark = ",", scientific = FALSE)
+      .rmbl_ntxt(lim)
     ),
     call. = FALSE
   )
@@ -1055,7 +2228,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
   if (n && !bytes[[n]] %in% as.raw(c(10, 13))) {
     bytes <- c(bytes, as.raw(10))
   }
-  writeBin(bytes, f)
+  .rmbl_wfile(f, bytes)
   # what read.csv() refuses (a header of "" and nothing under it: "first five
   # rows are empty") is refused in words, as the reader refuses
   tryCatch(
@@ -1068,36 +2241,6 @@ dload <- function(key, refresh = FALSE, token = NULL) {
         call. = FALSE
       )
     }
-  )
-}
-
-#' Refuses a download from the curated-data service without a key.
-#' @noRd
-.bl_data_no_key <- function() {
-  env <- trimws(Sys.getenv("MORIE_DATA_URL", unset = ""))
-  if (nzchar(env) && !is.null(.bl_hosted_key())) {
-    stop(
-      sprintf(
-        paste(
-          "MORIE_DATA_URL=%s is not the curated-data address of the",
-          "signed services document,",
-          "so the stored key is not sent to it: unset MORIE_DATA_URL",
-          "(the address comes from the",
-          "document)"
-        ),
-        env
-      ),
-      call. = FALSE
-    )
-  }
-  stop(
-    "the curated tables need your MORIE key: run ",
-    sprintf(
-      "dlogin() (or `%s login`) once; %s.",
-      .bl_prog(),
-      .bl_access_hint()
-    ),
-    call. = FALSE
   )
 }
 
@@ -1125,32 +2268,38 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 #' Says why a download from the curated-data service failed.
 #' @param rc The error or warning the download raised.
 #' @param label The download's label.
+#' @param dest The file the download was writing.
 #' @noRd
-.bl_data_get_failed <- function(rc, label) {
+.bl_data_get_failed <- function(rc, label, dest) {
   msg <- conditionMessage(rc)
-  if (grepl("403|Forbidden", msg) && .bl_data_restricted(label)) {
+  # the status is looked for outside the destination's own name: a
+  # temporary file's name is random hex and now and then holds "403"
+  st <- msg
+  for (pth in unique(c(dest, dirname(dest)))) {
+    if (nzchar(pth)) st <- gsub(pth, "", st, fixed = TRUE)
+  }
+  if (grepl("\\b410\\b|Gone", st)) {
+    stop(
+      label,
+      " is not served by data.rmorie.com: ICPSR's terms do not allow ",
+      "redistribution; download it from ICPSR (https://www.icpsr.umich.edu)",
+      call. = FALSE
+    )
+  }
+  if (grepl("\\b(401|403)\\b|Unauthorized|Forbidden", st)) {
     stop(
       sprintf(
         paste(
-          "%s is a restricted table (its source asks more than a",
-          "citation): read and accept",
-          "the terms at https://data.rmorie.com/terms, signed in with",
-          "your key, then ask again"
+          "data.rmorie.com asked for a key for %s: the tables need no",
+          "sign-in; update the package, or try again later"
         ),
         label
       ),
       call. = FALSE
     )
   }
-  if (grepl("401|403|Unauthorized|Forbidden", msg)) {
-    stop(
-      "the curated-data service rejected the stored key; ",
-      sprintf(
-        "run dlogin() again (or `%s login --token` and paste the key).",
-        .bl_prog()
-      ),
-      call. = FALSE
-    )
+  if (.bl_data_local_fail(msg, dest)) {
+    .bl_data_wfail(dest, sub("^bldl: ", "", msg))
   }
   stop("data.rmorie.com: ", msg, call. = FALSE)
 }
@@ -1248,7 +2397,7 @@ dload <- function(key, refresh = FALSE, token = NULL) {
 #' @return NULL, invisibly.
 #' @noRd
 .bl_data_digest_match <- function(key, dest, want) {
-  have <- tolower(csha256(readBin(dest, "raw", file.size(dest))))
+  have <- .rmbl_lower(csha256(readBin(dest, "raw", file.size(dest))))
   if (!identical(have, want)) {
     # a table rebuilt upstream has a new digest in a new manifest: fetch the
     # manifest again before calling the file bad, so a stale cached manifest

@@ -43,7 +43,12 @@ test_that("chgenv is the exact image of the input intervals", {
 })
 
 test_that("yoybnd widens the sampling interval, never narrows it", {
-  y <- yoy(otis, value = "individuals", prd = "year", by = c("table", "group"))
+  y <- yoychg(
+    otis,
+    value = "individuals",
+    prd = "year",
+    by = c("table", "group")
+  )
   yb <- yoybnd(y, rnd = 5)
   ok <- !is.na(yb$pctlo)
   expect_true(all(yb$compctlo[ok] <= yb$pctlo[ok]))
@@ -51,11 +56,16 @@ test_that("yoybnd widens the sampling interval, never narrows it", {
   expect_true(all(yb$envpctlo[ok] <= yb$pctchg[ok]))
   expect_true(all(yb$envpctup[ok] >= yb$pctchg[ok]))
   expect_s3_class(yb, "rmbl_yoy")
-  expect_error(yoybnd(otis), "yoy\\(\\)")
+  expect_error(yoybnd(otis), "yoychg\\(\\)")
 })
 
 test_that("exact p-values agree with binom.test and adjust over the scan", {
-  y <- yoy(otis, value = "individuals", prd = "year", by = c("table", "group"))
+  y <- yoychg(
+    otis,
+    value = "individuals",
+    prd = "year",
+    by = c("table", "group")
+  )
   yp <- yoypv(y)
   i <- which(!is.na(yp$previous))[1]
   expect_identical(
@@ -73,7 +83,7 @@ test_that("exact p-values agree with binom.test and adjust over the scan", {
   expect_identical(scanadj(d)$padj, p.adjust(d$p_value, "BH"))
   expect_error(scanadj(data.frame(a = 1)), "p_value")
   # continuous units carry no exact test
-  yc <- yoy(
+  yc <- yoychg(
     otis,
     value = "individuals",
     prd = "year",
@@ -122,8 +132,8 @@ test_that("drftcal reports a false-alarm rate on identical data", {
   expect_error(drftcal(d[1:2, ]), "four rows")
 })
 
-test_that("anltab runs the whole workflow on the shipped table", {
-  a <- anltab(
+test_that("anytab runs the whole workflow on the shipped table", {
+  a <- anytab(
     otis,
     value = "individuals",
     prd = "year",
@@ -145,12 +155,12 @@ test_that("anltab runs the whole workflow on the shipped table", {
   expect_output(print(a), "5 comparison|comparison")
 })
 
-test_that("anltab with bounds, exposure and a prior capsule", {
+test_that("anytab with bounds, exposure and a prior capsule", {
   d <- otis
   d$pop <- c(rep(25000, 9), rep(21000, 6))
   prior <- d
   prior$individuals <- round(prior$individuals * 0.9)
-  a <- anltab(
+  a <- anytab(
     d,
     value = "individuals",
     prd = "year",
@@ -168,11 +178,11 @@ test_that("anltab with bounds, exposure and a prior capsule", {
   expect_true("individuals" %in% a$drift$columns$column)
   expect_output(print(a), "Publication bounds")
   expect_output(print(a), "Drift vs prior")
-  expect_error(anltab(d, value = "nope", prd = "year"), "not found")
+  expect_error(anytab(d, value = "nope", prd = "year"), "not found")
 })
 
 test_that("rptanl writes Markdown and self-contained HTML", {
-  a <- anltab(
+  a <- anytab(
     otis,
     value = "individuals",
     prd = "year",
@@ -194,7 +204,7 @@ test_that("rptanl writes Markdown and self-contained HTML", {
   g <- tempfile(fileext = ".md")
   rptanl(a, g)
   expect_match(readLines(g, warn = FALSE)[1], "^# ")
-  expect_error(rptanl(otis), "anltab")
+  expect_error(rptanl(otis), "anytab")
 })
 
 test_that("the capsule template runs as written on the shipped example", {
@@ -207,11 +217,22 @@ test_that("the capsule template runs as written on the shipped example", {
   expect_true(file.exists(prov$source$url))
   expect_error(usecpstmpl(d), "not empty")
   skip_on_cran()
-  res <- system2(
-    file.path(R.home("bin"), "Rscript"),
-    c(shQuote(file.path(d, "analysis.R"))),
-    stdout = TRUE,
-    stderr = TRUE
+  skip_if_lowmem()
+  # the child R loads the package from the library this session uses, however
+  # the tests were started (R CMD check sets R_LIBS; a plain test_dir() does
+  # not, and the child then loaded an older installed copy)
+  child_env <- c(
+    R_LIBS = paste(.libPaths(), collapse = .Platform$path.sep),
+    R_TESTS = NA
+  )
+  res <- withr::with_envvar(
+    child_env,
+    system2(
+      file.path(R.home("bin"), "Rscript"),
+      c(shQuote(file.path(d, "analysis.R"))),
+      stdout = TRUE,
+      stderr = TRUE
+    )
   )
   expect_true(
     file.exists(file.path(d, "results", "manifest.json")),
@@ -226,11 +247,15 @@ test_that("the capsule template runs as written on the shipped example", {
   expect_true(file.exists(file.path(d, prov2$resource$filename)))
   expect_true(vrfcps(d)$ok)
   # a second run sees the pin and goes through again
-  res2 <- system2(
-    file.path(R.home("bin"), "Rscript"),
-    c(shQuote(file.path(d, "analysis.R"))),
-    stdout = TRUE,
-    stderr = TRUE
+  skip_if_lowmem()
+  res2 <- withr::with_envvar(
+    child_env,
+    system2(
+      file.path(R.home("bin"), "Rscript"),
+      c(shQuote(file.path(d, "analysis.R"))),
+      stdout = TRUE,
+      stderr = TRUE
+    )
   )
   expect_true(
     any(grepl("results in", res2, fixed = TRUE)),
@@ -245,32 +270,32 @@ test_that("rptanl() renders a percent analysis", {
     share = c(50, 52, 53, 55, 54, 57, 58, 60),
     stringsAsFactors = FALSE
   )
-  a <- anltab(d, value = "share", prd = "year", by = "g", units = "percent")
+  a <- anytab(d, value = "share", prd = "year", by = "g", units = "percent")
   txt <- rptanl(a)
   expect_type(txt, "character")
   expect_match(paste(txt, collapse = "\n"), "ppchg")
 })
 
-test_that("anltab() refuses an infinite or zero rounding base (C7)", {
+test_that("anytab() refuses an infinite or zero rounding base (C7)", {
   d <- data.frame(year = 2019:2021, n = c(10, 12, 15))
   expect_error(
-    anltab(d, "n", "year", rnd = Inf),
+    anytab(d, "n", "year", rnd = Inf),
     "`rnd` must be one positive number, finite, or NULL"
   )
-  expect_error(anltab(d, "n", "year", rnd = 0), "`rnd` must be one positive")
+  expect_error(anytab(d, "n", "year", rnd = 0), "`rnd` must be one positive")
   expect_error(
-    anltab(d, "n", "year", suplim = Inf),
+    anytab(d, "n", "year", suplim = Inf),
     "`suplim` must be one non-negative number, finite, or NULL"
   )
 })
 
-test_that("anltab() orders text periods as yoy() reads them (C18)", {
+test_that("anytab() orders text periods as yoychg() reads them (C18)", {
   d <- data.frame(
     p = c("2020 Q2", "2020 Q1", "2020 Q4", "2020 Q3"),
     n = 1:4,
     stringsAsFactors = FALSE
   )
-  a <- anltab(d, "n", "p")
+  a <- anytab(d, "n", "p")
   expect_identical(a$change$p, c("2020 Q1", "2020 Q2", "2020 Q3", "2020 Q4"))
   expect_identical(a$change$previous, c(NA, 2, 1, 4))
   expect_identical(a$meta$periods, a$change$p)
@@ -311,21 +336,23 @@ test_that("anltab() orders text periods as yoy() reads them (C18)", {
   invisible(b$out)
 }
 
-test_that("anltab() prints as a box of facts", {
+test_that("anytab() prints as a box of facts", {
   rd <- data.frame(
     g = c("a", "b", "a", "b"),
     yr = c(1, 1, 2, 2),
     n = c(3, 40, 5, 60),
     stringsAsFactors = FALSE
   )
-  .o2_check(anltab(rd, "n", "yr", by = "g"), "Analysis of a published table",
-    c("Periods", "2 (1 to 2)", "comparison(s)", "Trend"))
+  .o2_check(
+    anytab(rd, "n", "yr", by = "g"),
+    "Analysis of a published table",
+    c("Periods", "2 (1 to 2)", "comparison(s)", "Trend")
+  )
 })
 
 test_that("rptanl() Markdown tables hold no raw control bytes", {
   d <- data.frame(
-    group = c(paste0("A\033[31mR", "\u009b", "2J"),
-              paste0("B", "\u202e", "C")),
+    group = c(paste0("A\033[31mR", "\u009b", "2J"), paste0("B", "\u202e", "C")),
     pct = c(20, 1.25),
     n = c(12000, 3),
     stringsAsFactors = FALSE
@@ -337,6 +364,5 @@ test_that("rptanl() Markdown tables hold no raw control bytes", {
   # each number on its own: 20 stays 20, not 20.00000
   expect_match(md, "| 20 |", fixed = TRUE)
   expect_match(md, "| 12,000 |", fixed = TRUE)
-  expect_identical(.md_num1(c(20, 2023, NA), big = FALSE),
-                   c("20", "2023", ""))
+  expect_identical(.md_num1(c(20, 2023, NA), big = FALSE), c("20", "2023", ""))
 })

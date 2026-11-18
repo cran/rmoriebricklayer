@@ -439,10 +439,12 @@ test_that("the capsule verbs refuse a usage error with exit status 2", {
     "Capsules (the checks of the rmbl GitHub Action)",
     fixed = TRUE
   )
-  # nothing under the path: ok, and nothing to refresh
+  # nothing under the path: nothing was checked, which fails verify (status
+  # 1, as a failed row); nothing to refresh
   r <- run_cli(c("verify", root))
-  expect_identical(r$status, 0L)
-  expect_match(r$out, "No manifests found under", fixed = TRUE)
+  expect_identical(r$status, 1L)
+  expect_match(r$out, "No capsule found under", fixed = TRUE)
+  expect_identical(run_cli(c("report", root))$status, 0L)
   r <- run_cli(c("refresh", root))
   expect_identical(r$status, 0L)
   expect_match(r$out, "nothing to refresh", fixed = TRUE)
@@ -745,7 +747,8 @@ test_that("the capsule verbs take the options of the rmbl action", {
       unlist(j$capsules$notes)
   )
   r <- run_cli(c("verify", dirname(cp$dir), "--manifests", "nothing/*"))
-  expect_match(r$out, "No manifests found under", fixed = TRUE)
+  expect_match(r$out, "No capsule found under", fixed = TRUE)
+  expect_identical(r$status, 1L)
   m <- withr::local_tempfile(fileext = ".json")
   writeLines('{"resource": {"filename": "data.csv", "sha256": "01"}}', m)
   writeLines(
@@ -1007,4 +1010,43 @@ test_that("verify refuses a local source that refresh and drift refuse", {
   cp <- src_capsule()
   x <- cpschk(cp$dir, "verify", fp = FALSE)
   expect_false("source: local path" %in% x$rows$check)
+})
+
+test_that("rmbl exit statuses follow the page", {
+  no_stdin()
+  # a missing folder for verify is a usage error (2), as 1.1.0 gives it;
+  # pack and wayback call a missing input a failed verb (1)
+  r <- run_cli(c("verify", file.path(tempdir(), "no-such-capsule")))
+  expect_identical(r$status, 2L)
+  expect_match(r$out, "is not a directory", fixed = TRUE)
+  # an option without its value is a usage error before anything runs
+  r <- run_cli(c("pack", ".", "--dest"))
+  expect_identical(r$status, 2L)
+  expect_match(r$out, "--dest needs a value", fixed = TRUE)
+  # the scheme is checked before the key is asked for
+  root <- withr::local_tempdir()
+  withr::local_envvar(RMBL_KEY = NA)
+  r <- run_cli(c("sign", root, "--scheme", "bogus"))
+  expect_identical(r$status, 2L)
+  expect_match(
+    r$out,
+    "--scheme takes hmac or a scheme pqcbknd() lists, not 'bogus'",
+    fixed = TRUE
+  )
+})
+
+test_that("a launcher with standard output closed exits 1", {
+  skip_on_os("windows")
+  l <- system.file("bin", "rmbl", package = "rmoriebricklayer")
+  skip_if_not(nzchar(l))
+  err <- withr::local_tempfile()
+  st <- system2("sh", c("-c", shQuote(paste(shQuote(l), "version >&-"))),
+                stdout = FALSE, stderr = err)
+  expect_identical(as.integer(st), 1L)
+  expect_identical(readLines(err), "rmbl: standard output is closed")
+  d <- withr::local_tempdir()
+  p <- instcli(dir = d, name = "rmbl")
+  st <- system2("sh", c("-c", shQuote(paste(shQuote(p), "version >&-"))),
+                stdout = FALSE, stderr = err)
+  expect_identical(as.integer(st), 1L)
 })

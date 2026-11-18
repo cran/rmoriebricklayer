@@ -925,7 +925,7 @@ test_that("mcar: degenerate inputs and a rejected test", {
 
 test_that(
   paste0(
-    "anltab and its report: bad inputs, drift ",
+    "anytab and its report: bad inputs, drift ",
     "against a prior, missing values"
   ),
   {
@@ -934,9 +934,9 @@ test_that(
       "otis_a01_individuals.csv",
       package = "rmoriebricklayer"
     ))
-    expect_error(anltab(1), "`data` must be a data frame")
+    expect_error(anytab(1), "`data` must be a data frame")
     expect_error(
-      anltab(otis, value = "individuals", prd = "year", prior = 1),
+      anytab(otis, value = "individuals", prd = "year", prior = 1),
       "`prior` must be a data frame"
     )
     prior <- otis
@@ -944,7 +944,7 @@ test_that(
     prior$extra <- 1
     cur <- otis
     cur$individuals[1] <- NA
-    a <- anltab(cur, value = "individuals", prd = "year", prior = prior)
+    a <- anytab(cur, value = "individuals", prd = "year", prior = prior)
     md <- rptanl(a, format = "markdown")
     expect_true(grepl("## Drift against the prior capsule", md, fixed = TRUE))
     expect_true(grepl("Columns removed: extra.", md, fixed = TRUE))
@@ -952,7 +952,7 @@ test_that(
     expect_identical(.md_table(data.frame()), "(no rows)")
     # fewer than three periods: the trend is not tested, and the print says so
     short <- otis[otis$year %in% head(sort(unique(otis$year)), 2), ]
-    out <- capture.output(print(anltab(
+    out <- capture.output(print(anytab(
       short,
       value = "individuals",
       prd = "year"
@@ -1074,9 +1074,11 @@ test_that(
     })
     got <- new.env()
     got$out <- character(0)
+    # a key of the right shape: the key is checked first (audit of 716154bd,
+    # N6), and the destination is what this asks about
     rc <- .bl_cli_data(
-      c("pull", "tbl"),
-      function(f) "/nonexistent-dir-zz/out.csv",
+      c("pull", "db/tbl"),
+      function(f) if (f == "--out") "/nonexistent-dir-zz/out.csv",
       function(s) got$out <- c(got$out, s)
     )
     expect_identical(rc, 1L)
@@ -1131,7 +1133,7 @@ test_that("power, bounds, scan adjustment and falsification guards", {
   e <- chgenv(now, prev[1:2, ], pop = c(1000, 2000), prepop = c(900, 1900))
   expect_identical(e$ratelo, 1000 * now$lower / c(1000, 2000))
   expect_identical(e$prerateup, 1000 * prev$upper[1:2] / c(900, 1900))
-  expect_error(yoypv(1), "`y` must come from yoy()")
+  expect_error(yoypv(1), "`y` must come from yoychg()")
   expect_error(scanadj(1), "`x` must be a data frame")
   expect_identical(.exact_ratio_p(c(0, 3), c(0, 3)), c(NA, 1))
   cal <- structure(
@@ -1296,7 +1298,7 @@ test_that(
 )
 
 test_that("yoy PDF with groups, verdict colours and notes", {
-  y <- yoy(
+  y <- yoychg(
     data.frame(
       year = rep(2000:2003, 2),
       g = rep(c("a", "b"), each = 4),

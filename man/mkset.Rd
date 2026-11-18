@@ -8,7 +8,7 @@ mkset(..., title = "Analysis results", file = NULL, plots = TRUE)
 }
 \arguments{
 \item{...}{The results. A name gives a result its heading
-(\code{"Change by year" = anltab(...)}); an unnamed one is headed by its
+(\code{"Change by year" = anytab(...)}); an unnamed one is headed by its
 box's own title. One unnamed plain list is read as the list of results.}
 
 \item{title}{The report's heading, default \code{"Analysis results"}.}
@@ -34,7 +34,7 @@ plot), Markdown ready for a GitHub comment or a paper, or plain text.
 \details{
 Any object this package returns can go in, and any other R object that
 prints (a model, a data frame): each is shown as it prints. A
-year-over-year table from \code{\link[=yoy]{yoy()}} becomes a real table in HTML and
+year-over-year table from \code{\link[=yoychg]{yoychg()}} becomes a real table in HTML and
 Markdown.
 
 In a file the boxes are drawn 80 characters wide and without colour, so
@@ -70,6 +70,6 @@ try(mkset(ginicoef(x), file = file.path(tempdir(), "r.pdf")))
 }
 \seealso{
 \code{\link[=rptanl]{rptanl()}} for the report of one
-\code{\link[=anltab]{anltab()}} analysis;
+\code{\link[=anytab]{anytab()}} analysis;
 \code{\link[=rmblapp]{rmblapp()}}, whose dashboard gathers results the same way.
 }

@@ -58,7 +58,7 @@
 #' optional field that is not one string, an ORCID iD
 #' with a wrong check digit, an e-mail address or a web
 #' page of the wrong shape; `days` not a positive whole
-#' number; `path` not a card file.
+#' number; `path` not a card file, or over 32 MiB.
 #'
 #' @param key Your private signing key, from [fipskg()]
 #'   or [pqckg()].
@@ -179,9 +179,10 @@ idcrd <- function(
 #' @rdname idcrd
 #' @export
 idcrdrd <- function(path) {
-  path <- .rmbl_file1(path, "path")
+  # within the 32 MiB the package's JSON documents are held to
+  path <- .rmbl_file1(path, "path", max = 32 * 2^20)
   x <- .rmbl_json_text(
-    paste(readLines(path, warn = FALSE), collapse = "\n"),
+    paste(.rmbl_json_file_lines(path), collapse = "\n"),
     simplifyVector = FALSE
   )
   if (!is.list(x) || !identical(x$type, .bl_id_type)) {
@@ -355,7 +356,7 @@ print.rmbl_id_check <- function(x, ...) {
   if (!nzchar(id)) {
     return("")
   }
-  id <- toupper(sub("^https?://(www\\.)?orcid\\.org/", "", id))
+  id <- .rmbl_upper(sub("^https?://(www\\.)?orcid\\.org/", "", id))
   if (!grepl("^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]$", id)) {
     stop(
       "idcrd: `orcid` must look like 0000-0002-1825-0097",
@@ -441,10 +442,10 @@ print.rmbl_id_check <- function(x, ...) {
   if (!is.character(card$public) || !is.character(card$scheme)) {
     return("")
   }
-  h <- toupper(csha256(charToRaw(paste0(
+  h <- .rmbl_upper(csha256(charToRaw(paste0(
     card$scheme,
     ":",
-    tolower(card$public)
+    .rmbl_lower(card$public)
   ))))
   paste(substring(h, seq(1L, 61L, 4L), seq(4L, 64L, 4L)), collapse = " ")
 }
@@ -501,11 +502,19 @@ print.rmbl_id_check <- function(x, ...) {
     ok,
     sprintf(
       "valid %s to %s; checked at %s",
-      card$issued_utc %||% "?",
-      card$expires_utc %||% "?",
+      .bl_id_txt(card$issued_utc),
+      .bl_id_txt(card$expires_utc),
       .bl_id_utc(at)
     )
   )
+}
+
+#' A card member for a message: itself when it is one string, else "?".
+#' @param v The member as read from the card file.
+#' @return One string.
+#' @noRd
+.bl_id_txt <- function(v) {
+  if (is.character(v) && length(v) == 1L && !is.na(v)) v else "?"
 }
 
 #' The rows a card check adds for an ORCID iD, a fingerprint and an
@@ -541,7 +550,7 @@ print.rmbl_id_check <- function(x, ...) {
   if (!is.character(fpr) || length(fpr) != 1L || is.na(fpr)) {
     stop("idcrdvrf: `fpr` must be one string", call. = FALSE)
   }
-  squash <- function(s) toupper(gsub("[^0-9A-Fa-f]", "", s))
+  squash <- function(s) .rmbl_upper(gsub("[^0-9A-Fa-f]", "", s))
   ok <- nzchar(squash(fpr)) && identical(squash(fpr), squash(.bl_id_fpr(card)))
   .rmbl_attest_row(
     "fingerprint",
@@ -572,7 +581,7 @@ print.rmbl_id_check <- function(x, ...) {
     )
   }
   ok <- identical(atst$scheme, card$scheme) &&
-    identical(tolower(atst$public), tolower(card$public))
+    identical(.rmbl_lower(atst$public), .rmbl_lower(card$public))
   .rmbl_attest_row(
     "signed_by_card",
     ok,

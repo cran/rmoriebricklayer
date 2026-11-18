@@ -23,13 +23,29 @@
 #' file.} \item{\code{data_sha256}}{[vrfsha256()] finds that its
 #' SHA-256 equals \code{resource$sha256} (64 hex characters).}
 #' \item{\code{data_size_bytes}}{when \code{resource$size_bytes} is recorded:
-#' the size on disk matches.} \item{\code{data_readable}}{a \code{.csv} file is
-#' read with \code{utils::read.csv()}; a non-CSV file fails this row when a row
-#' count or schema is recorded (they cannot be checked).}
+#' the size on disk matches.} \item{\code{data_readable}}{a \code{.csv} file
+#' (gzip-compressed or plain, its name's case aside) reads as a table:
+#' \code{utils::read.csv()} reads its header and first five rows, so the
+#' columns are found as it finds them, and \code{scan()} the rest a block of
+#' 65,536 rows at a time, keeping one field of each, so memory stays at
+#' about that many fields plus the longest line whatever the file's size;
+#' \code{read.csv()}'s "incomplete final line" and "EOF within quoted
+#' string" warnings are no fault, any other error or warning fails the
+#' row with its words in \code{detail}. A row name used twice, which
+#' \code{read.csv()} refuses, is not looked at. A gzip file is inflated
+#' under the caps every reader of the package has: at most the option
+#' \code{rmoriebricklayer.maxcsvbytes} (1 GiB), and past 64 MiB at most
+#' \code{rmoriebricklayer.maxgzratio} (200) times its compressed size. A
+#' table of very repetitive rows can pass those: raise the options for
+#' the check, as \code{detail} then says.
+#' A non-CSV file fails this row when a row count or schema is recorded
+#' (they cannot be checked).}
 #' \item{\code{data_row_count}}{when \code{resource$row_count_data_rows} is
-#' recorded: the CSV has that many rows.} \item{\code{schema_valid}}{when a
+#' recorded: the CSV has that many rows, counted as \code{read.csv()} counts
+#' them, in the same pass.} \item{\code{schema_valid}}{when a
 #' \code{schema} is recorded: [valsch()] finds no fatal issue
-#' (warnings are listed in \code{detail} but pass).}
+#' (warnings are listed in \code{detail} but pass); the table is read whole
+#' for it, and when it cannot be the row fails with the reason.}
 #' \item{\code{manifest_consistent}}{when \code{mnffile} is given, or the
 #' capsule holds \code{manifest.json}: every result with numeric \code{observed}
 #' and \code{expected}, a \code{tol} and a status of \code{PASS} or
@@ -106,40 +122,24 @@ vrfcps <- function(
   mnffile = NULL,
   scrfile = NULL
 ) {
-  cpsdir <- .rmbl_string1(cpsdir, "cpsdir")
+  # by their bytes, as the file system names them (.rmbl_fspath()): marked
+  # UTF-8, a capsule under "donn\u00e9es/" was "not an existing directory"
+  # in a C locale
+  cpsdir <- .rmbl_fspath(.rmbl_string1(cpsdir, "cpsdir"))
   if (!dir.exists(cpsdir)) {
     stop("`cpsdir` is not an existing directory: ", cpsdir, call. = FALSE)
   }
-  provfile <- .rmbl_string1(provfile, "provfile")
+  provfile <- .rmbl_fspath(.rmbl_string1(provfile, "provfile"))
   if (!is.null(dfile)) {
-    dfile <- .rmbl_string1(dfile, "dfile")
+    dfile <- .rmbl_fspath(.rmbl_string1(dfile, "dfile"))
   }
   if (!is.null(mnffile)) {
-    mnffile <- .rmbl_string1(mnffile, "mnffile")
+    mnffile <- .rmbl_fspath(.rmbl_string1(mnffile, "mnffile"))
   }
   if (!is.null(scrfile)) {
-    scrfile <- .rmbl_string1(scrfile, "scrfile")
+    scrfile <- .rmbl_fspath(.rmbl_string1(scrfile, "scrfile"))
   }
-  acc <- .vc_acc()
-  prov <- .vc_provenance(acc, provfile, cpsdir)
-  dpath <- .vc_data_file(acc, dfile, prov, cpsdir)
-  synth_sidecar <- !is.null(dpath) && file.exists(paste0(dpath, ".synthetic"))
-  df <- if (!is.null(dpath)) .vc_data_checks(acc, dpath, prov)
-  if (!is.null(df)) {
-    .vc_frame_checks(acc, df, prov)
-  }
-  # a capsule that carries manifest.json is checked against it by default:
-  # vrfcps(dir) used to open the data and never the manifest
-  if (
-    is.null(mnffile) &&
-      file.exists(file.path(cpsdir, "manifest.json"))
-  ) {
-    mnffile <- "manifest.json"
-  }
-  manifest <- if (!is.null(mnffile)) .vc_manifest(acc, mnffile, cpsdir)
-  .vc_script(acc, scrfile, prov, manifest, cpsdir)
-  .vc_synthetic(acc, dpath, synth_sidecar, manifest, prov)
-  .vc_result(acc)
+  .vc_run(cpsdir, provfile, dfile, mnffile, scrfile)
 }
 
 #' @export
@@ -224,7 +224,8 @@ capenv <- function(pkgs = loadedNamespaces()) {
   if (!is.character(pkgs) || anyNA(pkgs)) {
     stop("`pkgs` must be package names", call. = FALSE)
   }
-  pkgs <- sort(unique(pkgs))
+  # by their bytes: the order goes into a manifest's digest
+  pkgs <- .rmbl_bsort(unique(.rmbl_valid_text(pkgs, "pkgs")))
   out <- list(
     r_version = as.character(getRversion()),
     platform = R.version$platform,
@@ -285,8 +286,9 @@ format.rmbl_capenv <- function(x, ...) {
 #'
 #' @details The fields used, with their fallbacks: \itemize{ \item author:
 #' \code{dataset$publisher}, else \code{"Unknown publisher"}; \item title:
-#' \code{resource$name}, else \code{dataset$package_slug}, else \code{"Untitled
-#' dataset"}; \item year: the first four characters of \code{captured_at_utc},
+#' \code{resource$name}, else \code{dataset$package_slug}, else
+#' \code{"Untitled dataset"}; \item year: the first four characters of
+#' \code{captured_at_utc},
 #' else the current year; retrieval date: its first ten characters (omitted if
 #' absent); \item link: \code{https://doi.org/<dataset$doi>} if a DOI is
 #' recorded, else \code{resource$direct_url}, else
@@ -312,7 +314,7 @@ format.rmbl_capenv <- function(x, ...) {
 #'   captured_at_utc = "2026-06-23T04:41:40Z",
 #'   dataset = list(publisher = "Ontario Ministry of the Solicitor General",
 #'                  licence_short = "OGL-Ontario",
-#'                  package_slug = "data-on-inmates-in-ontario"),
+#'                  package_slug = "jahn-settlement-data-inmates-ontario"),
 #'   resource = list(name = "Restrictive Confinement - Detailed Dataset",
 #'                   direct_url = "https://data.ontario.ca/example.csv")
 #' )
@@ -332,7 +334,7 @@ format.rmbl_capenv <- function(x, ...) {
 #' citecps(NULL)
 #'
 #' # anything else that is not a list is an error
-#' try(citecps("data-on-inmates-in-ontario"))
+#' try(citecps("jahn-settlement-data-inmates-ontario"))
 #' @export
 citecps <- function(prov) {
   if (is.null(prov)) {
@@ -374,6 +376,44 @@ format.rmbl_citation <- function(x, ...) {
       "cat(x$text) or cat(x$bibtex) gives either as it is, to paste."
     )
   )
+}
+
+#' vrfcps() on checked arguments.
+#'
+#' cpsseal()'s look-ahead runs it on the provenance as the seal will write
+#' it (`prov`), so what the check would call an error is refused before
+#' anything is written, by the check's own code.
+#' @param cpsdir,provfile,dfile,mnffile,scrfile As for vrfcps(), checked.
+#' @param prov The provenance, as loadprov() reads it, or NULL to read
+#'   `provfile`.
+#' @return The vrfcps() result.
+#' @noRd
+.vc_run <- function(cpsdir, provfile = "data_provenance.json", dfile = NULL,
+                    mnffile = NULL, scrfile = NULL, prov = NULL) {
+  acc <- .vc_acc()
+  if (is.null(prov)) {
+    prov <- .vc_provenance(acc, provfile, cpsdir)
+  } else {
+    .vc_note(acc, "provenance_readable", TRUE, file.path(cpsdir, provfile))
+  }
+  dpath <- .vc_data_file(acc, dfile, prov, cpsdir)
+  synth_sidecar <- !is.null(dpath) && file.exists(paste0(dpath, ".synthetic"))
+  df <- if (!is.null(dpath)) .vc_data_checks(acc, dpath, prov)
+  if (!is.null(df)) {
+    .vc_frame_checks(acc, df, prov)
+  }
+  # a capsule that carries manifest.json is checked against it by default:
+  # vrfcps(dir) used to open the data and never the manifest
+  if (
+    is.null(mnffile) &&
+      file.exists(file.path(cpsdir, "manifest.json"))
+  ) {
+    mnffile <- "manifest.json"
+  }
+  manifest <- if (!is.null(mnffile)) .vc_manifest(acc, mnffile, cpsdir)
+  .vc_script(acc, scrfile, prov, manifest, cpsdir)
+  .vc_synthetic(acc, dpath, synth_sidecar, manifest, prov)
+  .vc_result(acc)
 }
 
 #' A fresh record of vrfcps()'s checks, with the rows it requires.
@@ -548,7 +588,9 @@ format.rmbl_citation <- function(x, ...) {
 #' @param acc The vrfcps() checks so far, where the data checks are added.
 #' @param dpath The data file.
 #' @param prov The provenance.
-#' @return The data as a data frame (a CSV that reads), or NULL.
+#' @return For a CSV that reads, a list: its row count `n` and, when the
+#'   provenance pins a schema, the table `df` (an error message when it
+#'   cannot be read whole); else NULL.
 #' @noRd
 .vc_data_checks <- function(acc, dpath, prov) {
   .vc_sha(acc, dpath, prov)
@@ -556,17 +598,27 @@ format.rmbl_citation <- function(x, ...) {
     .vc_note(
       acc,
       "data_size_bytes",
-      file.size(dpath) == as.numeric(prov$resource$size_bytes),
+      isTRUE(
+        file.size(dpath) ==
+          suppressWarnings(as.numeric(prov$resource$size_bytes)[1L])
+      ),
       sprintf("%d bytes on disk", file.size(dpath))
     )
   }
-  if (grepl("\\.csv$", dpath, ignore.case = TRUE)) {
-    df <- tryCatch(
-      utils::read.csv(dpath, check.names = FALSE, stringsAsFactors = FALSE),
-      error = function(e) NULL
-    )
-    .vc_note(acc, "data_readable", !is.null(df), dpath)
-    return(df)
+  if (grepl("\\.csv$", .rmbl_lower(dpath), useBytes = TRUE)) {
+    # a pipe put in the data file's place has no end: read.csv() waited on it
+    # for ever, after the hash row had already failed
+    reg <- identical(.rmbl_path_kind(path.expand(dpath)), "regular")
+    sc <- if (reg) .vc_csv_scan(dpath) else list(why = "not a regular file")
+    .vc_note(acc, "data_readable", is.null(sc$why), if (is.null(sc$why)) {
+      dpath
+    } else {
+      sprintf("%s does not read as a CSV: %s", dpath, sc$why)
+    })
+    if (!is.null(sc$why)) {
+      return(NULL)
+    }
+    return(list(n = sc$n, df = if (!is.null(prov$schema)) .vc_csv_whole(dpath)))
   }
   if (
     !is.null(prov$resource$row_count_data_rows) ||
@@ -583,6 +635,89 @@ format.rmbl_citation <- function(x, ...) {
     )
   }
   NULL
+}
+
+#' Whether a CSV reads as a table, and its row count, read a block of rows
+#' at a time.
+#'
+#' read.csv() of the whole file cost the seal and the check 1 GB for a
+#' 127 MB file, and ran out of memory at 1.39 GB with no reason given. Here
+#' read.csv() reads the header and the first rows, so the columns are found
+#' as it finds them, and scan() reads the rest of the same connection
+#' `block` rows at a time, keeping one field of each row: memory stays at
+#' about `block` fields plus the longest line, time grows with the file,
+#' and the row count is read.csv()'s (a duplicated row name, which
+#' read.csv() refuses, is not looked at). Its "incomplete final line"
+#' warning is no fault; any other error or warning is the reason.
+#' @param path The CSV file, plain or gzip-compressed (inflated no further
+#'   than the option rmoriebricklayer.maxcsvbytes).
+#' @param block Rows read at a time.
+#' @return A list: `n`, the rows, and `why`, NULL when it reads.
+#' @noRd
+.vc_csv_scan <- function(path, block = 65536L) {
+  tryCatch({
+    plain <- .bl_gunzip_capped(path)
+    if (!identical(plain, path)) {
+      on.exit(unlink(plain), add = TRUE)
+    }
+    con <- file(plain, "rt", raw = TRUE)
+    on.exit(close(con), add = TRUE)
+    .vc_quiet(function() .vc_csv_count(con, block))
+  }, error = function(e) list(n = NA_integer_, why = conditionMessage(e)))
+}
+
+#' Counts the rows of an open CSV connection, as .vc_csv_scan() reads it.
+#' @param con The connection, opened as text.
+#' @param block Rows read at a time.
+#' @return A list: `n` and `why` (NULL).
+#' @noRd
+.vc_csv_count <- function(con, block) {
+  d <- utils::read.csv(con, nrows = 5L, colClasses = "character",
+                       row.names = NULL, check.names = FALSE,
+                       na.strings = character())
+  n <- nrow(d)
+  what <- c(list(""), rep(list(NULL), ncol(d) - 1L))
+  repeat {
+    x <- scan(con, what = what, sep = ",", quote = "\"", nmax = block,
+              quiet = TRUE, fill = TRUE, multi.line = FALSE,
+              na.strings = character(), comment.char = "")
+    if (!length(x[[1L]])) {
+      return(list(n = n, why = NULL))
+    }
+    n <- n + length(x[[1L]])
+  }
+}
+
+#' Runs a CSV reader with its "incomplete final line" warning muffled and
+#' every other warning made the error it stands for.
+#' @param f The reader.
+#' @return What `f` returns.
+#' @noRd
+.vc_quiet <- function(f) {
+  withCallingHandlers(f(), warning = function(w) {
+    # how the file ends is not its readability: a last line without a
+    # newline, or a quote left open (capsules sealed with one passed)
+    m <- conditionMessage(w)
+    if (grepl("incomplete final line", m, fixed = TRUE) ||
+          grepl("EOF within quoted string", m, fixed = TRUE)) {
+      invokeRestart("muffleWarning")
+    }
+    stop(conditionMessage(w), call. = FALSE)
+  })
+}
+
+#' A CSV read whole, for the schema check, or the reason it cannot be.
+#' @param path The CSV file.
+#' @return A data frame, or an error message.
+#' @noRd
+.vc_csv_whole <- function(path) {
+  tryCatch(.vc_quiet(function() {
+    plain <- .bl_gunzip_capped(path)
+    if (!identical(plain, path)) {
+      on.exit(unlink(plain), add = TRUE)
+    }
+    utils::read.csv(plain, check.names = FALSE, stringsAsFactors = FALSE)
+  }), error = conditionMessage)
 }
 
 #' The data file's SHA-256 against the one the provenance pins.
@@ -629,7 +764,8 @@ format.rmbl_citation <- function(x, ...) {
 
 #' The data's row count and schema against the provenance.
 #' @param acc The vrfcps() checks so far, where row and schema checks are added.
-#' @param df The data.
+#' @param df The data, as .vc_data_checks() gives it: its row count `n`
+#'   and, for a schema, the table `df` or why it could not be read.
 #' @param prov The provenance.
 #' @noRd
 .vc_frame_checks <- function(acc, df, prov) {
@@ -637,10 +773,20 @@ format.rmbl_citation <- function(x, ...) {
     .vc_note(
       acc,
       "data_row_count",
-      nrow(df) == as.numeric(prov$resource$row_count_data_rows),
-      sprintf("%d rows on disk", nrow(df))
+      isTRUE(
+        df$n ==
+          suppressWarnings(as.numeric(prov$resource$row_count_data_rows)[1L])
+      ),
+      sprintf("%d rows on disk", df$n)
     )
   }
+  if (!is.null(prov$schema) && is.character(df$df)) {
+    .vc_note(acc, "schema_valid", FALSE, paste(
+      "the table could not be read whole for the schema check:", df$df
+    ))
+    return(invisible(NULL))
+  }
+  df <- df$df
   if (!is.null(prov$schema)) {
     issues <- valsch(df, prov)
     fatal <- vapply(

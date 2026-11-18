@@ -52,7 +52,15 @@ test_that(
       expect_false(m$old[i] %in% ns, info = m$old[i])
       expect_true(m$new[i] %in% ns, info = m$new[i])
       expect_identical(length(old), length(new), info = m$old[i])
-      tf <- names(formals(get(m$new[i], asNamespace("rmoriebricklayer"))))
+      ns_env <- asNamespace("rmoriebricklayer")
+      tf <- names(formals(get(m$new[i], ns_env)))
+      # a generic takes its arguments through its methods (rtcalc(x, ...) and
+      # rtcalc.data.frame(x, count, pop, ...)): read those too
+      tbl <- ns_env[[".__S3MethodsTable__."]]
+      own <- grep(paste0("^", m$new[i], "\\."), names(tbl), value = TRUE)
+      for (meth in own) {
+        tf <- union(tf, names(formals(tbl[[meth]])))
+      }
       expect_true(all(new %in% tf), info = m$old[i])
     }
   }
@@ -250,7 +258,7 @@ test_that("0.5.x option names are still read", {
 test_that("old plot values are translated", {
   grDevices::pdf(NULL)
   on.exit(grDevices::dev.off(), add = TRUE)
-  y <- yoy(
+  y <- yoychg(
     data.frame(year = 2019:2022, n = c(10, 12, 9, 15)),
     value = "n",
     prd = "year"
@@ -267,7 +275,7 @@ test_that("old plot values are translated", {
     plot(sf, what = c("flowrate", "stkrate"))
   )
   tab <- data.frame(year = 2018:2022, n = c(10, 12, 9, 15, 14), pop = 1000)
-  a <- anltab(tab, value = "n", prd = "year", pop = "pop")
+  a <- anytab(tab, value = "n", prd = "year", pop = "pop")
   expect_identical(plot(a, which = "rate_change"), plot(a, which = "ratechg"))
 })
 
@@ -316,8 +324,8 @@ test_that("results come back under their 0.5.x names through an alias", {
 
 test_that("a translated result prints, plots and is read back by the aliases", {
   seg <- data.frame(year = 2019:2022, n = c(10, 12, 9, 15))
-  y <- yoy(seg, value = "n", period = "year")
-  y1 <- yoy(seg, value = "n", prd = "year")
+  y <- yoychg(seg, value = "n", period = "year")
+  y1 <- yoychg(seg, value = "n", prd = "year")
   expect_true("pct_change" %in% names(y))
   expect_false("pct_change" %in% names(y1))
   expect_identical(capture.output(print(y)), capture.output(print(y1)))

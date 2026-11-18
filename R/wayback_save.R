@@ -68,12 +68,6 @@
 #' @param maxcap The most captures this run starts; default
 #'   1000. The rest are left for the next run (with the same
 #'   \code{output}, it carries on from them).
-#' @param fallback \code{"rmorie"} saves what the Wayback Machine refused (a
-#'   server that refuses its crawler, Statistics Canada among them) from this
-#'   connection to archive.rmorie.com, with \code{\link{arccap}}; the result is
-#'   attribute \code{archive}. \code{NULL} (default) does not.
-#' @param reason With \code{fallback = "rmorie"}: why the files are kept (20
-#'   characters or more).
 #'
 #' @return A data frame of class \code{rmbl_wayback_save}, one
 #'   row per URL with a result: \code{url}, \code{status}
@@ -162,13 +156,8 @@ wbsave <- function(
   capall = FALSE,
   quiet = NULL,
   permin = 6,
-  maxcap = 1000,
-  fallback = NULL,
-  reason = NULL
+  maxcap = 1000
 ) {
-  if (!is.null(fallback) && !identical(fallback, "rmorie")) {
-    stop('`fallback` must be "rmorie" or NULL', call. = FALSE)
-  }
   urls <- .bl_wb_check_urls(urls)
   keys <- .bl_wb_check_keys(ak, sk)
   opt <- .bl_wb_check_opts(
@@ -212,7 +201,7 @@ wbsave <- function(
   .bl_anim_update(w$anim, sum(w$counts), .bl_wb_info(w), force = TRUE)
   started <- length(todo) + length(resumed) - length(not_sent)
   .bl_anim_done(w$anim, .bl_wb_summary(w, started, length(kept), not_sent))
-  .bl_wb_result(w, urls, not_sent, fallback, reason)
+  .bl_wb_result(w, urls, not_sent)
 }
 
 #' @export
@@ -469,17 +458,13 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
 #' @param w The run's state.
 #' @param urls The URLs of the run.
 #' @param not_sent The URLs not sent this run.
-#' @param fallback,reason As for wbsave().
 #' @return An rmbl_wayback_save data frame.
 #' @noRd
-.bl_wb_result <- function(w, urls, not_sent, fallback, reason) {
+.bl_wb_result <- function(w, urls, not_sent) {
   out <- .bl_wb_frame(w$results[intersect(urls, names(w$results))])
   attr(out, "not_sent") <- not_sent
   if (!is.null(w$stopped)) {
     attr(out, "stopped") <- w$stopped
-  }
-  if (identical(fallback, "rmorie")) {
-    out <- .bl_wb_fallback(out, reason)
   }
   out
 }
@@ -524,13 +509,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
       message = paste("found on retry;", failed$message[i]),
       at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
     )
-    cat(
-      tojs(rec, auto_unbox = TRUE),
-      "\n",
-      sep = "",
-      file = output,
-      append = TRUE
-    )
+    .rmbl_wappend(output, c(tojs(rec, auto_unbox = TRUE), "\n"))
     found <- found + 1L
     failed$status[i] <- "existing"
   }
@@ -624,12 +603,20 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
 #' @param res A transport reply.
 #' @return A list, or NULL.
 #' @noRd
-.bl_wb_json <- function(res) {
+.bl_wb_json <- function(res, keys = NULL) {
   if (!length(res$body) || length(res$body) > .bl_wb_body_max) {
     return(NULL)
   }
   j <- tryCatch(.rmbl_json_parse(rawToChar(res$body)), error = function(e) NULL)
-  if (is.list(j)) j else NULL
+  if (!is.list(j)) {
+    return(NULL)
+  }
+  # the message is shown and written to the results: one that repeats the
+  # keys sent is not
+  if (.bl_key_echoed(.bl_wb_str(j$message), keys)) {
+    j$message <- .bl_key_withheld_msg
+  }
+  j
 }
 
 #' Returns a field as one string, or NA.
@@ -668,7 +655,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
   if (
     !is.na(x) &&
       grepl("^[A-Za-z0-9._:-]{1,200}$", x) &&
-      !grepl("^error", x, ignore.case = TRUE)
+      !grepl(.rmbl_ci("^error"), x, perl = TRUE, useBytes = TRUE)
   ) {
     x
   } else {
@@ -784,13 +771,11 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
 .bl_wb_throttled <- function(j) {
   isTRUE(.bl_wb_str(j$status_ext) %in% .bl_wb_throttle_codes) ||
     grepl(
-      paste0(
+      .rmbl_ci(paste0(
         "already reached the limit of active sessions|cannot start ",
         "capture|too many requests|try again later"
-      ),
-      .bl_wb_str(j$message) %|NA|% "",
-      ignore.case = TRUE
-    )
+      )),
+      .bl_wb_str(j$message) %|NA|% "", perl = TRUE, useBytes = TRUE)
 }
 
 #' The account's own daily cap: nothing more can be captured today, so the run
@@ -804,13 +789,11 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
       c("error:max-daily-bandwidth", "error:max-daily-bandwidth-from-ip")
   ) ||
     grepl(
-      paste0(
+      .rmbl_ci(paste0(
         "cannot make more than [0-9,]+ captures per day|daily ",
         "(not-logged-in )?captures limit"
-      ),
-      .bl_wb_str(j$message) %|NA|% "",
-      ignore.case = TRUE
-    )
+      )),
+      .bl_wb_str(j$message) %|NA|% "", perl = TRUE)
 }
 
 #' Returns `b` when `a` is NA, else `a`.
@@ -835,6 +818,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
   if (is.null(output) || !file.exists(output)) {
     return(rows)
   }
+  .rmbl_file1(output, "output")
   for (l in readLines(output, warn = FALSE)) {
     r <- tryCatch(.rmbl_json_parse(l), error = function(e) NULL)
     u <- .bl_wb_str(if (is.list(r)) r$url)
@@ -1001,7 +985,8 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
       )
     }
   }
-  bad <- urls[!grepl("^https?://[^[:space:]]+$", urls, ignore.case = TRUE)]
+  bad <- urls[!grepl(.rmbl_ci("^https?://[^[:space:]]+$"), urls, perl = TRUE,
+      useBytes = TRUE)]
   if (length(bad)) {
     stop(
       sprintf("not an http(s) URL: %s", .rmbl_printable(bad[[1L]])),
@@ -1194,6 +1179,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
     sprintf("Authorization: LOW %s:%s", keys$ak, keys$sk),
     "Accept: application/json"
   )
+  w$keys <- c(keys$ak, keys$sk)
   w$results <- prior[kept]
   w$counts <- c(saved = 0L, existing = 0L, failed = 0L, submitted = 0L)
   # captures in flight, by URL (two URLs given the same job id each keep their
@@ -1253,13 +1239,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
   w$results[[u]] <- rec
   w$counts[[status]] <- w$counts[[status]] + 1L
   if (!is.null(w$output)) {
-    cat(
-      tojs(rec, auto_unbox = TRUE),
-      "\n",
-      sep = "",
-      file = w$output,
-      append = TRUE
-    )
+    .rmbl_wappend(w$output, c(tojs(rec, auto_unbox = TRUE), "\n"))
   }
 }
 
@@ -1399,7 +1379,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
 .bl_wb_submit <- function(w, u, now) {
   res <- .bl_wb_post(.bl_wb_form(w, u), w$hdr)
   .bl_wb_refused(res)
-  j <- .bl_wb_json(res)
+  j <- .bl_wb_json(res, w$keys)
   id <- .bl_wb_job_id(j$job_id)
   if (!is.na(id)) {
     w$inflight[[u]] <- list(
@@ -1517,7 +1497,7 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
     w$hdr
   )
   .bl_wb_refused(res)
-  j <- .bl_wb_json(res)
+  j <- .bl_wb_json(res, w$keys)
   st <- .bl_wb_str(j$status) %|NA|% ""
   if (identical(res$status, 404L) && !identical(st, "error")) {
     .bl_wb_finish(
@@ -1579,7 +1559,8 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
   orig <- .bl_wb_str(j$original_url)
   if (
     is.na(orig) ||
-      !grepl("^https?://[^[:space:]]+$", orig, ignore.case = TRUE)
+      !grepl(.rmbl_ci("^https?://[^[:space:]]+$"), orig, perl = TRUE,
+          useBytes = TRUE)
   ) {
     orig <- u
   }
@@ -1692,13 +1673,11 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
   # status of archive.org's own API (a capture refused or a job lost), and those
   # pages are live
   grepl(
-    paste0(
+    .rmbl_ci(paste0(
       "target server cannot find|returned 404|returned ",
       "410|error:not-found|error:gone"
-    ),
-    msg,
-    ignore.case = TRUE
-  )
+    )),
+    msg, perl = TRUE, useBytes = TRUE)
 }
 
 #' A failure that a capture today cannot fix: the URL's or the account's daily
@@ -1708,47 +1687,10 @@ wbrtry <- function(output, incgone = FALSE, lookup = TRUE, ...) {
 #' @noRd
 .bl_wb_daily_failure <- function(msg) {
   grepl(
-    paste0(
+    .rmbl_ci(paste0(
       "already captured|captured already today|captured [0-9]+ times ",
       "today|too-many-daily-captures|",
       "daily capture limit|captures per day"
-    ),
-    msg,
-    ignore.case = TRUE
-  )
-}
-
-#' Saves what the Wayback Machine refused (a server that refuses its crawler)
-#' from this connection to archive.rmorie.com instead, as attribute archive of
-#' the wbsave() result.
-#' @param out A wbsave() result.
-#' @param reason Why the files are kept.
-#' @return The result, with attribute archive (an arccap() result, or the reason
-#'   it failed) when anything was refused.
-#' @noRd
-.bl_wb_fallback <- function(out, reason) {
-  refused <- out$status == "failed" &
-    grepl(
-      "cannot find|blocks access|HTTP status=40[134]|not reachable",
-      ifelse(is.na(out$message), "", out$message)
-    )
-  if (!any(refused)) {
-    return(out)
-  }
-  attr(out, "archive") <- tryCatch(
-    arccap(
-      out$url[refused],
-      file.path(tempdir(), "rmbl-wayback-fallback"),
-      tsa = NULL,
-      upload = "rmorie",
-      reason = reason %||% ""
-    ),
-    error = function(e) {
-      .bl_unless_interrupted(
-        e,
-        structure(conditionMessage(e), class = "rmbl_fail")
-      )
-    }
-  )
-  out
+    )),
+    msg, perl = TRUE, useBytes = TRUE)
 }

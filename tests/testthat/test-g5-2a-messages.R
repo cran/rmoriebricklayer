@@ -29,7 +29,7 @@ test_that(
     err(chnvrf(list()), "chnvrf: `chain` must come from chnnew()")
     err(
       yoycsv(1, tempfile()),
-      "yoycsv: `x` must be an rmbl_yoy object from yoy()"
+      "yoycsv: `x` must be an rmbl_yoy object from yoychg()"
     )
     # S3 methods are named by their generic, and do.call() is followed to the
     # function it calls
@@ -44,17 +44,6 @@ test_that("a statistic that returns no finite number is refused by cpsfals()", {
   err(
     cpsfals(d, function(x) NA_real_, n = 9L),
     "cpsfals: the statistic must return one finite number"
-  )
-})
-
-test_that("a damaged credentials file is named", {
-  dir <- withr::local_tempdir()
-  withr::local_envvar(XDG_CONFIG_HOME = dir)
-  dir.create(file.path(dir, "morie"))
-  writeLines("[1]", file.path(dir, "morie", "credentials.json"))
-  expect_error(
-    .bl_read_credentials(),
-    "is not a JSON object; fix or remove it"
   )
 })
 
@@ -82,8 +71,8 @@ test_that(
 test_that("literal copies in function bodies start with the function name", {
   df <- data.frame(a = 1:3, b = c("x", "y", "z"), stringsAsFactors = FALSE)
   err(
-    anltab(data.frame(v = 1, p = 1), value = "zz", prd = "p"),
-    "anltab: column `zz` not found in `data`"
+    anytab(data.frame(v = 1, p = 1), value = "zz", prd = "p"),
+    "anytab: column `zz` not found in `data`"
   )
   err(expcnts(1, 0, 1), "expcnts: `pop` must be positive")
   err(stdinc(1:2, 1:3), "stdinc: `obs` and `expd` must be the same length")
@@ -168,7 +157,7 @@ test_that("literal copies in function bodies start with the function name", {
   err(topcors(df), "topcors: need at least two numeric columns to correlate")
   err(misspat(1), "misspat: `data` must be a data frame")
   err(misspat(data.frame()), "misspat: `data` has no columns")
-  err(yoybnd(1), "yoybnd: `y` must come from yoy()")
+  err(yoybnd(1), "yoybnd: `y` must come from yoychg()")
   err(cpsrpt(1), "cpsrpt: `data` must be a data frame")
   err(mnfrecseed(1), "mnfrecseed: `man` must be a manifest from mkmnf()")
   err(duprows(1), "duprows: `data` must be a data frame")
@@ -196,8 +185,14 @@ test_that("literal copies in function bodies start with the function name", {
   out <- withr::local_tempfile()
   writeLines("x", out)
   err(wbrtry(out, incgone = NA), "wbrtry: `incgone` must be TRUE or FALSE")
-  err(yoyjs(1, tempfile()), "yoyjs: `x` must be an rmbl_yoy object from yoy()")
-  err(yoymd(1, tempfile()), "yoymd: `x` must be an rmbl_yoy object from yoy()")
+  err(
+    yoyjs(1, tempfile()),
+    "yoyjs: `x` must be an rmbl_yoy object from yoychg()"
+  )
+  err(
+    yoymd(1, tempfile()),
+    "yoymd: `x` must be an rmbl_yoy object from yoychg()"
+  )
 })
 
 test_that("the signing refusals name their function", {

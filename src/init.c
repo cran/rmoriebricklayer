@@ -178,6 +178,7 @@ extern SEXP C_rmbl_http_download(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_rmbl_redirect_check(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_rmbl_url_check(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_rmbl_net_probe(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_rmbl_sigpipe_probe(SEXP);
 extern SEXP C_rmbl_wayback(SEXP, SEXP, SEXP);
 extern SEXP C_rmbl_wayback_into(SEXP, SEXP, SEXP, SEXP);
 /* .Call wrappers (defined in rmbl_siu.cpp) -- vendored SIU parse/resolve */
@@ -263,7 +264,7 @@ extern int rmbl_progress_bar(double, double, int, int, int, int, int, int, int, 
 extern const char *rmbl_progress_spinner(double, int);
 
 /* a bundle check's run inside a Windows job object (rmbl_winjob.c) */
-extern SEXP C_rmbl_winjob(SEXP, SEXP, SEXP);
+extern SEXP C_rmbl_winjob(SEXP, SEXP, SEXP, SEXP);
 /* a bundle check's survivors found and reaped on Linux (rmbl_reap.c) */
 extern SEXP C_rmbl_subreap(SEXP);
 extern SEXP C_rmbl_reap(SEXP);
@@ -303,6 +304,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rmbl_wayback_into",   (DL_FUNC) &C_rmbl_wayback_into,   4},
     {"C_rmbl_url_check",      (DL_FUNC) &C_rmbl_url_check,      4},
     {"C_rmbl_net_probe",      (DL_FUNC) &C_rmbl_net_probe,      4},
+    {"C_rmbl_sigpipe_probe",  (DL_FUNC) &C_rmbl_sigpipe_probe,  1},
     {"C_rmbl_siu_html_to_text",      (DL_FUNC) &C_rmbl_siu_html_to_text,      1},
     {"C_rmbl_siu_parse_html",        (DL_FUNC) &C_rmbl_siu_parse_html,        1},
     {"C_rmbl_siu_to_iso_date",       (DL_FUNC) &C_rmbl_siu_to_iso_date,       1},
@@ -411,7 +413,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rmbl_blake2b",           (DL_FUNC) &C_rmbl_blake2b,           3},
     {"C_rmbl_pbkdf2",            (DL_FUNC) &C_rmbl_pbkdf2,            4},
     {"C_rmbl_os_random",         (DL_FUNC) &C_rmbl_os_random,         1},
-    {"C_rmbl_winjob",            (DL_FUNC) &C_rmbl_winjob,            3},
+    {"C_rmbl_winjob",            (DL_FUNC) &C_rmbl_winjob,            4},
     {"C_rmbl_subreap",           (DL_FUNC) &C_rmbl_subreap,           1},
     {"C_rmbl_reap",              (DL_FUNC) &C_rmbl_reap,              1},
     {NULL, NULL, 0}

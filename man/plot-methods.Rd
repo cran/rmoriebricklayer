@@ -373,7 +373,8 @@ text.}
 \item{gaps}{For \code{rmbl_yoy} (\code{what = "value"}) and
 \code{rmbl_event_study} (\code{style = "stata"}): how a missing value
 shows in a line. \code{"break"} (the default) breaks the
-line there, so a \dQuote{no data} period that \code{yoy(complete = TRUE)}
+line there, so a \dQuote{no data} period that \code{yoychg(complete =
+TRUE)}
 inserted is a visible gap; \code{"join"} draws the line straight over it.}
 
 \item{period}{For \code{rmbl_rate}, a \code{by} column holding the period:
@@ -452,7 +453,7 @@ method returns the data it drew, invisibly, as a data frame.
 \describe{ \item{\code{rmbl_stock_flow}}{(\code{\link{stkflow}}) the average
 daily population, length of stay, people and person-days over the periods,
 one panel per measure in \code{what}; with an exposure, the flow and stock
-rates too.} \item{\code{rmbl_yoy}}{(\code{\link{yoy}}) the
+rates too.} \item{\code{rmbl_yoy}}{(\code{\link{yoychg}}) the
 period-over-period percent change with its interval over the periods, the
 period across and the change up, groups side by side, coloured by verdict;
 \code{what = "value"} draws the values instead.} \item{\code{rmbl_rate},
@@ -528,7 +529,7 @@ measure} when the work took no measurable time.} \item{\code{rmbl_field},
 \code{\link{lagrprt}}) a concentration field as an image with contours;
 particle positions, with the counting grid behind them when one was given.}
 \item{\code{rmbl_count_trend}}{(\code{\link{cnttrnd}}) the counts with the
-fitted trend.} \item{\code{bricklayer_analysis}}{(\code{\link{anltab}}) the
+fitted trend.} \item{\code{bricklayer_analysis}}{(\code{\link{anytab}}) the
 change, rates and rate change of a published table, one panel each.}
 \item{\code{rmbl_event_study}, \code{rmbl_staggered_att}}{
 (\code{\link{evstudy}}, \code{\link{stgatt}}) the effect at each period
@@ -592,14 +593,14 @@ sf <- stkflow(
 )
 plot(sf)
 plot(sf, what = "alos", col = "firebrick", main = "Length of stay")
-y <- yoy(
+y <- yoychg(
   data.frame(year = 2019:2023, n = c(400, 420, 390, 460, 450)),
   value = "n",
   prd = "year"
 )
 plot(y)
 # small counts: each percentage carries its exact interval
-plot(yoy(
+plot(yoychg(
   data.frame(year = 2019:2023, n = c(10, 12, 11, 15, 14)),
   value = "n",
   prd = "year"
@@ -694,7 +695,7 @@ tab <- data.frame(
   n = c(10, 20, 12, 22, 11, 25, 15, 24),
   pop = rep(c(1000, 2000), 4)
 )
-plot(anltab(tab, value = "n", prd = "year", by = "g", pop = "pop"))
+plot(anytab(tab, value = "n", prd = "year", by = "g", pop = "pop"))
 plot(cnttrnd(c(21000, 23000, 22000, 25000, 24000)))
 # banded tables
 plot(bandsens(

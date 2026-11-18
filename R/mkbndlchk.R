@@ -166,10 +166,15 @@ format.rmbl_bundle_audit <- function(x, ...) {
       Bundle = basename(x$bundle),
       `Input mode` = x$mode,
       Isolation = x$isolation %||% NA_character_,
-      Checks = n[["total"]],
-      PASS = n[["pass"]],
-      DIFFER = n[["differ"]],
-      INFO = n[["info"]]
+      # the bundle run's own results, from its manifest: not the audit's
+      # checks, which the status line counts (both were "Checks")
+      `Results in the run` = sprintf(
+        "%s (%s PASS, %s DIFFER, %s INFO)",
+        n[["total"]],
+        n[["pass"]],
+        n[["differ"]],
+        n[["info"]]
+      )
     ),
     reading = .rmbl_check_reading(
       x$ok,
@@ -393,7 +398,7 @@ format.rmbl_bundle_audit <- function(x, ...) {
 .bndlchk_args <- function(bundle, data, synthetic, dir, keep) {
   bundle <- .rmbl_string1(bundle, "bundle")
   if (!file.exists(bundle) || dir.exists(bundle) ||
-        !grepl("[.]zip$", bundle, ignore.case = TRUE)) {
+        !grepl(.rmbl_ci("[.]zip$"), bundle, perl = TRUE, useBytes = TRUE)) {
     stop(sprintf("`bundle` is not an existing .zip file: %s", bundle),
          call. = FALSE)
   }
@@ -482,8 +487,10 @@ format.rmbl_bundle_audit <- function(x, ...) {
   dir.create(file.path(home, "tmp"), recursive = TRUE)
   on.exit(unlink(home, recursive = TRUE, force = TRUE), add = TRUE)
   # a check run inside R CMD check would hand the child its test startup
-  withr::local_envvar(R_TESTS = NA)
-  withr::local_dir(root)
+  .rmbl_local_env(c(R_TESTS = NA))
+  # the run starts in the bundle's folder; this session's working folder
+  # is not changed for it
+  root <- normalizePath(root, winslash = "/")
   exe <- if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
   rscript <- file.path(R.home("bin"), exe)
   tmout <- .bndlchk_tmout()
@@ -492,9 +499,9 @@ format.rmbl_bundle_audit <- function(x, ...) {
     .bndlchk_ctr(rt, root, args, data, !synthetic && is.null(data), tmout,
                  log, out %||% file.path(home, "out"))
   } else if (isTRUE(win)) {
-    .bndlchk_win(rscript, args, home, tmout, log)
+    .bndlchk_win(rscript, args, home, tmout, log, root)
   } else {
-    .bndlchk_posix(rscript, args, home, tmout, log)
+    .bndlchk_posix(rscript, args, home, tmout, log, root)
   }
   if (identical(as.integer(r$status), 124L)) {
     cat(sprintf("\nstopped: the run took longer than %d seconds\n", tmout),
@@ -531,25 +538,25 @@ format.rmbl_bundle_audit <- function(x, ...) {
 #' @param home The run's HOME.
 #' @param tmout Seconds before the run is stopped.
 #' @param log The file the output goes to.
+#' @param wd The folder the run starts in (this session's stays as it is).
 #' @return A list: the exit status (124 when the run was stopped) and the
 #'   isolation used.
 #' @noRd
-.bndlchk_posix <- function(rscript, args, home, tmout, log) {
-  # job control (set -m) gives the run its own group; bash keeps it without
-  # a terminal, where dash turns it off
-  sh <- Sys.which("bash")
-  if (!nzchar(sh)) sh <- "/bin/sh"
-  envp <- Sys.which("env")
-  if (!nzchar(envp)) envp <- "/usr/bin/env"
+.bndlchk_posix <- function(rscript, args, home, tmout, log, wd = getwd()) {
+  pr <- .bndlchk_progs()
+  sh <- pr$sh
+  envp <- pr$env
   wrap <- file.path(home, "run.sh")
   .rmbl_wlines(.bndlchk_wrap(), wrap)
   # the run's mark: what still carries it afterwards outlived the run
   tag <- basename(tempfile("rmblchk"))
   env <- c(.rmbl_envmin(home), RMBL_CHKRUN = tag)
   pidns <- .bndlchk_unshare()
+  # started in `wd` by a shell that then becomes the run's own (exec)
   cmd <- c(
-    "-i", paste0(names(env), "=", env), pidns, sh, wrap, tmout,
-    file.path(home, "timed_out"), rscript, args
+    "-i", paste0(names(env), "=", env), pidns,
+    "/bin/sh", "-c", "cd \"$1\" && shift && exec \"$@\"", "sh", wd,
+    sh, wrap, tmout, file.path(home, "timed_out"), rscript, args
   )
   # this session the run's subreaper: what leaves the run stays below it
   reap <- .bndlchk_reaper(TRUE)
@@ -583,6 +590,19 @@ format.rmbl_bundle_audit <- function(x, ...) {
     units = units,
     blind = !reap && !length(pidns)
   )
+}
+
+#' The shell and env programs a POSIX run uses: bash, whose job control
+#' (set -m) gives the run its own group without a terminal, where dash
+#' turns it off; else /bin/sh, and /usr/bin/env when env is not found.
+#' @return A list: sh and env.
+#' @noRd
+.bndlchk_progs <- function() {
+  sh <- Sys.which("bash")
+  if (!nzchar(sh)) sh <- "/bin/sh"
+  envp <- Sys.which("env")
+  if (!nzchar(envp)) envp <- "/usr/bin/env"
+  list(sh = sh, env = envp)
 }
 
 #' Makes this R session the child subreaper of what it starts, or stops it
@@ -776,31 +796,32 @@ format.rmbl_bundle_audit <- function(x, ...) {
 #' credentials removed and HOME a temporary folder, for the run only, and
 #' the run started inside a job object that kills every process in it when
 #' the run ends or times out.
-#' @param rscript,args,home,tmout,log As for .bndlchk_posix().
+#' @param rscript,args,home,tmout,log,wd As for .bndlchk_posix().
 #' @return A list: the exit status (124 when the run was stopped) and the
 #'   isolation used.
 #' @noRd
-.bndlchk_win <- function(rscript, args, home, tmout, log) {
+.bndlchk_win <- function(rscript, args, home, tmout, log, wd = getwd()) {
   e <- unclass(Sys.getenv())
   drop <- .rmbl_envdrop(names(e), unname(e))
   tmp <- file.path(home, "tmp")
-  withr::local_envvar(c(
+  .rmbl_local_env(c(
     stats::setNames(rep(NA_character_, length(drop)), drop),
     HOME = home, R_USER = home, TMPDIR = tmp, TMP = tmp, TEMP = tmp
   ))
   cmd <- paste(shQuote(c(rscript, args), type = "cmd"), collapse = " ")
-  list(status = .rmbl_wjob(cmd, log, tmout), mode = "job object")
+  list(status = .rmbl_wjob(cmd, log, tmout, wd), mode = "job object")
 }
 
 #' Runs a command line inside a Windows job object (rmbl_winjob.c).
 #' @param cmd The command line.
 #' @param log The file its output goes to.
 #' @param tmout Seconds before the job is killed.
+#' @param wd The folder the job starts in.
 #' @return The exit status, 124 when the job was killed at the limit.
 #' @noRd
-.rmbl_wjob <- function(cmd, log, tmout) {
+.rmbl_wjob <- function(cmd, log, tmout, wd = getwd()) {
   .Call(C_rmbl_winjob, cmd, normalizePath(log, mustWork = FALSE),
-        as.numeric(tmout))
+        as.numeric(tmout), normalizePath(wd, mustWork = FALSE))
 }
 
 #' The container runtime a check asked for.
@@ -858,7 +879,7 @@ format.rmbl_bundle_audit <- function(x, ...) {
     dd <- tempfile("bndldata")
     dir.create(dd)
     on.exit(unlink(dd, recursive = TRUE, force = TRUE), add = TRUE)
-    file.copy(data, file.path(dd, basename(data)))
+    .rmbl_fcopy(data, file.path(dd, basename(data)))
     args[args == data] <- file.path("/data", basename(data))
   }
   name <- paste0("rmblchk-", sub("^file", "", basename(tempfile())))
@@ -938,7 +959,7 @@ format.rmbl_bundle_audit <- function(x, ...) {
     "DYLD_FALLBACK_LIBRARY_PATH", "SSL_CERT_FILE", "SSL_CERT_DIR",
     "CURL_CA_BUNDLE", .rmbl_lcvars()
   ) |
-    (tolower(n) %in% c("http_proxy", "https_proxy", "no_proxy") &
+    (.rmbl_lower(n) %in% c("http_proxy", "https_proxy", "no_proxy") &
        !grepl("@", e, fixed = TRUE))
   keep <- keep & !grepl("[^A-Za-z0-9_]", n)
   c(
@@ -979,12 +1000,12 @@ format.rmbl_bundle_audit <- function(x, ...) {
     "GCP|GEMINI|MISTRAL|COHERE|GROQ|HF|HUGGINGFACE|CODECOV|CLOUDFLARE|CF|",
     "R2|OLLAMA)_"
   )
-  bad <- grepl(pre, n, ignore.case = TRUE) |
-    grepl("KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH|COOKIE|SESSION", n,
-          ignore.case = TRUE) |
-    grepl("(^|_)(DATABASE_URL|WEBHOOK_URL|DSN|SK)$|_PWD$", n,
-          ignore.case = TRUE) |
-    (startsWith(toupper(n), "LC_") & !toupper(n) %in% .rmbl_lcvars())
+  bad <- grepl(.rmbl_ci(pre), n, perl = TRUE, useBytes = TRUE) |
+    grepl(.rmbl_ci("KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH|COOKIE|SESSION"), n,
+        perl = TRUE, useBytes = TRUE) |
+    grepl(.rmbl_ci("(^|_)(DATABASE_URL|WEBHOOK_URL|DSN|SK)$|_PWD$"), n,
+        perl = TRUE, useBytes = TRUE) |
+    (startsWith(.rmbl_upper(n), "LC_") & !.rmbl_upper(n) %in% .rmbl_lcvars())
   if (!is.null(v)) {
     # a password with or without a user name: redis://:pw@host
     bad <- bad | grepl("://[^/@[:space:]]*:[^/@[:space:]]*@", v)
@@ -1220,7 +1241,7 @@ format.rmbl_bundle_audit <- function(x, ...) {
 #' @noRd
 .bndlchk_names <- function(nm, bad) {
   # names are bytes: invalid UTF-8 is shown as <xx>, never an error
-  nm <- iconv(nm, "UTF-8", "UTF-8", sub = "byte")
+  nm <- .rmbl_esc8(nm)
   shown <- function(x) toString(.rmbl_printable(utils::head(x, 3L)))
   parts <- strsplit(nm, "[/\\\\]")
   long <- nchar(nm, type = "bytes") > 1024L |
@@ -1237,7 +1258,7 @@ format.rmbl_bundle_audit <- function(x, ...) {
     bad(sprintf("has entries that leave its folder: %s", shown(nm[out])))
   }
   # empty and "." parts name the same file: a//b and a/./b are a/b
-  key <- tolower(vapply(parts, function(p) {
+  key <- .rmbl_lower(vapply(parts, function(p) {
     paste(p[!p %in% c("", ".")], collapse = "/")
   }, ""))
   dup <- duplicated(key)
@@ -1263,4 +1284,40 @@ format.rmbl_bundle_audit <- function(x, ...) {
 #' @noRd
 .bndlchk_u32 <- function(b, i) {
   .bndlchk_u16(b, i) + 65536 * .bndlchk_u16(b, i + 2L)
+}
+
+#' Sets environment variables until the calling function returns.
+#'
+#' What withr::local_envvar() does, in base R: withr is only suggested, and
+#' mkbndlchk() called it unconditionally ("there is no package called
+#' 'withr'"). NA unsets a variable; each is put back as it was, or unset
+#' again, when the caller returns.
+#' @param vals The variables to set, NA to unset, by name.
+#' @param frame The caller's frame.
+#' @return The old values, invisibly.
+#' @noRd
+.rmbl_local_env <- function(vals, frame = parent.frame()) {
+  old <- Sys.getenv(names(vals), unset = NA, names = TRUE)
+  .rmbl_put_env(vals)
+  do.call(
+    on.exit,
+    list(bquote(.rmbl_put_env(.(old))), add = TRUE),
+    envir = frame
+  )
+  invisible(old)
+}
+
+#' Sets environment variables, unsetting those given as NA.
+#' @param vals Names and values; NA unsets.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_put_env <- function(vals) {
+  na <- is.na(vals)
+  if (any(na)) {
+    Sys.unsetenv(names(vals)[na])
+  }
+  if (!all(na)) {
+    do.call(Sys.setenv, as.list(vals[!na]))
+  }
+  invisible(NULL)
 }

@@ -108,8 +108,8 @@ mnfdiff <- function(old, new) {
   keys <- union(a$resource, b$resource)
   ia <- match(keys, a$resource)
   ib <- match(keys, b$resource)
-  sa <- tolower(a$sha256[ia])
-  sb <- tolower(b$sha256[ib])
+  sa <- .rmbl_lower(a$sha256[ia])
+  sb <- .rmbl_lower(b$sha256[ib])
   za <- a$size_bytes[ia]
   zb <- b$size_bytes[ib]
   eq <- sa == sb
@@ -215,7 +215,7 @@ format.rmbl_mnfdiff <- function(x, ...) {
 #'   filename one plain relative path inside it (test-capsule_cli.R).
 #' @export
 cpsrfrsh <- function(dir, allowfile = FALSE) {
-  dir <- .rmbl_string1(dir, "dir")
+  dir <- .rmbl_fspath(.rmbl_string1(dir, "dir"))
   allowfile <- .bl_allowfile_arg(allowfile)
   if (!dir.exists(dir)) {
     stop(.rmbl_fn(), "`dir` is not an existing directory: ", dir, call. = FALSE)
@@ -242,7 +242,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     ifelse(
       is.na(z),
       "-",
-      format(z, big.mark = ",", scientific = FALSE, trim = TRUE)
+      .rmbl_ntxt(z)
     )
   }
   c(
@@ -385,7 +385,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
       call. = FALSE
     )
   }
-  cur <- if (grepl("\\.csv$", dest, ignore.case = TRUE)) {
+  cur <- if (grepl(.rmbl_ci("\\.csv$"), dest, perl = TRUE, useBytes = TRUE)) {
     .bl_read_csv_capped(f$path)
   }
   issues <- if (is.data.frame(cur)) valsch(cur, f$old)
@@ -407,25 +407,24 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     digits = NA
   )
   if (!identical(.rmbl_realpath(f$path), .rmbl_realpath(dest))) {
-    file.copy(f$path, dest, overwrite = TRUE)
+    .rmbl_fcopy(f$path, dest, "new")
   }
   .rmbl_wlines(js, pf)
   invisible(dest)
 }
 
 #' A capsule's remote source, fetched: live or its pinned Wayback copy, then
-#' the archive's copy of the pinned bytes, then an earlier run's cache.
+#' an earlier run's cache.
 #' @param src The https:// source URL to fetch.
 #' @param prov The capsule's provenance, which may pin a Wayback copy.
-#' @param cache,archive As for .bl_fetch_pin().
-#' @return A list: got, cached, archived and tmp.
+#' @param cache As for .bl_fetch_pin().
+#' @return A list: got, cached and tmp.
 #' @noRd
-.bl_fetch_remote <- function(src, prov, cache, archive) {
+.bl_fetch_remote <- function(src, prov, cache) {
   s1 <- .bl_s1
-  archived <- FALSE
   # a source in a capsule (a pull request's, in the action) is fetched over
   # https only (audit of 30bed8e, #6)
-  if (!grepl("^https://", src, ignore.case = TRUE)) {
+  if (!grepl(.rmbl_ci("^https://"), src, perl = TRUE, useBytes = TRUE)) {
     stop(
       .rmbl_fn(),
       "a source to fetch must be an https:// URL: ",
@@ -441,15 +440,6 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     fdl(src, got, attwb = s1(prov[["wayback"]][["csv_snapshot"]]) %||% ""),
     error = function(e) e
   )
-  # then the copy kept on archive.rmorie.com with the pinned bytes, before an
-  # earlier run's cache
-  pin <- s1(prov[["resource"]][["sha256"]]) %||% ""
-  if (!isTRUE(ok) && isTRUE(archive) && nzchar(pin)) {
-    archived <- .bl_fetch_archived(src, got, pin)
-    if (archived) {
-      ok <- TRUE
-    }
-  }
   keep <- if (!is.null(cache)) {
     file.path(
       cache,
@@ -457,29 +447,15 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     )
   }
   if (isTRUE(ok) && !is.null(keep)) {
-    file.copy(got, keep, overwrite = TRUE)
+    .rmbl_fcopy(got, keep, "source")
   }
   if (!isTRUE(ok)) {
     unlink(got)
     .bl_fetch_unfetched(ok, keep, src)
     # an earlier run's copy, kept in the cache: not a temporary file
-    return(list(got = keep, cached = TRUE, archived = archived, tmp = FALSE))
+    return(list(got = keep, cached = TRUE, tmp = FALSE))
   }
-  list(got = got, cached = FALSE, archived = archived, tmp = TRUE)
-}
-
-#' Fetches a source's copy kept on archive.rmorie.com with the pinned bytes.
-#' @param src The source URL whose archive.rmorie.com copy is fetched.
-#' @param got The file to write.
-#' @param pin The pinned SHA-256.
-#' @return TRUE when the copy was fetched.
-#' @noRd
-.bl_fetch_archived <- function(src, got, pin) {
-  unlink(got)
-  a <- tryCatch(arcget(src, got, sha256 = pin), error = function(e) {
-    .bl_unless_interrupted(e, NULL)
-  })
-  !is.null(a) && file.exists(got)
+  list(got = got, cached = FALSE, tmp = TRUE)
 }
 
 #' Stops when a source could not be fetched and no earlier copy is cached.
@@ -523,8 +499,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   dir,
   allowfile = FALSE,
   cache = NULL,
-  root = dir,
-  archive = FALSE
+  root = dir
 ) {
   prov <- loadprov(file.path(dir, "data_provenance.json"))
   if (is.null(prov)) {
@@ -543,18 +518,16 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     )
   }
   cached <- FALSE
-  archived <- FALSE
   tmp <- FALSE
   if (
-    grepl("^file://", src, ignore.case = TRUE) ||
+    grepl(.rmbl_ci("^file://"), src, perl = TRUE, useBytes = TRUE) ||
       !grepl("^[A-Za-z][A-Za-z0-9+.-]*://", src)
   ) {
     got <- .bl_local_source(src, dir, allowfile, root)
   } else {
-    r <- .bl_fetch_remote(src, prov, cache, archive)
+    r <- .bl_fetch_remote(src, prov, cache)
     got <- r$got
     cached <- r$cached
-    archived <- r$archived
     tmp <- r$tmp
   }
   f <- list(
@@ -562,7 +535,6 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     path = got,
     src = src,
     cached = cached,
-    archived = archived,
     tmp = tmp
   )
   f$new <- tryCatch(
@@ -607,7 +579,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     )
   }
   real <- normalizePath(allowfile, winslash = "/", mustWork = TRUE)
-  if (grepl("^([A-Za-z]:)?/*$", real)) {
+  if (grepl("^([A-Za-z]:)?/*$", real, useBytes = TRUE)) {
     stop(
       .rmbl_fn(),
       "`allowfile` must not be the root of the file system",
@@ -634,7 +606,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
 #' @return The file's real path.
 #' @noRd
 .bl_local_source <- function(src, dir, allowfile, root) {
-  is_file <- grepl("^file://", src, ignore.case = TRUE)
+  is_file <- grepl(.rmbl_ci("^file://"), src, perl = TRUE, useBytes = TRUE)
   if (is_file && isFALSE(allowfile)) {
     stop(
       .rmbl_fn(),
@@ -654,7 +626,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   if (
     is.null(real) ||
       !any(startsWith(real, paste0(roots, "/"))) ||
-      grepl("^/(proc|sys|dev)(/|$)", real)
+      grepl("^/(proc|sys|dev)(/|$)", real, useBytes = TRUE)
   ) {
     stop(
       .rmbl_fn(),
@@ -678,14 +650,15 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   p <- src
   if (is_file) {
     p <- utils::URLdecode(sub(
-      "^file://(localhost)?",
+      .rmbl_ci("^file://(localhost)?"),
       "",
       src,
-      ignore.case = TRUE
+      perl = TRUE
     ))
-    p <- sub("^/([A-Za-z]:)", "\\1", p)
+    # by their bytes: a %-escape can decode to bytes that are not UTF-8
+    p <- sub("^/([A-Za-z]:)", "\\1", p, useBytes = TRUE)
   }
-  if (!grepl("^([/\\\\]|~|[A-Za-z]:)", p)) {
+  if (!grepl("^([/\\\\]|~|[A-Za-z]:)", p, useBytes = TRUE)) {
     p <- file.path(dir, p)
   }
   path.expand(p)
@@ -709,7 +682,8 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   sub(
     "/+$",
     "",
-    normalizePath(roots[nzchar(roots)], winslash = "/", mustWork = FALSE)
+    normalizePath(roots[nzchar(roots)], winslash = "/", mustWork = FALSE),
+    useBytes = TRUE
   )
 }
 
@@ -781,7 +755,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
         "rmoriebricklayer.maxcsvbytes and rmoriebricklayer.maxgzratio)"
       ),
       basename(p),
-      format(lim, big.mark = ",", scientific = FALSE)
+      .rmbl_ntxt(lim)
     ),
     call. = FALSE
   )
@@ -797,9 +771,9 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   # a directory is refused by name: gzfile() on one hung (1.0.3)
   p <- .rmbl_file1(p, "path")
   inp <- gzfile(p, "rb")
-  dst <- file(out, "wb")
+  on.exit(close(inp), add = TRUE)
   total <- 0
-  tryCatch(
+  .rmbl_wfile(out, function(dst) {
     repeat {
       b <- readBin(inp, "raw", 4194304L)
       if (!length(b)) {
@@ -810,12 +784,8 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
         .bl_gunzip_over(p, lim)
       }
       writeBin(b, dst)
-    },
-    finally = {
-      close(inp)
-      close(dst)
     }
-  )
+  })
   invisible(NULL)
 }
 
@@ -844,15 +814,17 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     tz = "UTC"
   )
   if (had_rows) {
-    d <- .bl_read_csv_capped(got)
-    if (is.null(d)) {
+    # counted as the check counts them (.vc_csv_scan()), a block at a time
+    d <- .vc_csv_scan(got)
+    if (!is.null(d$why)) {
       stop(
         .rmbl_fn(),
-        "the source does not read as a CSV, so its rows cannot be counted",
+        "the source does not read as a CSV, so its rows cannot be counted: ",
+        d$why,
         call. = FALSE
       )
     }
-    prov$resource$row_count_data_rows <- nrow(d)
+    prov$resource$row_count_data_rows <- d$n
   }
   prov
 }
@@ -1043,10 +1015,14 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
 #' @param capsule The capsule directory.
 #' @param path The capsule JSON file checked against `schema`.
 #' @param schema The schema's name, for schemapath().
+#' @param x The file's JSON, parsed, or NULL to read `path` (cpsseal()'s
+#'   look-ahead gives the provenance it is about to write).
 #' @return One check row.
 #' @noRd
-.bl_schema_row <- function(capsule, path, schema) {
-  x <- tryCatch(.bl_read_json_list(path), error = function(e) e)
+.bl_schema_row <- function(capsule, path, schema, x = NULL) {
+  if (is.null(x)) {
+    x <- tryCatch(.bl_read_json_list(path), error = function(e) e)
+  }
   err <- if (inherits(x, "error")) {
     paste("not valid JSON:", conditionMessage(x))
   } else {
@@ -1085,7 +1061,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   key <- sub("^.*\\.", "", at)
   hit <- grep(
     paste0("\"", key, "\"[[:space:]]*:"),
-    readLines(path, warn = FALSE)
+    .rmbl_rlines(path)
   )
   if (length(hit)) hit[[1L]] else NA_integer_
 }
@@ -1111,29 +1087,120 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   )
 }
 
+#' A glob as a regular expression, refused in words when it is longer than
+#' a path pattern needs (4,096 bytes) or does not compile: a 1 MB glob
+#' stopped cpschk() and cpsseal() with "invalid regular expression" after
+#' the regex engine ran out of memory.
+#' @param glob One string.
+#' @return The regular expression.
+#' @noRd
+.bl_glob_rx <- function(glob) {
+  if (nchar(glob, type = "bytes") > 4096L) {
+    stop(
+      .rmbl_fn(),
+      "`glob` is longer than the 4,096 bytes a path pattern may have",
+      call. = FALSE
+    )
+  }
+  rx <- utils::glob2rx(glob)
+  ok <- tryCatch(
+    {
+      grepl(rx, "")
+      TRUE
+    },
+    error = function(e) FALSE,
+    warning = function(w) FALSE
+  )
+  if (!ok) {
+    stop(
+      .rmbl_fn(),
+      "`glob` is not a pattern that can be matched",
+      call. = FALSE
+    )
+  }
+  rx
+}
+
 #' The directories under a path that hold a capsule (a provenance or a bundle).
 #' @param root The directory searched.
 #' @param glob Only capsule files whose path matches this glob (its `*` also
 #' matches \code{"/"}), or \code{""}.
-#' @return Sorted directory paths.
+#' @param strict TRUE to warn of a link out of `root` (.bl_find()).
+#' @return Sorted directory paths; attribute "outside" as .bl_find() gives
+#'   it.
 #' @noRd
-.bl_capsule_dirs <- function(root, glob = "") {
-  f <- list.files(
-    root,
-    pattern = "^(data_provenance|capsule_bundle)\\.json$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
-  f <- sub("^\\./", "", f)
-  f <- f[!grepl("(^|/)(\\.git|\\.rmbl-cache)/", f)]
+.bl_capsule_dirs <- function(root, glob = "", strict = TRUE) {
+  # a folder whose name starts with a dot is searched too: a capsule
+  # renamed to .two was neither sealed nor checked, and the result was ok
+  f <- .bl_find(root, c("data_provenance.json", "capsule_bundle.json"),
+                strict)
   if (nzchar(glob)) {
-    f <- f[grepl(utils::glob2rx(glob), f)]
+    f <- f[grepl(.bl_glob_rx(glob), f, useBytes = TRUE)]
   }
-  d <- sort(unique(dirname(f)))
-  # one capsule once: list.files() follows a link back up the tree, and a loop
-  # listed the same capsule under every depth the system allowed, a 209 KB
-  # report (audit of 30bed8e, #17)
-  d[!duplicated(normalizePath(d, winslash = "/", mustWork = FALSE))]
+  # sorted by their bytes, the same in every locale
+  d <- .rmbl_bsort(unique(dirname(f)))
+  # one capsule once: list.files() followed a link back up the tree, and a
+  # loop listed the same capsule under every depth the system allowed, a
+  # 209 KB report (audit of 30bed8e, #17)
+  d <- d[!duplicated(normalizePath(d, winslash = "/", mustWork = FALSE))]
+  structure(d, outside = attr(f, "outside"))
+}
+
+#' The files of given names under a folder, found by .bl_walk()'s search:
+#' a link to a folder inside the folder is followed, each real folder
+#' searched once; a link to a folder outside it is not followed.
+#'
+#' A folder that cannot be read is refused: a capsule in it was left
+#' unsealed and unchecked without a word. A link not followed is warned of
+#' (`strict`), or returned for the caller to report: skipped without a
+#' word, a capsule linked in from another disk went unchecked and the check
+#' said "ok". It is not refused: a project library (renv links each
+#' package to its cache), node_modules or a shared data folder are links
+#' out of a tree that holds sound capsules. Messages are headed by the
+#' function the user called
+#' (.rmbl_fn()): no exported function lies between it and this one.
+#' @param root The folder searched for files named `names`.
+#' @param names The file names looked for.
+#' @param strict TRUE to warn of a link that leaves `root`.
+#' @return Their paths, under `root` (relative when `root` is "."), with
+#'   attribute "outside": the links not followed, named the same way.
+#' @noRd
+.bl_find <- function(root, names, strict = TRUE) {
+  root <- .rmbl_fspath(root)
+  w <- .bl_walk(root, search = TRUE)
+  if (length(w$unread)) {
+    stop(
+      .rmbl_fn(),
+      "a folder under ", .bl_names(root), " cannot be read (permission ",
+      "denied), so a capsule in it would be missed; make it readable or ",
+      "move it: ", .bl_names(w$unread, Inf),
+      call. = FALSE
+    )
+  }
+  # named as list.files(full.names = TRUE) named them, less a leading "./"
+  top <- if (identical(root, ".")) "" else sub("^[.]/", "", root,
+                                                  useBytes = TRUE)
+  under <- function(x) if (nzchar(top) && length(x)) .rmbl_jpath(top, x) else x
+  out <- under(w$outside)
+  if (strict && length(out)) {
+    warning(.rmbl_fn(), .bl_link_out(root, out), call. = FALSE)
+  }
+  b <- sub("^.*/", "", w$files, useBytes = TRUE)
+  structure(under(w$files[.rmbl_bytes(b) %in% names]), outside = out)
+}
+
+#' What a search says of the links it did not follow.
+#' @param root The folder the search was made in.
+#' @param out The links, as .bl_find() names them.
+#' @return One sentence.
+#' @noRd
+.bl_link_out <- function(root, out) {
+  paste0(
+    "a link under ", .bl_names(root), " leads to a folder outside it and ",
+    "was not followed, so a capsule behind it is neither sealed nor ",
+    "checked here; seal and check that folder where it is: ",
+    .bl_names(out, Inf)
+  )
 }
 
 #' The verify rows of one capsule: every file against its schema, vrfcps(),
@@ -1154,35 +1221,57 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   pkgs = NULL,
   seen = NULL
 ) {
-  prov_file <- file.path(d, "data_provenance.json")
-  bundle_file <- file.path(d, "capsule_bundle.json")
-  rows <- list()
-  for (sp in list(
-    c(prov_file, "capsule"),
-    c(bundle_file, "bundle"),
+  rbind(
+    .bl_verify_files(d, pkgs),
+    .bl_bundle_rows(d, file.path(d, "capsule_bundle.json"), key, pubkey,
+                    seen)
+  )
+}
+
+#' The verify rows of one capsule short of its bundle's signature: each file
+#' against its schema, vrfcps(), a pinned proof ledger.
+#'
+#' cpsseal() runs them before it writes (`ahead`), so a capsule the check
+#' would fail right after the seal is refused instead: a manifest.json that
+#' fails its schema and a data file that does not read were sealed, and
+#' `rmbl sign` then failed.
+#' @param d The capsule directory whose files are checked.
+#' @param pkgs As for .bl_verify_capsule().
+#' @param ahead TRUE for cpsseal()'s look-ahead: the bundle, which the seal
+#'   writes, is not looked at.
+#' @param pin With `ahead`, the provenance's JSON as the seal will write it,
+#'   or NULL when it is pinned already.
+#' @return Check rows.
+#' @noRd
+.bl_verify_files <- function(d, pkgs = NULL, ahead = FALSE, pin = NULL) {
+  pf <- file.path(d, "data_provenance.json")
+  x <- if (!is.null(pin)) {
+    .rmbl_read_json(paste(pin, collapse = "\n"), simplify = FALSE)
+  }
+  sp <- list(
+    c(pf, "capsule"),
+    if (!ahead) c(file.path(d, "capsule_bundle.json"), "bundle"),
     c(file.path(d, "manifest.json"), "manifest"),
     c(file.path(d, "results", "manifest.json"), "manifest")
-  )) {
-    if (file.exists(sp[[1L]])) {
-      rows[[length(rows) + 1L]] <- .bl_schema_row(d, sp[[1L]], sp[[2L]])
+  )
+  rows <- lapply(sp, function(s) {
+    if (!is.null(x) && identical(s[[1L]], pf)) {
+      .bl_schema_row(d, pf, "capsule", x)
+    } else if (length(s) && file.exists(s[[1L]])) {
+      .bl_schema_row(d, s[[1L]], s[[2L]])
+    }
+  })
+  if (!is.null(x) || file.exists(pf)) {
+    prov <- if (!is.null(x)) .rmbl_prov_obj(x)
+    rows <- c(rows, list(.bl_result_rows(.vc_run(d, prov = prov), d,
+                                         "provenance", pf)))
+    # a proof ledger pinned in a capsule: its theorem rows and the pins of
+    # its commit and build
+    led <- x %||% tryCatch(.bl_read_json_list(pf), error = function(e) NULL)
+    if (identical(led$kind, "ledger")) {
+      rows <- c(rows, list(.bl_ldgr_capsule_rows(d, led, pkgs)))
     }
   }
-  if (file.exists(prov_file)) {
-    rows[[length(rows) + 1L]] <- .bl_result_rows(
-      vrfcps(d),
-      d,
-      "provenance",
-      prov_file
-    )
-    # a proof ledger pinned in a capsule: its theorem rows and the pins of its
-    # commit and build
-    prov <- tryCatch(.bl_read_json_list(prov_file), error = function(e) NULL)
-    if (identical(prov$kind, "ledger")) {
-      rows[[length(rows) + 1L]] <- .bl_ldgr_capsule_rows(d, prov, pkgs)
-    }
-  }
-  rows[[length(rows) + 1L]] <- .bl_bundle_rows(d, bundle_file, key, pubkey,
-                                                seen)
   do.call(rbind, rows)
 }
 
@@ -1259,7 +1348,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
       substr(s1(res[["sha256"]]), 1L, 12L)
     },
     size = .bl_capsule_size(b),
-    rows = if (is.na(n)) "-" else format(n, big.mark = ","),
+    rows = if (is.na(n)) "-" else .rmbl_ntxt(n),
     bounds = .bl_capsule_bounds(rnd, sup)
   )
 }
@@ -1435,11 +1524,12 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     if (is.null(v)) default else suppressWarnings(as.numeric(v))
   }
   # a refused argument (a PSI band that is not a number, a --base that does not
-  # exist) is a usage error
-  tryCatch(
-    cpschk(
-      root,
-      verb,
+  # exist) is a usage error; what stops once they are checked (a folder under
+  # PATH that cannot be read) fails the verb, exit status 1, as sign does
+  a <- tryCatch(
+    .bl_cpschk_args(list(
+      path = root,
+      mode = verb,
       key = key,
       pubkey = flag("--public-key") %||% "",
       psiwarn = num("--psi-warn", 0.1),
@@ -1448,11 +1538,22 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
       cache = flag("--cache") %||% FALSE,
       allowfile = "--allow-file" %in% rest,
       snapshot = "--snapshot" %in% rest,
+      wayback = FALSE,
       glob = flag("--manifests") %||% "",
       fp = !"--no-footprint" %in% rest,
       seenlog = flag("--seen-log") %||% ""
-    ),
-    error = function(e) usage_error(sub("^cpschk: ", "", conditionMessage(e)))
+    )),
+    error = function(e) {
+      usage_error(sub("^[a-z]+: ", "", conditionMessage(e), useBytes = TRUE))
+    }
+  )
+  # the verb's own refusal, without the name of the function under it
+  tryCatch(
+    .bl_cpschk_do(a$o, a$glob, a$fp, a$seenlog, flag("--base")),
+    error = function(e) {
+      stop(sub("^[a-z]+: ", "", conditionMessage(e), useBytes = TRUE),
+           call. = FALSE)
+    }
   )
 }
 
@@ -1520,7 +1621,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   out,
   usage_error
 ) {
-  scheme <- flag("--scheme") %||% "hmac"
+  scheme <- .bl_cli_sign_scheme(flag, usage_error)
   kf <- flag("--key-file")
   key <- .bl_cli_sign_key(key, kf, usage_error)
   glob <- flag("--manifests") %||% ""
@@ -1566,6 +1667,23 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   .bl_cli_sign_check(root, scheme, key, pub, glob, flag, fmt, fail_on, out)
 }
 
+#' rmbl sign's --scheme, checked before the key is asked for: a bad scheme
+#' was reported as a missing key.
+#' @param flag The function that reads one of sign's options.
+#' @param usage_error The function that stops sign with status 2.
+#' @return The scheme, "hmac" when none is given.
+#' @noRd
+.bl_cli_sign_scheme <- function(flag, usage_error) {
+  scheme <- flag("--scheme") %||% "hmac"
+  if (!scheme %in% c("hmac", pqcbknd())) {
+    usage_error(sprintf(
+      "--scheme takes hmac or a scheme pqcbknd() lists, not '%s'",
+      .rmbl_printable(scheme)
+    ))
+  }
+  scheme
+}
+
 #' rmbl sign's key: from the environment, or from --key-file.
 #' @param key The key from RMBL_KEY, or "".
 #' @param kf The --key-file path, or NULL.
@@ -1577,10 +1695,18 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     if (!file.exists(kf) || dir.exists(kf)) {
       usage_error(sprintf("--key-file: no such file: %s", .rmbl_printable(kf)))
     }
+    # a pipe or a device has no end: readLines() waited, or read until
+    # memory ran out
+    if (!identical(.rmbl_path_kind(path.expand(kf)), "regular")) {
+      usage_error(sprintf(
+        "--key-file: not a regular file (a device, a pipe or a socket): %s",
+        .rmbl_printable(kf)
+      ))
+    }
     key <- sub(
       "[\r\n]+$",
       "",
-      paste(readLines(kf, warn = FALSE), collapse = "\n")
+      paste(.rmbl_rlines(kf), collapse = "\n")
     )
   }
   if (!nzchar(key)) {
@@ -1600,7 +1726,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   out(sprintf(
     "%s: %s\n",
     .bl_prog(),
-    sub("^(blcli|xmssidxseen): ", "", conditionMessage(e))
+    sub("^(blcli|xmssidxseen): ", "", conditionMessage(e), useBytes = TRUE)
   ))
   1L
 }
@@ -1691,7 +1817,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
   }
   if (!is.null(sf)) {
     kind <- .Call(C_rmbl_path_kind, sf)
-    why <- if (!grepl("^(/|[A-Za-z]:[/\\\\])", sf)) {
+    why <- if (!grepl("^(/|[A-Za-z]:[/\\\\])", sf, useBytes = TRUE)) {
       "a relative path"
     } else if (kind == "directory") {
       "a directory"
@@ -1814,7 +1940,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
       dirs <- .bl_seal_dirs(root, overwrite, glob)
       # every signature of this key seen under the path and in the log: a state
       # below them is a stale copy
-      seen <- xmssidxseen(root, seenlog)
+      seen <- .rmbl_xmss_seen(root, seenlog)
       ids <- .rmbl_xmss_ids(.rmbl_xmss_key_json(key, "the key")$key)
       p <- .rmbl_xmss_index_file(cli = TRUE)
       rec_hi <- if (is.null(p)) {
@@ -1894,7 +2020,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     message(sub("\n$", "", m))
   }
   if (!is.null(seenlog)) {
-    s <- xmssidxseen(root)
+    s <- .rmbl_xmss_seen(root)
     .rmbl_xmss_seen_append(
       seenlog,
       s[s$key == xs$fpr & s$index >= xs$from & s$index <= xs$to, , drop = FALSE]
@@ -1928,7 +2054,7 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
     file
   } else {
     paste0(
-      sub("\\.html?$", "", file, ignore.case = TRUE),
+      sub(.rmbl_ci("\\.html?$"), "", file, perl = TRUE, useBytes = TRUE),
       "-",
       basename(names(drifts)),
       ".html"
@@ -2077,9 +2203,22 @@ cpsrfrsh <- function(dir, allowfile = FALSE) {
       "the data are marked synthetic: a ",
       "capsule holds the real data"
     ),
+    .bl_check_meanings_bundle()
+  )
+}
+
+#' The meanings of the failed checks of what a capsule's bundle covers.
+#' @return A named character vector: check name to meaning.
+#' @noRd
+.bl_check_meanings_bundle <- function() {
+  c(
     no_unlisted_files = paste0(
       "the capsule holds files the bundle does not cover: remove them or ",
       "sign again (cpsbndl())"
+    ),
+    no_unsigned_fields = paste0(
+      "the bundle holds fields no signature covers: remove them or sign ",
+      "again (cpsbndl())"
     )
   )
 }

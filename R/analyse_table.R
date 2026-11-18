@@ -14,7 +14,8 @@
 #'
 #' @details The steps, in order: \enumerate{ \item profile:
 #' [profcols()] and [misssmry()] on
-#' \code{data}; \item change: [yoy()] between consecutive periods within
+#' \code{data}; \item change: [yoychg()] between consecutive
+#' periods within
 #' each \code{by} group. For \code{units = "count"} the exact p-values are then
 #' adjusted across all comparisons with [scanadj()], and, when
 #' \code{rnd} or \code{suplim} is given, [yoybnd()] adds the
@@ -34,7 +35,7 @@
 #' \code{data} or \code{prior} not a data frame; a named column not in
 #' \code{data}; an invalid \code{units}, \code{dir} or \code{rndkind}; a
 #' \code{conflvl} outside (0, 1); and any error of the functions called (for
-#' example negative counts in [yoy()]).
+#' example negative counts in [yoychg()]).
 #'
 #' @param data A data frame in long form: one row per period and group.
 #' @param value Name of the column (a string) with the published count (or
@@ -42,7 +43,7 @@
 #' @param prd Name of the column with the period (fiscal year, quarter,
 #'   ...); numeric periods are used as the time axis of the trend tests. Text
 #'   periods (\code{"2019/20"}, \code{"2021 Q3"}, \code{"Mar 2021"}) are
-#'   ordered as [yoy()] reads them (see its \code{prd}), or as
+#'   ordered as [yoychg()] reads them (see its \code{prd}), or as
 #'   \code{prdord} gives.
 #' @param by Optional character vector of grouping column names
 #'   (institution, region, ...). \code{NULL} (the default) treats the table as
@@ -52,7 +53,7 @@
 #' @param prior Optional data frame: the previous capsule of the same
 #'   table, for the drift screen. \code{NULL} (the default) skips it.
 #' @param units \code{"count"} (the default), \code{"continuous"} or
-#'   \code{"percent"}, as in [yoy()].
+#'   \code{"percent"}, as in [yoychg()].
 #' @param rnd,rndkind,suplim How the release rounds
 #'   or suppresses cells; see [pubbnd()].
 #'   \code{rnd} is the
@@ -61,7 +62,7 @@
 #'   which cells are suppressed. \code{NULL} when the counts are exact. Used
 #'   only for counts: with other \code{units} they are ignored, with a
 #'   warning.
-#' @param dir Which way is an improvement, as in [yoy()]:
+#' @param dir Which way is an improvement, as in [yoychg()]:
 #'   \code{"neutral"} (the default), \code{"higher"} or
 #'   \code{"lower"}.
 #' @param per Rate denominator, as in [rtcalc()]; default 1000 (rates
@@ -73,13 +74,13 @@
 #' @param adjust Multiple-comparison method for
 #'   [scanadj()]. The default is \code{"BH"} (Benjamini-Hochberg).
 #' @param prdord Optional character vector: the period labels in order,
-#'   for text periods the reader does not know (see [yoy()]); passed to
-#'   [yoy()], [ratechg()] and the trend tests.
+#'   for text periods the reader does not know (see [yoychg()]); passed to
+#'   [yoychg()], [ratechg()] and the trend tests.
 #' @return A list of class \code{bricklayer_analysis} (with a print method that
 #'   summarises it in a few lines): \describe{
 #'   \item{\code{profile}}{[profcols()] of \code{data}.}
 #'   \item{\code{missingness}}{named numeric from [misssmry()].}
-#'   \item{\code{change}}{the [yoy()] table; for counts with the added
+#'   \item{\code{change}}{the [yoychg()] table; for counts with the added
 #'   columns \code{p_value}, \code{padj} and \code{significant}, and with
 #'   \code{env_*} and \code{compctlo}/\code{compctup} when publication bounds
 #'   were requested.} \item{\code{rates}, \code{ratechg}}{the
@@ -96,14 +97,14 @@
 #' path <- system.file("extdata", "otis_a01_individuals.csv",
 #'                     package = "rmoriebricklayer")
 #' otis <- read.csv(path)
-#' a <- anltab(otis, value = "individuals", prd = "year",
+#' a <- anytab(otis, value = "individuals", prd = "year",
 #'                    by = c("table", "group"))
 #' a
 #' a$change[, c("table", "group", "year", "pctchg", "padj")]
 #' a$trend[, c("group", "tau", "trndp", "rateratio")]
 #'
 #' # counts published rounded to base 5: the intervals widen
-#' b <- anltab(otis, value = "individuals", prd = "year",
+#' b <- anytab(otis, value = "individuals", prd = "year",
 #'                    by = c("table", "group"), rnd = 5)
 #' b$change[1:3, c("group", "year", "pctlo", "compctlo")]
 #'
@@ -111,11 +112,11 @@
 #' d <- data.frame(year = rep(2019:2022, 2), site = rep(c("A", "B"), each = 4),
 #'                 n = c(10, 12, 15, 9, 30, 28, 35, 40),
 #'                 pop = rep(c(1000, 2000), each = 4))
-#' r <- anltab(d, "n", "year", by = "site", pop = "pop", per = 1000)
+#' r <- anytab(d, "n", "year", by = "site", pop = "pop", per = 1000)
 #' r$ratechg[, c("site", "year", "rate", "rateratio", "padj")]
 #'
 #' # a column that is not in the data is an error
-#' try(anltab(otis, value = "count", prd = "year"))
+#' try(anytab(otis, value = "count", prd = "year"))
 #' @seealso [rptanl()] writes the result as a
 #'   Markdown or HTML
 #'   report.
@@ -128,7 +129,7 @@
 #' @srrstats {EA3.0} One call runs profile, change, Benjamini-Hochberg
 #'   adjustment over the whole scan, publication envelope, trend, rates and
 #'   drift, which otherwise take separate manual steps; test-analyse_table.R.
-anltab <- function(
+anytab <- function(
   data,
   value,
   prd,
@@ -191,7 +192,7 @@ format.bricklayer_analysis <- function(x, ...) {
 
 #' Write an analysis as a Markdown or HTML report
 #'
-#' Renders an [anltab()] result as a report: the
+#' Renders an [anytab()] result as a report: the
 #' change table with
 #' its intervals and adjusted p-values, the rates, the trends, the drift
 #' screen and the column profile, each with one sentence saying how to read
@@ -212,11 +213,11 @@ format.bricklayer_analysis <- function(x, ...) {
 #' inline code, with the text escaped). The file is written as UTF-8 and
 #' overwritten if it exists.
 #'
-#' Errors: \code{x} not from [anltab()]; an invalid
+#' Errors: \code{x} not from [anytab()]; an invalid
 #' \code{format}.
 #'
 #' @param x A \code{bricklayer_analysis} from
-#'   [anltab()].
+#'   [anytab()].
 #' @param path Where to write, a file path. With \code{NULL} (the default)
 #'   the text is returned invisibly and nothing is written.
 #' @param format \code{"markdown"} or \code{"html"}. With \code{NULL} (the
@@ -230,7 +231,7 @@ format.bricklayer_analysis <- function(x, ...) {
 #' @examplesIf isTRUE(getOption("rmbl.examples"))
 #' path <- system.file("extdata", "otis_a01_individuals.csv",
 #'                     package = "rmoriebricklayer")
-#' a <- anltab(read.csv(path), value = "individuals",
+#' a <- anytab(read.csv(path), value = "individuals",
 #'                    prd = "year", by = c("table", "group"))
 #' md <- rptanl(a)
 #' cat(substr(md, 1, 400))
@@ -240,7 +241,7 @@ format.bricklayer_analysis <- function(x, ...) {
 #' rptanl(a, out, title = "OTIS A01: individuals in custody", digits = 2)
 #' readLines(out, n = 3)
 #'
-#' # only an anltab() result can be reported
+#' # only an anytab() result can be reported
 #' try(rptanl(read.csv(path)))
 #' unlink(out)
 #' @export
@@ -252,14 +253,15 @@ rptanl <- function(
   digits = 1L
 ) {
   if (!inherits(x, "bricklayer_analysis")) {
-    stop("`x` must come from anltab()", call. = FALSE)
+    stop("`x` must come from anytab()", call. = FALSE)
   }
   if (!is.null(path)) {
     path <- .rmbl_out_file(path, "path")
   }
   if (!is.null(path) && is.null(format)) {
     format <- if (
-      is.character(path) && grepl("\\.html?$", path, ignore.case = TRUE)
+      is.character(path) && grepl(.rmbl_ci("\\.html?$"), path, perl = TRUE,
+          useBytes = TRUE)
     ) {
       "html"
     } else {
@@ -284,13 +286,13 @@ rptanl <- function(
     text <- .md_to_html(text, title)
   }
   if (!is.null(path)) {
-    writeLines(enc2utf8(text), path, useBytes = TRUE)
+    .rmbl_wlines(text, path)
   }
   invisible(text)
 }
 
-#' anltab()'s rounding base and suppression limit, checked.
-#' @param rnd,suplim As for anltab().
+#' anytab()'s rounding base and suppression limit, checked.
+#' @param rnd,suplim As for anytab().
 #' @return A list: rnd and suplim.
 #' @noRd
 .anl_check_bounds <- function(rnd, suplim) {
@@ -317,15 +319,15 @@ rptanl <- function(
   list(rnd = rnd, suplim = suplim)
 }
 
-#' anltab()'s columns, each in the data.
-#' @param data The table given to anltab(), whose names must include `cols`.
+#' anytab()'s columns, each in the data.
+#' @param data The table given to anytab(), whose names must include `cols`.
 #' @param cols The columns.
 #' @noRd
 .anl_check_cols <- function(data, cols) {
   for (col in cols) {
     if (!col %in% names(data)) {
       stop(
-        sprintf("anltab: column `%s` not found in `data`", col),
+        sprintf("anytab: column `%s` not found in `data`", col),
         call. = FALSE
       )
     }
@@ -333,9 +335,9 @@ rptanl <- function(
   invisible(NULL)
 }
 
-#' anltab()'s rates and their changes, when there is an exposure.
+#' anytab()'s rates and their changes, when there is an exposure.
 #' @param data,value,prd,by,pop,per,conflvl,adjust,alpha,prdord As for
-#'   anltab().
+#'   anytab().
 #' @return A list: rates and rc (NULL without `pop`).
 #' @noRd
 .anl_rates <- function(data, value, prd, by, pop, per, conflvl, adjust, alpha,
@@ -381,8 +383,8 @@ rptanl <- function(
 .analysis_trends <- function(data, value, period, by, units, conf_level,
                              prdord = NULL) {
   conf_level <- .rmbl_conf_level(conf_level)
-  # text periods in the order yoy() reads them ("Mar 2021" after "Feb 2021"),
-  # not alphabetically; yoy() has already warned about any it cannot order
+  # text periods in the order yoychg() reads them ("Mar 2021" after "Feb 2021"),
+  # not alphabetically; yoychg() has already warned about any it cannot order
   data[[period]] <- .yoy_prd_read(data[[period]], prdord, quiet = TRUE)$p
   groups <- if (is.null(by)) {
     list(data)
@@ -421,7 +423,7 @@ rptanl <- function(
     }
     out
   })
-  # unnamed: group labels as row names warned in a C locale (as yoy())
+  # unnamed: group labels as row names warned in a C locale (as yoychg())
   out <- do.call(rbind, unname(rows))
   rownames(out) <- NULL
   out
@@ -439,9 +441,15 @@ rptanl <- function(
       return("")
     }
     format(z, big.mark = if (big && abs(z) >= 1e4) "," else "",
-           trim = TRUE, scientific = FALSE, digits = 15L)
+           trim = TRUE, scientific = FALSE, digits = 15L, decimal.mark = ".")
   }, character(1L))
 }
+
+#' Text for a Markdown table cell: one line, HTML and the pipe escaped.
+#' @param v The values of one table column, or the header names.
+#' @return The cell texts.
+#' @noRd
+.md_cell <- function(v) .yoy_md_esc(as.character(v))
 
 #' Minimal Markdown table (pipe syntax) from a data frame; numeric
 #' columns rounded to `digits`, logicals as yes/no, NA as blank.
@@ -462,7 +470,7 @@ rptanl <- function(
       lab <- if (is.numeric(v)) {
         .md_num1(v, big = FALSE)
       } else {
-        .rmbl_ctl_escape(as.character(v))
+        .md_cell(v)
       }
       ifelse(is.na(v), "", lab)
     } else if (is.logical(v)) {
@@ -473,16 +481,16 @@ rptanl <- function(
       # a separator from 10,000 up only: a four-digit whole number (a year in
       # the profile's min / max) read as "2,023"
       num <- ifelse(whole, .md_num1(v, big = TRUE),
-                    formatC(v, digits = digits, format = "f"))
+                    .rmbl_fc(v, digits = digits, format = "f"))
       ifelse(is.na(v), "", num)
     } else {
-      ifelse(is.na(v), "", .rmbl_ctl_escape(as.character(v)))
+      ifelse(is.na(v), "", .md_cell(v))
     }
   })
   rows <- do.call(paste, c(cells, sep = " | "))
   paste(
     c(
-      paste("|", paste(.rmbl_ctl_escape(names(d)), collapse = " | "), "|"),
+      paste("|", paste(.md_cell(names(d)), collapse = " | "), "|"),
       paste("|", paste(rep("---", ncol(d)), collapse = " | "), "|"),
       paste("|", rows, "|")
     ),
@@ -526,20 +534,20 @@ rptanl <- function(
   .md_html_page(out, title)
 }
 
-#' anltab()'s data, column names, confidence level and alpha, checked.
-#' @param data,value,prd,by,pop,conflvl,alpha As for anltab().
+#' anytab()'s data, column names, confidence level and alpha, checked.
+#' @param data,value,prd,by,pop,conflvl,alpha As for anytab().
 #' @return A list: value, prd, pop, conflvl and alpha.
 #' @noRd
 .anl_inputs <- function(data, value, prd, by, pop, conflvl, alpha) {
   if (!is.data.frame(data)) {
-    stop("anltab: `data` must be a data frame", call. = FALSE)
+    stop("anytab: `data` must be a data frame", call. = FALSE)
   }
   .rmbl_df_names(data)
   value <- .rmbl_string1(value, "value")
   prd <- .rmbl_string1(prd, "prd")
   if (!is.null(by) && (!is.character(by) || !length(by) || anyNA(by))) {
     stop(
-      "anltab: `by` must be one or more column names, or NULL",
+      "anytab: `by` must be one or more column names, or NULL",
       call. = FALSE
     )
   }
@@ -555,7 +563,7 @@ rptanl <- function(
 }
 
 #' Warns that rounding and suppression are ignored for a non-count.
-#' @param o anltab()'s settings.
+#' @param o anytab()'s settings.
 #' @return NULL, invisibly.
 #' @noRd
 .anl_warn_bounds <- function(o) {
@@ -575,10 +583,10 @@ rptanl <- function(
   invisible(NULL)
 }
 
-#' anltab()'s analysis, once its arguments are checked.
+#' anytab()'s analysis, once its arguments are checked.
 #' @param data The table analysed: profiled, checked for gaps and change.
 #' @param prior The prior capsule, or NULL.
-#' @param o anltab()'s settings.
+#' @param o anytab()'s settings.
 #' @return A bricklayer_analysis.
 #' @noRd
 .anl_run <- function(data, prior, o) {
@@ -632,17 +640,17 @@ rptanl <- function(
   )
 }
 
-#' anltab()'s year-on-year change, multiplicity-adjusted and bounded for a
+#' anytab()'s year-on-year change, multiplicity-adjusted and bounded for a
 #' count.
 #' @param data The table whose change between periods is measured.
-#' @param o anltab()'s settings.
-#' @return A yoy() result.
+#' @param o anytab()'s settings.
+#' @return A yoychg() result.
 #' @noRd
 .anl_change <- function(data, o) {
-  # bare `value` and `prd`, as anltab() passed them to yoy()
+  # bare `value` and `prd`, as anytab() passed them to yoychg()
   value <- o$value
   prd <- o$period
-  change <- yoy(
+  change <- yoychg(
     data,
     value = value,
     prd = prd,
@@ -823,15 +831,15 @@ rptanl <- function(
     "",
     sprintf(
       paste0(
-        "`%s` by `%s`%s; %d rows; %d period(s) from %s to %s; ",
+        "%s by %s%s; %d rows; %d period(s) from %s to %s; ",
         "generated %s."
       ),
-      m$value,
-      m$period,
+      .md_code(m$value),
+      .md_code(m$period),
       if (length(m$by)) {
         paste0(
           ", grouped by ",
-          paste(sprintf("`%s`", m$by), collapse = " and ")
+          paste(.md_code(m$by), collapse = " and ")
         )
       } else {
         ""
@@ -1043,7 +1051,42 @@ rptanl <- function(
 #' @param s A character vector.
 #' @return `s` as HTML.
 #' @noRd
-.md_inline <- function(s) gsub("`([^`]+)`", "<code>\\1</code>", .md_esc(s))
+.md_inline <- function(s) {
+  s <- .md_esc(s)
+  # a character escaped with a backslash (.md_lit()) is shown as itself, never
+  # as the start of a code span
+  for (ch in c("\\", "`", "*")) {
+    s <- gsub(
+      paste0("\\", ch),
+      sprintf("&#%d;", utf8ToInt(ch)),
+      s,
+      fixed = TRUE
+    )
+  }
+  gsub("`([^`]+)`", "<code>\\1</code>", s)
+}
+
+#' Escapes the characters Markdown would read as code or emphasis (a
+#' backslash, a backtick, an asterisk) with a backslash, so a label shows as
+#' written.
+#' @param s A character vector.
+#' @return `s`, escaped.
+#' @noRd
+.md_lit <- function(s) gsub("([\\\\`*])", "\\\\\\1", s)
+
+#' A name as a Markdown code span, on one line. A name holding a backtick
+#' cannot be put in a single-backtick span: it is written as escaped text.
+#' @param s A character vector.
+#' @return The Markdown.
+#' @noRd
+.md_code <- function(s) {
+  s <- gsub("[\r\n]+", " ", s)
+  .rmbl_ctl_escape(ifelse(
+    grepl("`", s, fixed = TRUE),
+    .md_lit(s),
+    paste0("`", s, "`")
+  ))
+}
 
 #' Renders a Markdown table (its lines, separator second) as HTML.
 #' @param tbl The table's lines.
@@ -1056,7 +1099,12 @@ rptanl <- function(
       " | ",
       fixed = TRUE
     )[[1L]]
-    trimws(v)
+    # a cell is Markdown: its pipe is written \| and its &, < and > as
+    # entities; back to the text first, so .md_inline() escapes it once
+    v <- gsub("\\|", "|", trimws(v), fixed = TRUE)
+    v <- gsub("&lt;", "<", v, fixed = TRUE)
+    v <- gsub("&gt;", ">", v, fixed = TRUE)
+    gsub("&amp;", "&", v, fixed = TRUE)
   })
   hdr <- paste0(
     "<tr>",
@@ -1106,7 +1154,7 @@ rptanl <- function(
   )
 }
 
-#' anltab()'s drift against the prior capsule.
+#' anytab()'s drift against the prior capsule.
 #' @param prior The prior capsule, or NULL.
 #' @param data The current table, compared with `prior` by cpsdrft().
 #' @param alpha The significance level.
@@ -1122,9 +1170,9 @@ rptanl <- function(
   cpsdrft(prior, data, alpha = alpha)
 }
 
-#' The `meta` of an anltab() result: its settings, then the data's size,
+#' The `meta` of an anytab() result: its settings, then the data's size,
 #' periods and when it ran.
-#' @param o anltab()'s settings.
+#' @param o anytab()'s settings.
 #' @param data The table analysed, giving the row count and the periods.
 #' @param prior The prior capsule, or NULL.
 #' @return A list.

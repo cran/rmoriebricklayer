@@ -334,7 +334,7 @@ wrmnfjs <- function(man, path, canon = FALSE) {
     man$meta$synthetic <- TRUE
   }
   if (isTRUE(canon)) {
-    writeLines(mnfcanon(man), path, useBytes = TRUE)
+    .rmbl_wlines(mnfcanon(man), path)
     return(invisible(path))
   }
   .rmbl_wlines(
@@ -525,7 +525,7 @@ wrsmrytxt <- function(
     stop("`outdir` is not a directory: ", outdir, call. = FALSE)
   }
   .rmbl_smry_check_text(whatwasdone, contact, lic)
-  files <- sort(list.files(outdir))
+  files <- .rmbl_bsort(list.files(outdir))
   lines <- c(
     .rmbl_smry_head(man),
     .rmbl_smry_paths(paths),
@@ -706,7 +706,7 @@ summarise_counts <- function(manifest) {
       sprintf(
         "%-15s %s",
         paste0(
-          toupper(substr(nm, 1, 1)),
+          .rmbl_upper(substr(nm, 1, 1)),
           substr(nm, 2, nchar(nm)),
           ":"
         ),

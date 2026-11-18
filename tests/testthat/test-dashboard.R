@@ -7,6 +7,21 @@
 skip_on_cran()
 
 ns <- asNamespace("rmoriebricklayer")
+
+# A long analysis runs in a fork of the session (.bl_bg() calls
+# parallel::mcparallel()). Under covr each fork of this file's session grew to
+# the session's own size, about 800 MB, beside it, which stopped the coverage
+# run of a 2 GB checking machine. There the background run is done in this
+# process instead: the promise, its polling and the refusal are the same, only
+# the second process is left out. The fork itself is tested (by "long
+# analyses run as an ExtendedTask ...") where there is room for it.
+if (mem_cap() < 3 * 1024^3) {
+  local_mocked_bindings(
+    mcparallel = function(expr, ...) list(value = try(expr, silent = TRUE)),
+    mccollect = function(jobs, ...) list(jobs$value),
+    .package = "parallel"
+  )
+}
 specs <- function() ns$.bl_app_specs()
 spec <- function(id) Filter(function(s) s$id == id, specs())[[1L]]
 setting <- function() shiny::reactive(list(digits = 4L, seed = 1L))
@@ -294,8 +309,7 @@ test_that(
           stringsAsFactors = FALSE
         )
       },
-      dload = function(key, ...) data.frame(x = 1:2),
-      .bl_hosted_key = function() NULL
+      dload = function(key, ...) data.frame(x = 1:2)
     )
     shiny::testServer(
       ns$.bl_data_server,
@@ -306,7 +320,7 @@ test_that(
         expect_match(cur()$label, "capsule")
         session$setInputs(cpsdir = tempfile(), cpsload = 2)
         expect_match(html(output$status), "not an existing directory")
-        expect_match(html(output$signin), "Not signed in")
+        expect_match(html(output$signin), "need no sign-in")
         session$setInputs(hublist = 1)
         session$setInputs(hubkey = "db/t", hubload = 1)
         expect_identical(cur()$code, "data <- dload(\"db/t\")")
@@ -314,14 +328,12 @@ test_that(
       }
     )
     local_mocked_bindings(
-      dtabs = function(...) stop("the data service did not answer"),
-      .bl_hosted_key = function() "k"
+      dtabs = function(...) stop("the data service did not answer")
     )
     shiny::testServer(
       ns$.bl_data_server,
       args = list(id = "data", init = nodata),
       {
-        expect_match(html(output$signin), "Signed in")
         session$setInputs(hublist = 1)
         expect_match(html(output$status), "the data service did not answer")
       }
@@ -352,7 +364,7 @@ test_that(
         freqtbl = list(),
         mahaoutl = list(source = "datasets::mtcars"),
         plotrdg = list(),
-        plotecdf = list(),
+        plotcdfs = list(),
         plotvln = list(),
         plothex = list(),
         plotgain = list()
@@ -365,7 +377,7 @@ test_that(
         cnttrnd = list(),
         plotcal = list(source = 4L),
         plothrz = list(source = 2L),
-        plotsm = list(source = 2L),
+        plotmult = list(source = 2L),
         plotbump = list(source = 2L)
       ),
       survey = list(svyest = list(), svycmp = list(a_ref = "Central")),
@@ -797,12 +809,16 @@ test_that(
       }
       rec$out
     }
+    # a short analysis runs in this process
+    expect_identical(ns$.bl_bg(function() 1, FALSE), 1)
+    # a long one forks this session (parallel::mcparallel): a second copy of
+    # it, which a 2 GB check machine has no room for
+    skip_if_lowmem()
     expect_identical(wait(ns$.bl_bg(function() 6 * 7, TRUE))$ok, 42)
     expect_match(
       wait(ns$.bl_bg(function() stop("no luck"), TRUE))$err,
       "no luck"
     )
-    expect_identical(ns$.bl_bg(function() 1, FALSE), 1)
     local_mocked_bindings(
       mccollect = function(...) list(NULL),
       .package = "parallel"
@@ -953,8 +969,8 @@ test_that("a tab shows the exact call, the refusal and its explanation", {
   expect_identical(
     strsplit(g$code, "\n", fixed = TRUE)[[1L]][2L],
     paste(
-      "y <- yoy(data, value = \"n\", prd = \"year\", by = \"area\", lag = 1,",
-      "units = \"count\",",
+      "y <- yoychg(data, value = \"n\", prd = \"year\", by = \"area\",",
+      "lag = 1, units = \"count\",",
       "minbase = 20, dir = \"neutral\")"
     )
   )
@@ -963,7 +979,7 @@ test_that("a tab shows the exact call, the refusal and its explanation", {
   expect_s3_class(g$rpt[[1L]]$yoy, "rmbl_yoy")
   # the same call in a script gives the same table
   data <- eval(str2lang(src))
-  y <- yoy(
+  y <- yoychg(
     data,
     value = "n",
     prd = "year",
@@ -998,7 +1014,7 @@ test_that("a tab shows the exact call, the refusal and its explanation", {
 test_that("results download as the package writes them", {
   skip_if_not_installed("shiny")
   f <- tempfile()
-  y <- yoy(c(1, 2, 4))
+  y <- yoychg(c(1, 2, 4))
   expect_identical(ns$.bl_dl_name(y, "yoy"), "rmbl-yoy.html")
   ns$.bl_dl_write(y, f)
   expect_match(paste(readLines(f), collapse = ""), "<table>", fixed = TRUE)
@@ -1403,7 +1419,7 @@ test_that("tabs made in a loop each keep their own spec", {
         if (nzchar(output[[paste0(tab, "-code")]])) break
       }
     }
-    expect_match(output[["yoy-code"]], "yoy(data", fixed = TRUE)
+    expect_match(output[["yoy-code"]], "yoychg(data", fixed = TRUE)
     expect_match(output[["hawkes-code"]], "chwkfit(", fixed = TRUE)
   })
 })

@@ -21,12 +21,7 @@ failure, 2 for a usage error, 130 when interrupted.
 }
 \description{
 Dispatches the verbs of the \code{rmoriebricklayer} launcher: \describe{
-\item{\code{login [--token] [--email ADDRESS [--code CODE]]
-[--no-browser]}}{sign in for the curated tables at data.rmorie.com (a free
-MORIE data key, issued at \code{www.rmorie.com/access/}): a key you paste
-with \code{--token} (read from the terminal or a pipe when KEY is omitted), a
-code sent to \code{--email}, or the GitHub device flow}
-\item{\code{logout}}{forget the data key} \item{\code{doctor}}{report the
+\item{\code{doctor}}{report the
 language-model routes available here (own endpoint, each provider with your
 key, local Ollama), in the order \code{ask} tries them} \item{\code{models
 [--route ROUTE]}}{list the models your provider (or server) offers, the one
@@ -68,15 +63,13 @@ comments skipped) in the Internet Archive's Wayback Machine with
 \code{\link{wbsave}}, results in \code{--out} (default
 \code{FILE.wayback.jsonl}), so a stopped run carries on; \code{wayback
 --retry FILE.jsonl [--include-gone]} retries the failures of an earlier run
-(\code{\link{wbrtry}})} \item{\code{archive save URL... --reason TEXT
-[--dir D] [--private] [--also wayback]}}{save from this connection to
-archive.rmorie.com with \code{\link{arccap}}, keeping the files, their
-manifest and WARC copies in D (default \file{captures}); \code{archive
-push DIR [--reason TEXT] [--private] [--also wayback]} sends a capture
-kept in DIR on later, the same bytes, with \code{\link{arcpush}} (run it
-again to retry what failed); \code{archive find URL} and \code{archive
-get ID|URL -o FILE} list the captures of a URL and fetch one's exact bytes
-(\code{\link{arcfind}}, \code{\link{arcget}})}
+(\code{\link{wbrtry}})} \item{\code{archive save URL... [--reason TEXT]
+[--dir D] [--also wayback]}}{capture from this connection with
+\code{\link{arccap}}, keeping the files, their manifest and WARC copies in
+D (default \file{captures}), and with \code{--also wayback} ask the
+Wayback Machine too; \code{archive push DIR --also wayback} asks the
+Wayback Machine later for the addresses of a capture kept in DIR, with
+\code{\link{arcpush}} (run it again to retry what failed)}
 \item{\code{verify PATH [--json] [--fail-on LEVEL]
 [--public-key HEX]}}{check every capsule under PATH as the rmbl GitHub Action
 does (\code{\link{cpschk}}): each file against its JSON Schema
@@ -85,8 +78,10 @@ does (\code{\link{cpschk}}): each file against its JSON Schema
 \code{RMBL_KEY}, which is then removed from the environment. Prints the
 Markdown report, or JSON with \code{--json}; exits 1 when a failed row is at
 or above \code{--fail-on} (\code{error}, the default, \code{drift} or
-\code{warn}). \code{--base MANIFEST|DIR} compares each manifest with its base
-copy, \code{--manifests GLOB} checks only the capsule files matching GLOB,
+\code{warn}), and when no capsule is found under PATH (an error row:
+nothing was checked). \code{--base MANIFEST|DIR} compares each
+manifest with its base copy, \code{--manifests GLOB} checks only the
+capsule files matching GLOB,
 \code{--snapshot} looks up each source's latest Wayback snapshot and
 \code{--no-footprint} leaves the footprint (\code{\link{co2fp}}) out of the
 report. \code{--seen-log FILE} adds the signatures an XMSS seen-log lists to
@@ -133,19 +128,34 @@ argument that is plainly a question (two or more words, or ending in
 asked as \code{ask} would ask it.
 
 Errors are not raised: every error is written to \code{out} as
-\code{"PROG: message"} and turned into the exit status. The status is 0
-on success, 1 when the verb failed (an error, nothing found, no route), 2
-for a usage error (an unknown verb or option, a missing value) and 130 when
-interrupted (Ctrl-C). The command name in messages is the environment
-variable \code{RMBL_PROG}, else \code{rmoriebricklayer}.
+\code{"PROG: message"} and turned into the exit status, one table for
+every verb: 0 on success; 1 when the verb failed or refused (an error,
+nothing found, no route, a check that failed at or above
+\code{--fail-on}, a folder under PATH that cannot be read, a link out of
+PATH that the capsule verbs do not follow); 2 for a usage error, found
+while the arguments are checked and before anything is read (an unknown
+verb or option, a missing value, a value an option does not take, such
+as a PSI band that is no number, a \code{--base} or a folder PATH that
+does not exist, a \code{--seen-log} that cannot be read); and 130 when
+interrupted (Ctrl-C). \code{report} prints the report and exits 0 once
+it is made, whatever its rows say. An input that does not exist gives,
+verb by verb: 2 for the folder of \code{verify}, \code{drift},
+\code{report}, \code{refresh} and \code{sign}, and 1 for the project of
+\code{pack} and the results file of \code{wayback} (a failed verb). The
+capsule verbs search PATH as \code{\link{cpschk}} does: a link to a
+folder inside it is followed, a loop is not, and a link to any other
+folder outside it is not followed and is warned of, named. The options of
+\code{pack} and \code{sign} are checked
+before anything is read or a key is asked for. The command name in
+messages is the environment variable \code{RMBL_PROG}, else
+\code{rmoriebricklayer}.
 
 Side effects: during the call \code{options(morie.progress = TRUE)} is set,
 so downloads draw a progress bar; when \code{RMBL_PROG} is set (the
 launcher sets it) and \code{options(rmoriebricklayer.dcache)} is not,
 the data.rmorie.com manifest and tables are kept in
 \code{tools::R_user_dir("rmoriebricklayer", "cache")} rather than a fresh
-temporary folder. The verbs \code{login}, \code{logout} and
-\code{config} write the shared credentials and settings files;
+temporary folder. The verb \code{config} writes the settings file;
 \code{ask}, \code{models}, \code{data}, \code{bundle} and
 \code{wayback} use the network, and \code{drift} and \code{refresh}
 fetch each capsule's source (\code{refresh} writes the capsule),
@@ -231,7 +241,7 @@ blcli(c("verify", d))
 \dontshow{if (interactive()) withAutoprint(\{ # examplesIf}
 # these read every help page, which takes a few seconds
 blcli(c("functions", "json"))
-blcli(c("describe", "anltab"))
+blcli(c("describe", "anytab"))
 blcli(c("examples", "perdays"))
 \dontshow{\}) # examplesIf}
 }

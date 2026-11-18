@@ -95,8 +95,10 @@
 #' @export
 jsgzenc <- function(x, raw = FALSE, ...) {
   raw <- .rmbl_flag1(raw, "raw")
-  txt <- tojs(x, ...)
-  bytes <- .rmbl_gzip_member(charToRaw(as.character(txt)))
+  txt <- .rmbl_js_as("jsgzenc", tojs(x, ...))
+  json <- charToRaw(as.character(txt))
+  .rmbl_gz_json_cap(length(json))
+  bytes <- .rmbl_gzip_member(json)
   if (isTRUE(raw)) {
     return(bytes)
   }
@@ -106,6 +108,17 @@ jsgzenc <- function(x, raw = FALSE, ...) {
 #' @rdname jsgz
 #' @export
 jsgzdec <- function(txt, raw = FALSE, ...) {
+  # every refusal names jsgzdec, also those of the base64 and JSON steps
+  # ("fromjs: trailing content", "base64 input contains characters outside
+  # the alphabet"; audit of 21478080, P8)
+  .rmbl_js_as("jsgzdec", .rmbl_jsgzdec(txt, raw, ...), "`txt`")
+}
+
+#' The work of jsgzdec(), whose refusals it names.
+#' @param txt,raw,... As for jsgzdec().
+#' @return As for jsgzdec().
+#' @noRd
+.rmbl_jsgzdec <- function(txt, raw, ...) {
   .rmbl_no_fn(txt = txt)
   raw <- .rmbl_flag1(raw, "raw")
   # The input's own type settles how to read it: raw is already the gzip
@@ -125,9 +138,50 @@ jsgzdec <- function(txt, raw = FALSE, ...) {
     }
     jsb64dec(as.character(txt))
   }
-  .rmbl_gzip_check(bytes)
-  json <- rawToChar(memDecompress(bytes, type = "gzip"))
-  fromjs(json, ...)
+  json <- .rmbl_jsgz_inflate(bytes)
+  # two gzip members joined (two results of jsgzenc() pasted together) inflate
+  # to two JSON documents in a row
+  tryCatch(fromjs(json, ...), error = function(e) {
+    m <- conditionMessage(e)
+    if (!grepl("trailing content at character", m, fixed = TRUE)) {
+      stop(e)
+    }
+    stop(
+      "`txt` holds more than one JSON value (",
+      sub("^.*(trailing content at character [0-9]+).*$", "\\1", m),
+      "): decode each result of jsgzenc() on its own",
+      call. = FALSE
+    )
+  })
+}
+
+#' Inflate the gzip member of jsgzdec() to its JSON text.
+#' @param bytes The gzip member.
+#' @return The text.
+#' @noRd
+.rmbl_jsgz_inflate <- function(bytes) {
+  # the package's bounded inflater: base memDecompress() kept doubling its
+  # buffer on a damaged stream until the machine ran out of memory. It says
+  # what is wrong with the member; the trailer's declared length alone
+  # called a truncated member an oversized one.
+  tryCatch(
+    {
+      .rmbl_gzip_check(bytes, isize = FALSE)
+      rawToChar(.Call(C_rmbl_gunzip_checked, bytes, 64 * 1024^2))
+    },
+    error = function(e) {
+      m <- conditionMessage(e)
+      if (grepl("more than the size limit", m, fixed = TRUE)) {
+        m <- paste0(
+          "`txt` holds more than 64 MiB uncompressed; ",
+          "refusing to inflate more than 64 MiB"
+        )
+      } else if (!startsWith(m, "`txt`")) {
+        m <- paste("`txt`", m)
+      }
+      stop("jsgzdec: ", m, call. = FALSE)
+    }
+  )
 }
 
 #' Wrap a deflate stream in a real gzip member (RFC 1952).
@@ -184,9 +238,10 @@ jsgzdec <- function(txt, raw = FALSE, ...) {
 #' Refuses bytes that are not one gzip member, or that declare more than 64 MiB
 #' uncompressed.
 #' @param bytes The raw bytes to inflate.
+#' @param isize Whether to check the declared length too.
 #' @return NULL, invisibly.
 #' @noRd
-.rmbl_gzip_check <- function(bytes) {
+.rmbl_gzip_check <- function(bytes, isize = TRUE) {
   # A gzip member is at least 18 bytes (10 of header, 8 of trailer) and
   # starts 1f 8b; R's own memDecompress() would return garbage on a short
   # zlib-framed input and, in R 4.6, dumps core on an empty one.
@@ -206,6 +261,9 @@ jsgzdec <- function(txt, raw = FALSE, ...) {
   # The trailer's ISIZE (uncompressed length mod 2^32) is a free pre-check
   # against a decompression bomb from an untrusted field (gzip reaches
   # ~1000:1); zlib itself verifies the trailer while inflating.
+  if (!isize) {
+    return(invisible(NULL))
+  }
   nb <- length(bytes)
   isize <- sum(as.numeric(as.integer(bytes[(nb - 3L):nb])) * 256^(0:3))
   if (isize > 64 * 1024^2) {
@@ -216,6 +274,27 @@ jsgzdec <- function(txt, raw = FALSE, ...) {
           "refusing to inflate more than 64 MiB"
         ),
         isize
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
+#' Refuses JSON longer than jsgzdec() inflates (64 MiB), before it is
+#' compressed: jsgzenc() wrote what jsgzdec() then refused.
+#' @param n The JSON's length in bytes.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_gz_json_cap <- function(n) {
+  if (n > 64 * 1024^2) {
+    stop(
+      sprintf(
+        paste0(
+          "jsgzenc: the JSON is %.0f bytes, and jsgzdec() reads at ",
+          "most 64 MiB (67108864 bytes)"
+        ),
+        n
       ),
       call. = FALSE
     )

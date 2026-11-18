@@ -151,7 +151,7 @@ print.rmbl_region_coverage <- function(x, n = 10L, ...) {
 #' @export
 format.rmbl_region_coverage <- function(x, n = 10L, ...) {
   a <- attr(x, "coverage")
-  fm <- function(v) format(round(v), big.mark = ",", trim = TRUE)
+  fm <- function(v) .rmbl_ntxt(round(v))
   n <- min(as.integer(n)[1L], nrow(x))
   d <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
   attr(d, "coverage") <- NULL
@@ -697,7 +697,7 @@ rgnmappts <- function(x, y, unit, bounds, fields, crs = 4326) {
 #' @return The trimmed character vector.
 #' @noRd
 .rmbl_rm_chr <- function(x, arg) {
-  x <- trimws(as.character(x))
+  x <- trimws(.rmbl_valid_text(as.character(x), arg))
   if (!length(x)) {
     stop(.rmbl_fn(), sprintf("`%s` must not be empty", arg), call. = FALSE)
   }
@@ -719,6 +719,15 @@ rgnmappts <- function(x, y, unit, bounds, fields, crs = 4326) {
 .rmbl_rm_col <- function(d, nm, arg) {
   if (!is.data.frame(d)) {
     stop(sprintf("`%s` must be a data frame", arg), call. = FALSE)
+  }
+  # a column named by no string (a data frame, NULL) gave an error with an
+  # empty message: sprintf() of a zero-length name is no text
+  if (!is.character(nm) || length(nm) != 1L || is.na(nm)) {
+    stop(
+      .rmbl_fn(),
+      sprintf("the columns of `%s` must be named by single strings", arg),
+      call. = FALSE
+    )
   }
   if (length(nm) != 1L || !nm %in% names(d)) {
     stop(sprintf("`%s` has no column `%s`", arg, nm), call. = FALSE)

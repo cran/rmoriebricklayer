@@ -149,6 +149,7 @@ test_that(
       ", ", deparse(dir), ", man = readRDS(", deparse(mf), "), key = ",
       deparse(fx_secret), "); cat(l10n_info()[['UTF-8']], isTRUE(r$ok))"
     )
+    skip_if_lowmem()
     out <- withr::with_envvar(
       c(
         LC_ALL = "C",
@@ -166,3 +167,134 @@ test_that(
     expect_identical(utils::tail(out, 1L), "FALSE TRUE")
   }
 )
+
+test_that("a bundle with fields no signature covers fails", {
+  dir <- withr::local_tempdir()
+  writeLines("x", file.path(dir, "a.csv"))
+  m <- mkmnf(list(x = 1), env = FALSE)
+  k <- fipskg("ML-DSA-44", seed = as.raw(1:32))
+  bp <- file.path(withr::local_tempdir(), "b.json")
+  cpsbndl(dir, m, k, path = bp)
+  expect_true(cpsbndlvrf(bp, dir, man = m, keyexp = k$public)$ok)
+  edit <- function(f) {
+    b <- fromjs(bp, simplifyVector = FALSE)
+    p <- tempfile(fileext = ".json")
+    writeLines(tojs(f(b), auto_unbox = TRUE, pretty = TRUE, na = "null",
+                    null = "null", digits = I(17)), p)
+    cpsbndlvrf(p, dir, man = m, keyexp = k$public)
+  }
+  expect_true(edit(identity)$ok)
+  r <- edit(function(b) c(b, list(unsigned_claim = "reviewed")))
+  expect_false(r$ok)
+  expect_match(
+    r$checks$detail[r$checks$check == "no_unsigned_fields"],
+    "not covered by the signature: unsigned_claim"
+  )
+  r <- edit(function(b) {
+    b$attestation$reviewer <- "x"
+    b
+  })
+  expect_false(r$ok)
+  expect_true("attestation:no_unsigned_fields" %in% r$checks$check)
+  r <- edit(function(b) {
+    b$attestation$signature$signature <- toupper(
+      b$attestation$signature$signature
+    )
+    b
+  })
+  expect_false(r$ok)
+  r <- edit(function(b) {
+    b$attestation$signature$prehash <- "sha512"
+    b
+  })
+  expect_false(r$ok)
+})
+
+test_that("an empty folder is no content of a bundled capsule", {
+  dir <- withr::local_tempdir()
+  writeLines("x", file.path(dir, "a.csv"))
+  m <- mkmnf(list(x = 1), env = FALSE)
+  b <- cpsbndl(dir, m, "a secret")
+  expect_true(cpsbndlvrf(b, dir, man = m, key = "a secret")$ok)
+  # a bundle lists files only: reported, an empty folder failed every
+  # capsule sealed with one, for ever
+  dir.create(file.path(dir, "added", "deeper"), recursive = TRUE)
+  expect_true(cpsbndlvrf(b, dir, man = m, key = "a secret")$ok)
+  # a file put in it is reported
+  writeLines("y", file.path(dir, "added", "deeper", "f.txt"))
+  r <- cpsbndlvrf(b, dir, man = m, key = "a secret")
+  expect_false(r$ok)
+  row <- r$checks[r$checks$check == "no_unlisted_files", ]
+  expect_false(row$ok)
+  expect_identical(
+    row$detail,
+    "not covered by the bundle: added/deeper/f.txt"
+  )
+  unlink(file.path(dir, "added"), recursive = TRUE)
+  expect_true(cpsbndlvrf(b, dir, man = m, key = "a secret")$ok)
+})
+
+test_that("cpsbndlrd() refuses a file over 32 MiB, the cap of JSON documents", {
+  # read whole, a very large file failed in readLines() as "cannot allocate
+  # buffer"; the file check refuses it first, in the package's words
+  f <- withr::local_tempfile(fileext = ".json")
+  writeBin(raw(32 * 2^20 + 1), f)
+  expect_error(
+    cpsbndlrd(f),
+    "`path` is larger than the 33,554,432 bytes read",
+    fixed = TRUE
+  )
+})
+
+test_that("a bundle respelt with the same values still verifies", {
+  # the signature covers the values a bundle records, not the bytes of its
+  # JSON: rewritten without changing a value, a bundle keeps verifying (the
+  # hex, context, pre-hash and fields are what have one accepted spelling);
+  # a byte-order mark is no JSON the package's documents start with, and the
+  # bundle is refused before anything is checked
+  dir <- withr::local_tempdir()
+  writeBin(charToRaw("hello\n"), file.path(dir, "a.csv"))
+  m <- mkmnf(list(x = 1), env = FALSE)
+  p <- attr(cpsbndl(dir, m, "a secret"), "path")
+  orig <- readBin(p, "raw", file.size(p))
+  txt <- rawToChar(orig)
+  expect_match(txt, "\"a.csv\"", fixed = TRUE)
+  expect_match(txt, "\"size_bytes\": 6\\b")
+  respelt <- list(
+    escape = charToRaw(sub("\"a.csv\"", "\"\\u0061.csv\"", txt,
+                           fixed = TRUE)),
+    decimal = charToRaw(sub("(\"size_bytes\": 6)\\b", "\\1.0", txt)),
+    crlf = charToRaw(gsub("\n", "\r\n", txt, fixed = TRUE))
+  )
+  for (k in names(respelt)) {
+    expect_false(identical(respelt[[k]], orig), info = k)
+    writeBin(respelt[[k]], p)
+    r <- cpsbndlvrf(p, dir, man = m, key = "a secret")
+    expect_true(r$ok, info = k)
+  }
+  writeBin(c(as.raw(c(0xef, 0xbb, 0xbf)), orig), p)
+  expect_error(cpsbndlvrf(p, dir, man = m, key = "a secret"), "not JSON")
+})
+
+test_that("capsule_bundle.json is exempt only when it is the bundle checked", {
+  dir <- withr::local_tempdir()
+  writeLines("x", file.path(dir, "a.csv"))
+  m <- mkmnf(list(x = 1), env = FALSE)
+  bp <- file.path(withr::local_tempdir(), "b.json")
+  cpsbndl(dir, m, "a secret", path = bp)
+  expect_true(cpsbndlvrf(bp, dir, man = m, key = "a secret")$ok)
+  # checked from outside, a file planted under the bundle's usual name is
+  # content the bundle does not list, whatever it holds
+  writeLines("anything", file.path(dir, "capsule_bundle.json"))
+  r <- cpsbndlvrf(bp, dir, man = m, key = "a secret")
+  expect_false(r$ok)
+  expect_identical(
+    r$checks$detail[r$checks$check == "no_unlisted_files"],
+    "not covered by the bundle: capsule_bundle.json"
+  )
+  # the bundle in its usual place is its own file: exempt when it is checked
+  unlink(file.path(dir, "capsule_bundle.json"))
+  ip <- attr(cpsbndl(dir, m, "a secret"), "path")
+  expect_true(cpsbndlvrf(ip, dir, man = m, key = "a secret")$ok)
+  expect_true(cpsbndlvrf(cpsbndlrd(ip), dir, man = m, key = "a secret")$ok)
+})

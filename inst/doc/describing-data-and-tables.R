@@ -155,7 +155,7 @@ for (nm in names(messy)) {
   }
 }
 par(op)
-plotecdf(
+plotcdfs(
   c(reference$score, fresh$score),
   rep(c("reference", "fresh"), c(nrow(reference), nrow(fresh))),
   main = "Fresh scores against the reference"
@@ -639,7 +639,7 @@ seg <- data.frame(
 )
 
 ## -----------------------------------------------------------------------------
-y <- yoy(seg,
+y <- yoychg(seg,
   value = NumberOfPlacements,
   prd = EndFiscalYear,
   by = "Gender",
@@ -652,23 +652,23 @@ stats::poisson.test(c(331, 268), c(1, 1))$conf.int
 
 ## -----------------------------------------------------------------------------
 gap <- data.frame(year = c(2019, 2020, 2022, 2023), n = c(100, 120, 140, 150))
-yoy(gap, value = n, prd = year)
+yoychg(gap, value = n, prd = year)
 
 ## -----------------------------------------------------------------------------
 tiny <- data.frame(year = 2019:2021, n = c(2, 20, 25))
-as.data.frame(yoy(tiny, value = n, prd = year))[, c("year", "pctchg",
+as.data.frame(yoychg(tiny, value = n, prd = year))[, c("year", "pctchg",
                                                      "pctlo", "pctup")]
 
 ## -----------------------------------------------------------------------------
-as.data.frame(yoy(tiny, value = n, prd = year, minbase = 20))$flag
+as.data.frame(yoychg(tiny, value = n, prd = year, minbase = 20))$flag
 
 ## -----------------------------------------------------------------------------
 rate <- data.frame(year = 2019:2023, share = c(4.1, 4.6, 5.2, 5.0, 5.4))
-yoy(rate, value = share, prd = year, units = "percent")
+yoychg(rate, value = share, prd = year, units = "percent")
 
 ## -----------------------------------------------------------------------------
 m <- stats::ts(c(10:21, 20:31), start = c(2021, 1), frequency = 12)
-head(as.data.frame(yoy(m, minbase = 0))[12:14, c("period", "value",
+head(as.data.frame(yoychg(m, minbase = 0))[12:14, c("period", "value",
                                                   "previous", "change")], 3)
 
 ## -----------------------------------------------------------------------------
@@ -708,7 +708,7 @@ for (ext in c("csv", "tsv", "json", "md", "html", "pdf")) {
 cat(yoycsv(y, NULL, digits = 1L))
 
 ## -----------------------------------------------------------------------------
-cat(yoymd(yoy(gap, value = n, prd = year), NULL))
+cat(yoymd(yoychg(gap, value = n, prd = year), NULL))
 
 ## -----------------------------------------------------------------------------
 yoypals()
@@ -721,12 +721,13 @@ unlink(file.path(dir, paste0("placements.",
 hi <- indiex("health")
 m <- hi[hi$age == "Total, 18 years and over" &
           hi$indicator == "Perceived mental health, very good or excellent", ]
-# yoy() steps through consecutive periods: number the two survey cycles 1 and 2
+# yoychg() steps through consecutive periods: number the two survey cycles
+# 1 and 2
 m$cycle <- match(m$period, c("2015/2018", "2019/2022"))
 for (g in unique(m$group)) {
   s <- m[m$group == g, ]
-  print(as.data.frame(yoy(s, value = estimate, prd = cycle, units = "percent"))[
-    2, c("value", "previous", "ppchg", "verdict")])
+  y <- yoychg(s, value = estimate, prd = cycle, units = "percent")
+  print(as.data.frame(y)[2, c("value", "previous", "ppchg", "verdict")])
 }
 
 ## ----yoy-yoy-plot, fig.width = 7, fig.height = 4.5----------------------------
@@ -799,7 +800,7 @@ sf <- stkflow(
 plot(sf)
 
 ## ----plotting-results-yoy-----------------------------------------------------
-y <- yoy(
+y <- yoychg(
   data.frame(year = 2018:2023, n = c(40, 44, 41, 55, 52, 61)),
   value = "n",
   prd = "year"
@@ -807,7 +808,7 @@ y <- yoy(
 plot(y)
 
 ## ----plotting-results-yoy-small-----------------------------------------------
-plot(yoy(
+plot(yoychg(
   data.frame(year = 2019:2023, n = c(10, 12, 11, 15, 14)),
   value = "n",
   prd = "year"

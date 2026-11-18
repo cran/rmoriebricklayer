@@ -630,9 +630,9 @@ figures</h2>
 the average of 12 bootstrap weights, so the bootstrap variance is
 multiplied by 12 (Health Canada’s technical notes; the same as Fay’s BRR
 with <span class="math inline">\(\rho = 1 - 1/\sqrt{12}\)</span>). The
-public-use file and its weights are on data.rmorie.com (sign in once
-with <code>rmbl login</code>), where <code>dload()</code> checks each
-table against the SHA-256 its manifest lists:</p>
+public-use file and its weights are on data.rmorie.com (no sign-in),
+where <code>dload()</code> checks each table against the SHA-256 its
+manifest lists:</p>
 <div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>a <span class="ot">&lt;-</span> <span class="fu">dload</span>(<span class="st">&quot;csus_2023/pumf&quot;</span>)        <span class="co"># 36,180 respondents</span></span>
 <span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>b <span class="ot">&lt;-</span> <span class="fu">dload</span>(<span class="st">&quot;csus_2023/bootstrap&quot;</span>)   <span class="co"># PUMF_ID, WGT_PUMF and BWGT1 ... BWGT1000</span></span></code></pre></div>
 <p>Or, without signing in, from Health Canada’s own copies on the Open
@@ -840,9 +840,8 @@ econometric methods of the day could recover its experimental effect on
 1978 earnings when the randomised controls are replaced by a survey
 sample (the PSID). Dehejia and Wahba (1999) kept the men with 1974
 earnings: 185 treated, 260 randomised controls, and 2,490 PSID-1
-comparison men. The three files are on data.rmorie.com
-(<code>rmbl login</code> once), checked against the SHA-256 the manifest
-lists:</p>
+comparison men. The three files are on data.rmorie.com (no sign-in),
+checked against the SHA-256 the manifest lists:</p>
 <div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>tr <span class="ot">&lt;-</span> <span class="fu">dload</span>(<span class="st">&quot;nsw_dw/treated&quot;</span>)</span>
 <span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>ct <span class="ot">&lt;-</span> <span class="fu">dload</span>(<span class="st">&quot;nsw_dw/control&quot;</span>)</span>
 <span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a>ps <span class="ot">&lt;-</span> <span class="fu">dload</span>(<span class="st">&quot;nsw_dw/psid_controls&quot;</span>)</span></code></pre></div>

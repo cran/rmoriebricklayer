@@ -16,7 +16,7 @@ otis <- read.csv(system.file("extdata", "otis_a01_individuals.csv",
 otis
 
 ## -----------------------------------------------------------------------------
-a <- anltab(otis, value = "individuals", prd = "year",
+a <- anytab(otis, value = "individuals", prd = "year",
                    by = c("table", "group"))
 a
 
@@ -26,7 +26,7 @@ a$change[, c("table", "group", "year", "value", "previous",
              "significant")]
 
 ## -----------------------------------------------------------------------------
-b <- anltab(otis, value = "individuals", prd = "year",
+b <- anytab(otis, value = "individuals", prd = "year",
                    by = c("table", "group"), rnd = 5)
 b$change[!is.na(b$change$previous),
          c("group", "year", "pctchg", "pctlo", "pctup",
@@ -376,19 +376,18 @@ rallocvrf(moved, digest = attr(alloc, "alloc")$digest)$ok
 # cap <- arccap(
 #   "https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip",
 #   "captures",
-#   upload = c("rmorie", "wayback"),
+#   upload = "wayback",
 #   reason = "Custody table cited in chapter 3"
 # )
-# cap$archive # its page at archive.rmorie.com
-# arcfind("https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip")
-# arcget(cap$capture_id, "table.zip", sha256 = cap$sha256)
+# cap$warc    # the WARC file of each capture
+# cap$wayback # what the Wayback Machine answered
 
 ## ----eval = FALSE-------------------------------------------------------------
 # fetchvrf(
 #   "https://www150.statcan.gc.ca/n1/tbl/csv/35100177-eng.zip",
 #   "table.zip",
 #   sha256 = cap$sha256,
-#   arcs = c("rmorie", "captures")
+#   arcs = "captures"
 # )
 
 ## -----------------------------------------------------------------------------
@@ -406,7 +405,7 @@ unlink(dir, recursive = TRUE)
 proj <- file.path(tempdir(), "my-study")
 p <- mkbndlproj(proj, title = "My study", author = "A. Researcher",
                 contact = "a.researcher@example.org", overwrite = TRUE)
-p
+list.files(proj)
 
 ## -----------------------------------------------------------------------------
 dat <- data.frame(group = rep(c("a", "b"), 50), value = rep(c(4, 6), 50),
@@ -420,7 +419,8 @@ writeLines(tojs(prov, auto_unbox = TRUE, pretty = TRUE), pv)
 
 ## -----------------------------------------------------------------------------
 b <- mkbndl(proj, dest = tempdir(), data = csv, overwrite = TRUE)
-b
+basename(b$path)
+b$sha256
 
 ## -----------------------------------------------------------------------------
 out <- file.path(tempdir(), "reviewer")
@@ -743,7 +743,11 @@ led <- ldgrread(system.file(
   "ledger_sample.json",
   package = "rmoriebricklayer"
 ))
-led
+# the box names the file it read: shown by its name, not the folder of
+# this installation
+shown <- led
+attr(shown, "path") <- basename(attr(led, "path"))
+shown
 ldgrchk(led)[, c("check", "ok", "severity")]
 
 ## ----include = FALSE----------------------------------------------------------
@@ -779,11 +783,6 @@ if (is.na(old)) Sys.unsetenv("OLLAMA_HOST") else Sys.setenv(OLLAMA_HOST = old)
 s <- svcs(offline = TRUE)
 s$data$mode
 attr(s, "source")
-
-## ----language-model-routes-login, eval = FALSE--------------------------------
-# dlogin(token = "<key issued at https://www.rmorie.com/access/>")
-# dlogin()          # or: GitHub device flow / emailed code
-# dlogout()         # forget the key
 
 ## ----language-model-routes-indigenous-llm, eval = FALSE-----------------------
 # llmask(paste(

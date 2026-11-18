@@ -656,7 +656,7 @@ test_that("reports and messages stay readable where Unicode is not shown", {
   d <- withr::local_tempdir()
   md <- format(cpschk(d, "drift", fp = FALSE), fmt = "md")
   expect_true(all(charToRaw(md) < as.raw(128)))
-  expect_match(md, "OK No manifests found", fixed = TRUE)
+  expect_match(md, "X No capsule found", fixed = TRUE)
   expect_true(endsWith(md, "\n"))
   e <- tryCatch(grdrcd(c("W", "X"), c(W = "White")), error = conditionMessage)
   expect_false(grepl("‘|<U\\+", e))
@@ -667,4 +667,25 @@ test_that("reports and messages stay readable where Unicode is not shown", {
   if (isTRUE(l10n_info()[["UTF-8"]])) {
     expect_identical(.rmbl_squote("a"), "‘a’")
   }
+})
+
+test_that("recode checks refuse in their own words", {
+  # an empty label was looked up by name: "subscript out of bounds"
+  expect_silent(vrfrcd("", "", ""))
+  expect_error(
+    vrfrcd(c("a", ""), c("x", "y"), c(a = "x", b = "y")),
+    "vrfrcd: .{0,2} was mapped to .y. but the declared mapping says"
+  )
+  expect_error(
+    vrfrcd(as.raw(1), as.raw(1), c(a = "b")),
+    "`orig` and `recd` must be atomic vectors of labels"
+  )
+  expect_error(
+    grdbin(function(x) x, function(x) x),
+    "`col` must be a single string"
+  )
+  expect_error(
+    rlblfrns(data.frame(), data.frame()),
+    "rlblfrns: `vlabs` .* must both be named vectors"
+  )
 })

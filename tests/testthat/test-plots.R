@@ -91,7 +91,7 @@ test_that("stock and flow", {
 
 test_that("period-over-period change", {
   # bases large enough for a percentage change
-  big <- yoy(
+  big <- yoychg(
     data.frame(year = 2019:2023, n = c(400, 420, 390, 460, 450)),
     value = "n",
     prd = "year"
@@ -101,7 +101,7 @@ test_that("period-over-period change", {
   expect_identical(d$pctchg, big$pctchg)
   expect_true(any(is.finite(d$pctchg)))
   # small counts draw their percentages like any other
-  small <- yoy(
+  small <- yoychg(
     data.frame(year = 2019:2023, n = c(10, 12, 11, 15, 14)),
     value = "n",
     prd = "year"
@@ -111,7 +111,7 @@ test_that("period-over-period change", {
   expect_identical(is.finite(ds$pctchg), c(FALSE, TRUE, TRUE, TRUE, TRUE))
   # only zero bases leave no percentage at all: the counts are drawn instead of
   # an empty frame
-  y <- yoy(
+  y <- yoychg(
     data.frame(year = 2019:2021, n = c(0, 0, 5)),
     value = "n",
     prd = "year"
@@ -125,7 +125,7 @@ test_that("period-over-period change", {
     n = c(500, 600, 700, 900, 800, 1000),
     stringsAsFactors = FALSE
   )
-  yg <- yoy(seg, value = "n", prd = "year", by = "g")
+  yg <- yoychg(seg, value = "n", prd = "year", by = "g")
   dg <- with_dev(plot(yg))
   expect_true(all(grepl("^(a|b): ", dg$label)))
   vg <- with_dev(plot(yg, what = "value"))
@@ -362,10 +362,10 @@ test_that("trend and the whole analysis", {
     pop = rep(c(1000, 2000), 4),
     stringsAsFactors = FALSE
   )
-  a <- anltab(otis, value = "n", prd = "year", by = "g", pop = "pop")
+  a <- anytab(otis, value = "n", prd = "year", by = "g", pop = "pop")
   out <- with_dev(plot(a))
   expect_named(out, c("change", "rates", "ratechg"))
-  a0 <- anltab(otis, value = "n", prd = "year", by = "g")
+  a0 <- anytab(otis, value = "n", prd = "year", by = "g")
   expect_named(with_dev(plot(a0)), "change")
   expect_length(with_dev(plot(a0, which = "rates")), 0L)
 })
@@ -821,19 +821,19 @@ test_that("plots leave par('col') and par('mar') as they found them (B1, B2)", {
   set.seed(1)
   x <- c(stats::rnorm(30), stats::rnorm(30, 2))
   g <- rep(c("a", "b"), each = 30)
-  .par_kept(plotecdf(c(3, 1, 2, 5, 4)))
+  .par_kept(plotcdfs(c(3, 1, 2, 5, 4)))
   .par_kept(plotvln(x, g))
   .par_kept(plotrdg(x, g))
-  .par_kept(plotsm(1:12, rep(1:4, 3), rep(c("a", "b", "c"), each = 4)))
+  .par_kept(plotmult(1:12, rep(1:4, 3), rep(c("a", "b", "c"), each = 4)))
   .par_kept(plotbump(1:6, rep(1:3, 2), rep(c("a", "b"), each = 3)))
   .par_kept(plotfnl(c(3, 8, 20), c(5, 10, 18), area = c("p", "q", "r")))
-  y <- yoy(data.frame(year = 2019:2022, n = c(5, 7, 6, 9)), "n", "year")
+  y <- yoychg(data.frame(year = 2019:2022, n = c(5, 7, 6, 9)), "n", "year")
   .par_kept(plot(y))
   # a panel grid reset cex: it comes back too
   grDevices::pdf(NULL)
   on.exit(grDevices::dev.off(), add = TRUE)
   graphics::par(cex = 1.3)
-  plotsm(1:8, rep(1:4, 2), rep(c("a", "b"), each = 4))
+  plotmult(1:8, rep(1:4, 2), rep(c("a", "b"), each = 4))
   expect_identical(graphics::par("cex"), 1.3)
 })
 
@@ -879,4 +879,23 @@ test_that(".bl_par_set() returns one parameter as a named list", {
   expect_identical(graphics::par("lty"), "dashed")
   graphics::par(op)
   expect_identical(graphics::par("lty"), old)
+})
+
+test_that("plots refuse what they cannot draw in their own words", {
+  grDevices::pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  expect_error(
+    blpal(n = .Machine$integer.max),
+    "`n` must be a single positive whole number, at most 100,000"
+  )
+  expect_length(blpal("sequential", 1e5), 1e5)
+  for (f in list(plotbump, plothrz, plotmult)) {
+    expect_error(f(Inf, Inf, Inf), "`prd` must be finite periods")
+  }
+  expect_error(plotmult(c(Inf, NA), 1:2), "`y` has no finite value to draw")
+  expect_error(plotcal(Inf, 1), "plotcal: `x` must be dates")
+  skip_if_not(isTRUE(l10n_info()[["UTF-8"]]))
+  bad <- "\xff\xfe"
+  expect_error(plotmult(1:3, 1:3, main = bad), "`main` holds text that is not")
+  expect_error(plotrdg(c(1, 2, 3, 4), bw = bad), "plotrdg")
 })

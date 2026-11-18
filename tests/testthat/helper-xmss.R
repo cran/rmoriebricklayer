@@ -19,6 +19,7 @@ xmss_kid <- function(k) .rmbl_xmss_ids(k)$id
 # (covr's merge then fails), and forked children on macOS can die soon after
 # they start. `out` captures the child's standard output.
 rscript_bg <- function(code, wait = FALSE, out = FALSE) {
+  skip_if_lowmem()
   rscript <- file.path(R.home("bin"), "Rscript")
   lib <- paste(.libPaths(), collapse = .Platform$path.sep)
   pre <- sprintf(
@@ -47,4 +48,41 @@ wait_files <- function(files, seconds = 60) {
     Sys.sleep(0.1)
   }
   FALSE
+}
+
+# Memory this test process may use, in bytes: the cgroup limit (a container) or
+# the machine's RAM, whichever is smaller; Inf when neither can be read.
+mem_cap <- function() {
+  cap <- Inf
+  for (f in c(
+    "/sys/fs/cgroup/memory.max",
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+  )) {
+    v <- suppressWarnings(as.numeric(
+      tryCatch(readLines(f, 1L, warn = FALSE), error = function(e) NA)
+    ))
+    if (length(v) == 1L && !is.na(v) && v > 0) cap <- min(cap, v)
+  }
+  mi <- tryCatch(
+    readLines("/proc/meminfo", warn = FALSE),
+    error = function(e) character()
+  )
+  kb <- suppressWarnings(as.numeric(
+    sub("^MemTotal:\\s+(\\d+) kB$", "\\1", grep("^MemTotal:", mi, value = TRUE))
+  ))
+  if (length(kb) == 1L && !is.na(kb)) cap <- min(cap, kb * 1024)
+  cap
+}
+
+# A second R process (a child Rscript or a fork) beside the test session does
+# not fit a 2 GB check machine: rOpenSci's pkgcheck holds about 900 MB itself
+# once coverage is done, a test session takes 500 to 800 MB, and a fork or a
+# child R that loads the package takes as much again (the kernel killed the run
+# in the coverage step and again in R CMD check). Tests that start one skip
+# when the machine or container has under 3 GB; CI and the coverage job, on
+# larger machines, run them.
+skip_if_lowmem <- function() {
+  if (mem_cap() < 3 * 1024^3) {
+    testthat::skip("a second R process needs more memory than this has")
+  }
 }

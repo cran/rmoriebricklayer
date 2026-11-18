@@ -780,7 +780,7 @@ pqckg <- function(height = 10L, skseed = NULL, pubseed = NULL, skprf = NULL) {
   root <- .bl_busy(
     sprintf(
       "XMSS key: building the tree of %s one-time keys",
-      format(2^height, big.mark = ",")
+      .rmbl_ntxt(2^height)
     ),
     .Call(C_rmbl_xmss_keygen, skseed, pubseed, height)
   )
@@ -1030,6 +1030,20 @@ cpssign <- function(
   scheme <- .rmbl_arg(scheme, c("xmss", "hmac"))
 
   if (identical(scheme, "hmac")) {
+    if (!is.character(key) && !is.raw(key)) {
+      stop(
+        "`key` must come from fipskg() or pqckg(), or be a shared secret (a ",
+        "string or raw vector) for hmac; a public key cannot sign",
+        call. = FALSE
+      )
+    }
+    if (!.rmbl_hmac_secret(key)) {
+      stop(
+        "`key` is empty: an hmac signature needs a shared secret (one ",
+        "non-empty string or a raw vector)",
+        call. = FALSE
+      )
+    }
     tag <- chmac(key, msg)
     out <- list(scheme = "hmac", signature = tag)
     class(out) <- c("bricklayer_signature", "list")
@@ -1198,6 +1212,16 @@ xmssadv <- function(key, sig, msg = NULL) {
 #' carries a `key_state` field) still verifies, with a warning that it exposed
 #' the signer's private key.
 #'
+#' The encoding is strict: the signature's hex must be lower case, as
+#' [cpssign()]
+#' writes it; a field
+#' [cpssign()]
+#' does not write for the scheme is not accepted; and the context and
+#' pre-hash name a standardised signature records must be the ones it is
+#' verified under. Each of these
+#' returns `FALSE`: such an object is not the one that was made, although
+#' the bytes verified are the same.
+#'
 #' @param msg The message the signature is claimed to
 #' cover.
 #' @param sig A `bricklayer_signature` from
@@ -1253,6 +1277,11 @@ cpsvrf <- function(msg, sig, key, ctx = NULL, prehash = NULL) {
   .rmbl_no_fn(msg = msg)
   if (!inherits(sig, "bricklayer_signature")) {
     stop("`sig` must come from cpssign()", call. = FALSE)
+  }
+  # a field cpssign() never writes is covered by no signature: an object
+  # carrying one is not the signature that was made
+  if (!.rmbl_vrf_known_fields(sig)) {
+    return(FALSE)
   }
   # a key object whose class or scheme was edited is "not verified", like an
   # edited signature; a value that is not a key object at all (a number, a
@@ -1392,13 +1421,16 @@ xmssfgt <- function(keytofgt = NULL) {
     h <- if (length(x) == 1L) as.character(x) else NA_character_
     # not .rmbl_hex_or_null(): that decodes to bytes, and what is wanted
     # here is the validated STRING, since a key is carried as hex
-    if (is.na(h) || nchar(h) %% 2L != 0L || !grepl("^[0-9a-fA-F]*$", h)) {
+    if (
+      is.na(h) || nchar(h, type = "bytes") %% 2L != 0L ||
+        !grepl("^[0-9a-fA-F]*$", h, useBytes = TRUE)
+    ) {
       NULL
     } else {
-      tolower(h)
+      .rmbl_lower(h)
     }
   }
-  if (is.null(hex) || nchar(hex) %/% 2L != n) {
+  if (is.null(hex) || nchar(hex, type = "bytes") %/% 2L != n) {
     stop(
       sprintf("`%s` must be %d bytes of key material for %s", what, n, scheme),
       call. = FALSE
@@ -1448,7 +1480,7 @@ xmssfgt <- function(keytofgt = NULL) {
           "are: %s. For the stateful hash-based scheme ",
           "use pqckg()."
         ),
-        scheme,
+        .rmbl_ctl_escape(scheme),
         toString(known)
       ),
       call. = FALSE
@@ -1727,7 +1759,7 @@ xmssfgt <- function(keytofgt = NULL) {
       msg
     )
   )
-  if (!identical(tolower(as.character(res$root)), ids$root)) {
+  if (!identical(.rmbl_lower(as.character(res$root)), ids$root)) {
     stop(
       sprintf(
         paste(
@@ -1804,7 +1836,8 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @noRd
 .rmbl_xa_index <- function(sig, key) {
   if (
-    !identical(tolower(as.character(sig$root)), tolower(as.character(key$root)))
+    !identical(.rmbl_lower(as.character(sig$root)),
+        .rmbl_lower(as.character(key$root)))
   ) {
     stop(
       "this signature was not made by this key (the roots differ)",
@@ -1891,7 +1924,7 @@ xmssfgt <- function(keytofgt = NULL) {
   # an unknown pre-hash name in the signature (or asked for) is "not
   # verified", not an error
   ph <- tryCatch(.rmbl_fips_prehash(ph), error = function(e) NULL)
-  if (is.null(ph)) {
+  if (is.null(ph) || !.rmbl_vrf_fips_bound(sig, .ctx, ph)) {
     return(FALSE)
   }
   .rmbl_fips_verify(key$scheme, pk, .msg, .ctx, sg, ph)
@@ -1903,7 +1936,7 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @return TRUE or FALSE.
 #' @noRd
 .rmbl_vrf_fips_fields <- function(sig) {
-  if (!is.character(sig$signature) || length(sig$signature) != 1L) {
+  if (!.rmbl_vrf_lowhex(sig$signature)) {
     return(FALSE)
   }
   rec <- sig[["context"]]
@@ -1916,6 +1949,67 @@ xmssfgt <- function(keytofgt = NULL) {
   }
   recp <- sig[["prehash"]]
   is.null(recp) || (is.character(recp) && length(recp) == 1L && !is.na(recp))
+}
+
+#' One string of lower-case hex digits, as every writer of the package
+#' spells them.
+#'
+#' A re-cased signature decodes to the same bytes, so it verified: one
+#' signature then had many accepted spellings, where every other hex field is
+#' compared exactly.
+#' @param x A signature field.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_vrf_lowhex <- function(x) {
+  is.character(x) && length(x) == 1L && !is.na(x) &&
+    grepl("^[0-9a-f]*$", x, useBytes = TRUE)
+}
+
+#' Whether a signature object holds only the fields cpssign() writes for its
+#' scheme (and `key_state`, which XMSS objects of 0.5.9 to 0.5.12 carry and
+#' which is warned about). A field no writer makes is covered by no
+#' signature, so an object carrying one is not the one that was made.
+#' @param sig The signature whose fields are checked.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_vrf_known_fields <- function(sig) {
+  sc <- sig[["scheme"]]
+  more <- if (identical(sc, "hmac")) {
+    character()
+  } else if (identical(sc, "xmss-sha256")) {
+    c("auth", "index", "root", "height", "randomizer", "wire", "key_state")
+  } else {
+    # a FIPS module key (fipsmkg()) records the module that signed
+    c("context", "prehash", "module")
+  }
+  all(names(sig) %in% c("scheme", "signature", more))
+}
+
+#' Whether a FIPS signature's own context and pre-hash name are the ones it
+#' is verified under.
+#'
+#' The writer records them in the signature; they are not covered by it, and
+#' the verifier uses its own (the arguments, or the attestation's signed
+#' fields), so a recorded value that differs was edited and the object is
+#' refused. An absent field is accepted. A context is raw bytes in R and
+#' their base64 text in JSON (\code{""} for none).
+#' @param sig The signature whose context and pre-hash are checked.
+#' @param ctx The context bytes used.
+#' @param ph The pre-hash name used.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_vrf_fips_bound <- function(sig, ctx, ph) {
+  rec <- sig[["context"]]
+  ctx_ok <- is.null(rec) ||
+    (is.raw(rec) && identical(rec, ctx)) ||
+    (is.character(rec) &&
+      identical(rec, if (length(ctx)) jsb64enc(ctx) else ""))
+  rp <- sig[["prehash"]]
+  ph_ok <- is.null(rp) || identical(
+    tryCatch(.rmbl_fips_prehash(rp), error = function(e) NULL),
+    ph
+  )
+  ctx_ok && ph_ok
 }
 
 #' One non-empty string.
@@ -1944,7 +2038,7 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @return TRUE or FALSE.
 #' @noRd
 .rmbl_vrf_same <- function(a, b) {
-  identical(tolower(as.character(a)), tolower(as.character(b)))
+  identical(.rmbl_lower(as.character(a)), .rmbl_lower(as.character(b)))
 }
 
 #' Whether an XMSS signature has the shape this package writes.
@@ -1963,9 +2057,11 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @return TRUE or FALSE.
 #' @noRd
 .rmbl_vrf_xmss_shape <- function(sig) {
-  .rmbl_vrf_one_string(sig$signature) &&
-    .rmbl_vrf_one_string(sig$auth) &&
-    .rmbl_vrf_one_string(sig[["randomizer"]]) &&
+  all(vapply(
+    list(sig$signature, sig$auth, sig[["randomizer"]]),
+    function(x) .rmbl_vrf_lowhex(x) && nzchar(x),
+    NA
+  )) &&
     .rmbl_vrf_whole(sig$index) &&
     .rmbl_vrf_whole(sig$height) &&
     .rmbl_vrf_one_string(sig$root) &&
@@ -2029,10 +2125,12 @@ xmssfgt <- function(keytofgt = NULL) {
     return(NULL)
   }
   hex <- as.character(hex)
-  if (is.na(hex) || nchar(hex) %% 2L != 0L) {
+  # counted and matched as bytes: text that is not valid (bytes such as
+  # "\\xff") failed in nchar() in base R's words, and is no hex
+  if (is.na(hex) || nchar(hex, type = "bytes") %% 2L != 0L) {
     return(NULL)
   }
-  if (!grepl("^[0-9a-fA-F]*$", hex)) {
+  if (!grepl("^[0-9a-fA-F]*$", hex, useBytes = TRUE)) {
     return(NULL)
   }
   .rmbl_hex_to_raw(hex)
@@ -2100,15 +2198,15 @@ xmssfgt <- function(keytofgt = NULL) {
   if (
     length(seed) != 1L ||
       is.na(seed) ||
-      nchar(seed) != 64L ||
-      !grepl("^[0-9a-fA-F]{64}$", seed)
+      nchar(seed, type = "bytes") != 64L ||
+      !grepl("^[0-9a-fA-F]{64}$", seed, useBytes = TRUE)
   ) {
     stop(
       sprintf("`%s` must be 64 hex characters (32 bytes)", what),
       call. = FALSE
     )
   }
-  tolower(seed)
+  .rmbl_lower(seed)
 }
 
 #' The one sentence every path that meets an old XMSS object with `key_state`
@@ -2155,7 +2253,7 @@ xmssfgt <- function(keytofgt = NULL) {
   sk <- .rmbl_check_seed(.rmbl_xkey(key, "skseed"), "skseed")
   ps <- .rmbl_check_seed(.rmbl_xkey(key, "pubseed"), "pubseed")
   root <- if (is.character(key$root) && length(key$root) == 1L) {
-    tolower(key$root)
+    .rmbl_lower(key$root)
   } else {
     NA_character_
   }
@@ -2169,7 +2267,8 @@ xmssfgt <- function(keytofgt = NULL) {
   list(
     id = paste0(
       "k:",
-      tolower(csha256(charToRaw(paste0("rmoriebricklayer xmss record\n", sk))))
+      .rmbl_lower(csha256(charToRaw(paste0("rmoriebricklayer xmss record\n",
+          sk))))
     ),
     legacy = paste0(root, ":", ps),
     root = root
@@ -2285,7 +2384,7 @@ xmssfgt <- function(keytofgt = NULL) {
   out <- integer()
   for (k in names(rec)) {
     v <- rec[[k]]
-    kk <- tolower(k)
+    kk <- .rmbl_lower(k)
     if (!.rmbl_xmss_legacy_entry_ok(kk, v)) {
       .rmbl_xmss_legacy_bad(j)
     }
@@ -2747,7 +2846,7 @@ xmssfgt <- function(keytofgt = NULL) {
     return(NULL)
   }
   if (
-    toupper(p) %in%
+    .rmbl_upper(p) %in%
       strsplit("TRUE FALSE T F 0 1 NULL NA YES NO ON OFF", " ", fixed = TRUE)[[
         1L
       ]]
@@ -2824,7 +2923,7 @@ xmssfgt <- function(keytofgt = NULL) {
   if (!file.exists(p)) {
     return(list(ids = character(), idx = integer()))
   }
-  lines <- readLines(p, warn = FALSE, encoding = "UTF-8")
+  lines <- .rmbl_rlines(p, encoding = "UTF-8")
   lines <- lines[grepl("[^[:space:]]", lines, perl = TRUE)]
   ok <- grepl(
     "^(k:[0-9a-f]{64}|[0-9a-f]{64}:[0-9a-f]{64})\t(-1|[0-9]{1,9})$",
@@ -2919,6 +3018,17 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @return NULL, invisibly; an error for an index outside the block.
 #' @noRd
 .rmbl_xmss_take_block <- function(ids, idx, blk) {
+  .rmbl_xmss_take_check(idx, blk)
+  assign(ids$id, c(idx + 1L, blk[[2L]]), envir = .rmbl_xmss_block)
+  invisible(NULL)
+}
+
+#' Refuses an index outside the block rmbl sign reserved.
+#' @param idx The index.
+#' @param blk The block, first and last index.
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_xmss_take_check <- function(idx, blk) {
   if (idx < blk[[1L]] || idx > blk[[2L]]) {
     stop(
       sprintf(
@@ -2933,7 +3043,6 @@ xmssfgt <- function(keytofgt = NULL) {
       call. = FALSE
     )
   }
-  assign(ids$id, c(idx + 1L, blk[[2L]]), envir = .rmbl_xmss_block)
   invisible(NULL)
 }
 
@@ -2943,10 +3052,7 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @return NULL, invisibly, after the warning.
 #' @noRd
 .rmbl_xmss_reserve_off <- function(ids, idx) {
-  hi <- .rmbl_xmss_highest(ids, integer(0))
-  if (idx <= hi) {
-    .rmbl_xmss_refuse(idx, hi)
-  }
+  .rmbl_xmss_check_idx(ids, idx, integer(0), record = FALSE)
   assign(ids$id, idx, envir = .rmbl_xmss_used)
   warning(
     "the XMSS used-index record is off ",
@@ -2969,11 +3075,27 @@ xmssfgt <- function(keytofgt = NULL) {
 #' @noRd
 .rmbl_xmss_reserve_locked <- function(p, ids, idx) {
   rec <- .rmbl_xmss_record_read(p)
+  .rmbl_xmss_check_idx(ids, idx, rec)
+  rec[ids$id] <- idx
+  .rmbl_xmss_record_write(p, rec)
+  assign(ids$id, idx, envir = .rmbl_xmss_used)
+}
+
+#' Refuses an index the record or this session has seen used, and index 0
+#' of a key the record does not know: what a reservation refuses, before it
+#' writes anything (the reservation and cpsseal()'s look-ahead share it).
+#' @param ids The key's record ids.
+#' @param idx The index.
+#' @param rec The record, as read.
+#' @param record Whether the record is on (off, only this session knows).
+#' @return NULL, invisibly.
+#' @noRd
+.rmbl_xmss_check_idx <- function(ids, idx, rec, record = TRUE) {
   hi <- .rmbl_xmss_highest(ids, rec)
   if (idx <= hi) {
     .rmbl_xmss_refuse(idx, hi)
   }
-  if (!.rmbl_xmss_known(ids, rec) && idx == 0L) {
+  if (record && !.rmbl_xmss_known(ids, rec) && idx == 0L) {
     stop(
       "this XMSS key is not in the used-index record on this ",
       "machine, and it claims never to have ",
@@ -2987,9 +3109,44 @@ xmssfgt <- function(keytofgt = NULL) {
       call. = FALSE
     )
   }
-  rec[ids$id] <- idx
-  .rmbl_xmss_record_write(p, rec)
-  assign(ids$id, idx, envir = .rmbl_xmss_used)
+  invisible(NULL)
+}
+
+#' Whether an XMSS key can make `n` signatures in a row, found without
+#' making one or reserving an index.
+#'
+#' cpsseal() signs one capsule after another: a key with one index left for
+#' two capsules signed the first, spent its last index and then stopped, and
+#' a key whose next index was already used was refused only after the first
+#' capsule had been pinned. The checks are those the signer makes
+#' (.rmbl_sign_index(), the block of rmbl sign, .rmbl_xmss_check_idx()),
+#' applied to the first index and to the capacity the run needs.
+#' @param key An XMSS signing key.
+#' @param n The number of signatures.
+#' @return NULL, invisibly; stops in the signer's words.
+#' @noRd
+.rmbl_xmss_ready <- function(key, n) {
+  idx <- .rmbl_sign_index(key)
+  if (idx + n > key$capacity) {
+    stop(sprintf(paste0(
+      "this key has %d signatures left and %d are needed: generate a new ",
+      "key, or sign fewer capsules at a time; nothing was signed"
+    ), key$capacity - idx, n), call. = FALSE)
+  }
+  ids <- .rmbl_xmss_ids(key)
+  blk <- .rmbl_xmss_block[[ids$id]]
+  if (!is.null(blk)) {
+    .rmbl_xmss_take_check(idx, blk)
+    .rmbl_xmss_take_check(idx + n - 1L, blk)
+    return(invisible(NULL))
+  }
+  p <- .rmbl_xmss_index_file()
+  rec <- if (is.null(p)) {
+    integer(0)
+  } else {
+    .rmbl_xmss_with_lock(p, function() .rmbl_xmss_record_read(p))
+  }
+  .rmbl_xmss_check_idx(ids, idx, rec, record = !is.null(p))
 }
 
 #' The ML-DSA mode of a fipsvrfmu() verification, when the key, signature
@@ -3029,9 +3186,22 @@ xmssfgt <- function(keytofgt = NULL) {
     !is.character(sg) ||
       length(sg) != 1L ||
       is.na(sg) ||
-      !grepl("^[0-9a-fA-F]{64}$", sg)
+      !grepl("^[0-9a-f]{64}$", sg)
   ) {
     return(FALSE)
   }
+  # the empty secret is everyone's: nothing verifies under it
+  if (!.rmbl_hmac_secret(key)) {
+    return(FALSE)
+  }
   tryCatch(cdgsteq(chmac(key, msg), sg), error = function(e) FALSE)
+}
+
+#' Whether a shared secret for hmac holds anything.
+#' @param key The secret.
+#' @return TRUE for a raw vector of one byte or more, or one non-empty string.
+#' @noRd
+.rmbl_hmac_secret <- function(key) {
+  (is.raw(key) && length(key) > 0L) ||
+    (is.character(key) && length(key) == 1L && !is.na(key) && nzchar(key))
 }

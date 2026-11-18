@@ -35,8 +35,11 @@ test_that("#7: the reservoir loop answers an interrupt", {
   skip_on_cran()
   skip_on_os("windows")
   skip_if(!nzchar(Sys.which("python3")), "python3 runs the probe")
-  # 3e9 items took 37.9 s through a Ctrl-C; the loop now takes it
-  r <- interrupt_probe("rsvidx(3e9, 1)", after = 1)
+  # 3e9 items took 37.9 s through a Ctrl-C; the loop now takes it. Since
+  # 1.0.3 `n` is at most 2147483647, and 3e9 was refused before the loop
+  # ran (the test skipped as inconclusive): the largest accepted size still
+  # runs for many seconds
+  r <- interrupt_probe("rsvidx(2147483647, 1)", after = 1)
   skip_if(startsWith(r, "inconclusive"), r)
   expect_identical(r, "interrupt")
 })
@@ -569,9 +572,9 @@ test_that("the survey row keys from C are the keys the R arithmetic made", {
 test_that("every new refusal is reached (one call per branch)", {
   w <- function(expr, pat) expect_error(expr, pat)
   d <- data.frame(v = c(10, 12, 15), p = 2020:2022)
-  w(anltab(d, "v", "p", by = 1), "`by` must be one or more column names")
+  w(anytab(d, "v", "p", by = 1), "`by` must be one or more column names")
   w(
-    anltab(d, "v", "p", suplim = -1),
+    anytab(d, "v", "p", suplim = -1),
     "`suplim` must be one non-negative number"
   )
   w(
@@ -657,10 +660,10 @@ test_that("every new refusal is reached (one call per branch)", {
   )
   w(stepchg(1:6, x = matrix(1:6)), "`x` must be one time or position")
   w(certchnvrf(NULL, NULL, attm = "now"), "`attm` must be a single date-time")
-  w(yoy(d, "v", "p", by = 1), "`by` must be one or more column names")
-  w(yoy(c(1, 2, 3), value = 1), "for a numeric `x`")
-  w(yoy(c(1, 2, 3), prd = 1:2), "`prd` must have one entry per value")
-  y <- yoy(c(10, 12, 15))
+  w(yoychg(d, "v", "p", by = 1), "`by` must be one or more column names")
+  w(yoychg(c(1, 2, 3), value = 1), "for a numeric `x`")
+  w(yoychg(c(1, 2, 3), prd = 1:2), "`prd` must have one entry per value")
+  y <- yoychg(c(10, 12, 15))
   w(yoyhtml(y, NULL), "`file` must be a file path or a connection")
   w(
     yoyhtml(y, tempfile(fileext = ".html"), sub = 1),

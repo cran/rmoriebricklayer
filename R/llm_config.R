@@ -383,7 +383,7 @@ llmcfg <- function(...) {
   # only the settings that changed are written, in place: the rest of the file
   # stays as it was written (a full rewrite cut floats to 4 digits, unboxed
   # one-element arrays, turned a "" key into "1" and rounded integers past 2^53;
-  # network stress test of 5e1dce5). credentials.json is written the same way.
+  # network stress test of 5e1dce5).
   old <- if (file.exists(p)) .bl_read_config() else list()
   txt <- if (file.exists(p)) .bl_read_text(p) else "{}"
   for (k in union(names(old), names(data))) {
@@ -447,7 +447,7 @@ llmcfg <- function(...) {
     key,
     route = {
       r <- .bl_env1("MORIE_LLM_ROUTE") %||% "auto"
-      if (identical(tolower(r), "hosted")) {
+      if (identical(.rmbl_lower(r), "hosted")) {
         "auto (the saved route `hosted` is retired and ignored)"
       } else {
         r
@@ -526,7 +526,7 @@ llmcfg <- function(...) {
   if (
     key %in%
       c("own.url", "ollama.url") &&
-      !tolower(value) %in% c("off", "none", "disabled")
+      !.rmbl_lower(value) %in% c("off", "none", "disabled")
   ) {
     .bl_url_sane(value, key)
   }
@@ -574,7 +574,7 @@ llmcfg <- function(...) {
 #' @return NULL, invisibly.
 #' @noRd
 .bl_cfg_chk_own <- function(value) {
-  if (!tolower(value) %in% c("off", "none", "disabled")) {
+  if (!.rmbl_lower(value) %in% c("off", "none", "disabled")) {
     if (!grepl("^https?://[^/[:space:]]+", value)) {
       stop(
         "own.url must be an http(s):// address, e.g. ",
@@ -595,11 +595,13 @@ llmcfg <- function(...) {
 #' @return NULL, invisibly.
 #' @noRd
 .bl_cfg_chk_ollama <- function(value) {
-  if (!tolower(value) %in% c("off", "none", "disabled")) {
-    has_scheme <- grepl("^[a-z][a-z0-9+.-]*://", value, ignore.case = TRUE)
+  if (!.rmbl_lower(value) %in% c("off", "none", "disabled")) {
+    has_scheme <- grepl(.rmbl_ci("^[a-z][a-z0-9+.-]*://"), value, perl = TRUE,
+        useBytes = TRUE)
     if (
       grepl("[[:space:]]", value) ||
-        (has_scheme && !grepl("^https?://", value, ignore.case = TRUE))
+        (has_scheme && !grepl(.rmbl_ci("^https?://"), value, perl = TRUE,
+            useBytes = TRUE))
     ) {
       stop(
         "ollama.url must be an http(s):// address such as ",
@@ -638,7 +640,7 @@ llmcfg <- function(...) {
     stop(
       sprintf(
         "unknown setting '%s' (one of: %s)",
-        bad[[1L]],
+        .rmbl_ctl_escape(bad[[1L]]),
         toString(spec$key)
       ),
       call. = FALSE
@@ -693,7 +695,7 @@ llmcfg <- function(...) {
     return(data)
   }
   if (identical(k, "route")) {
-    v <- tolower(v)
+    v <- .rmbl_lower(v)
   }
   .bl_config_check(k, v)
   # a key belongs to the server it was saved for: a new address drops the
@@ -979,7 +981,7 @@ llmcfg <- function(...) {
 #' @noRd
 .bl_config_setup <- function(out) {
   ask <- function(q, current = "", secret = FALSE) {
-    # a key is typed without echo, like `login --token` (review of 52a8883, B6)
+    # a key is typed without echo (review of 52a8883, B6)
     a <- .bl_readline(
       sprintf(
         "%s%s: ",
@@ -1028,7 +1030,8 @@ llmcfg <- function(...) {
       "OpenAI-compatible server), auto.\n"
     )
   )
-  route <- tolower(ask("Which should `ask` use", .bl_config_effective("route")))
+  route <- .rmbl_lower(ask("Which should `ask` use",
+      .bl_config_effective("route")))
   if (!route %in% c("auto", .bl_llm_route_names())) {
     out(sprintf("'%s' is not one of them; keeping auto\n", route))
     route <- "auto"
@@ -1188,30 +1191,13 @@ llmcfg <- function(...) {
   }
 }
 
-#' Prints the state of the data key.
+#' Prints the doctor's line on the curated tables: they need no key.
 #' @param out The function that writes the output.
-#' @param prog The command's name, used in the doctor's advice.
+#' @param prog The command's name (unused: kept for the doctor's callers).
 #' @return What `out` returns.
 #' @noRd
 .bl_doctor_key <- function(out, prog) {
-  # the sign-in key is for the curated tables only, never a language model
-  ks <- tryCatch(.bl_hosted_key_state(), error = function(e) {
-    list(state = "none")
-  })
-  out(switch(
-    ks$state,
-    ok = paste0(
-      "\n  data key: stored (the curated tables at data.rmorie.com are ",
-      "open to you)\n"
-    ),
-    other_address = sprintf(
-      "\n  data key: issued for %s, so not sent to %s (`%s login` again)\n",
-      ks$saved_for,
-      ks$now,
-      prog
-    ),
-    sprintf("\n  data key: none (`%s login` opens the curated tables)\n", prog)
-  ))
+  out("\n  data key: none (the curated tables need none)\n")
 }
 
 #' Moves an unreadable settings file aside.

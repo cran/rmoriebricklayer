@@ -179,30 +179,9 @@ test_that(
     withr::local_envvar(RMBL_PACKAGES = "rmoriebricklayer,no.such.pkg")
     expect_error(explerr("x"), "not installed: no.such.pkg")
     withr::local_envvar(RMBL_PACKAGES = NA)
-    # the code names no package built on this one; in these functions "rmorie"
-    # names the archive at archive.rmorie.com (the upload, fallback and arcs
-    # choices), not the package
-    arc <- c(
-      "arccap",
-      ".bl_cap_upload_arg",
-      "fetchvrf",
-      ".fv_check",
-      ".fv_try_archive",
-      "wbsave",
-      ".bl_cli_archive",
-      ".bl_cli_archive_save",
-      # arcpush() sends a kept capture to the same archive
-      "arcpush",
-      ".bl_cli_archive_push",
-      ".bl_wb_fallback",
-      ".bl_refresh_capsule",
-      # pieces of arccap(), .bl_refresh_capsule() and wbsave()
-      ".bl_cap_publish",
-      ".bl_refresh_wayback",
-      ".bl_wb_result"
-    )
+    # the code names no package built on this one
     src <- unlist(lapply(
-      setdiff(ls(asNamespace("rmoriebricklayer"), all.names = TRUE), arc),
+      ls(asNamespace("rmoriebricklayer"), all.names = TRUE),
       function(n) {
         f <- get(n, envir = asNamespace("rmoriebricklayer"))
         if (is.function(f)) deparse(f) else character()
@@ -726,9 +705,9 @@ test_that(
     # two columns with one name are refused in words
     d <- data.frame(a = 1:3, b = 4:6)
     names(d) <- c("a", "a")
-    expect_error(anltab(d, "a", "a"), "has two columns named a", fixed = TRUE)
+    expect_error(anytab(d, "a", "a"), "has two columns named a", fixed = TRUE)
     names(d) <- c("a", "")
-    expect_error(anltab(d, "a", "a"), "must have a name", fixed = TRUE)
+    expect_error(anytab(d, "a", "a"), "must have a name", fixed = TRUE)
     # a file named .gz that is plain CSV, larger than the in-memory limit, is
     # read streamed
     p <- tempfile(fileext = ".csv.gz")

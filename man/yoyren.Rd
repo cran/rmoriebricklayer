@@ -34,7 +34,7 @@ yoypdf(
 )
 }
 \arguments{
-\item{x}{An \code{rmbl_yoy} object from \code{\link[=yoy]{yoy()}}, written as HTML.}
+\item{x}{An \code{rmbl_yoy} object from \code{\link[=yoychg]{yoychg()}}, written as HTML.}
 
 \item{file}{Output path (a string). \code{yoyhtml()} writes a single
 self-contained HTML file with no external requests; \code{yoypdf()}
@@ -72,7 +72,8 @@ landscape US letter).}
 The path \code{file}, invisibly.
 }
 \description{
-Writes a change table from \code{\link[=yoy]{yoy()}} to a file for people who will not
+Writes a change table from \code{\link[=yoychg]{yoychg()}} to a file for people who
+will not
 run
 R: \code{yoyhtml()} to a single self-contained web page, \code{yoypdf()}
 to a PDF. Each row shows the period, the value, the previous value, the
@@ -89,7 +90,7 @@ the network) and escapes every value, so the file stays the artefact and
 renders the same later. Rows are coloured by the table's \code{verdict}:
 \code{"worse"} in the palette's bad colour, \code{"better"} in its good
 colour, everything else (including the \code{"up"} and \code{"down"} of
-\code{direction = "neutral"}) in its neutral grey. Labels set
+\code{dir = "neutral"}) in its neutral grey. Labels set
 with \code{\link[=yoylbl]{yoylbl()}} replace the period. For percentage units
 the change is
 shown in points. The page ends with the package version that wrote it.
@@ -101,7 +102,7 @@ which cannot draw arrows or dashes, so those are written in ASCII (\code{+},
 fit and on pages of their own otherwise. The interval column appears only
 when the table has \code{pctlo} and \code{pctup} (counts).
 
-Both overwrite \code{file}. Errors: \code{x} not from \code{\link[=yoy]{yoy()}}; a
+Both overwrite \code{file}. Errors: \code{x} not from \code{\link[=yoychg]{yoychg()}}; a
 \code{pal} not in \code{\link[=yoypals]{yoypals()}}; a file that cannot
 be written.
 }
@@ -110,7 +111,7 @@ be written.
 d <- data.frame(year = rep(2019:2023, each = 2),
                 region = rep(c("North", "South"), 5),
                 n = c(31, 402, 28, 377, 12, 190, 19, 268, 24, 331))
-y <- yoy(d, value = "n", prd = "year", by = "region",
+y <- yoychg(d, value = "n", prd = "year", by = "region",
          dir = "lower")
 
 h <- file.path(tempdir(), "change.html")
@@ -129,7 +130,7 @@ any(grepl("suppressed", readLines(h)))
 # portrait letter pages, with fiscal-year labels
 yoypdf(yoylbl(y, fylbl), p, width = 8.5, height = 11)
 
-# only yoy() tables can be rendered
+# only yoychg() tables can be rendered
 try(yoyhtml(d, h))
 unlink(c(h, p))
 \dontshow{\}) # examplesIf}

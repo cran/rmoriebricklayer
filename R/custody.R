@@ -1009,7 +1009,12 @@ all.equal.rmbl_measure <- function(target, current, ...) {
   } # refused by perdays(), as a missing date
   d <- tryCatch(as.Date(v), error = function(e) as.Date(NA))
   if (is.na(d)) {
-    stop(sprintf("`%s` is not a date: %s", what, format(v)), call. = FALSE)
+    # bytes that are not text are shown as <ff>: pasted as they were, they
+    # made the message itself invalid UTF-8
+    stop(
+      sprintf("`%s` is not a date: %s", what, .rmbl_ctl_escape(format(v))),
+      call. = FALSE
+    )
   }
   d
 }
@@ -1406,8 +1411,8 @@ all.equal.rmbl_measure <- function(target, current, ...) {
 .an_count <- function(v) {
   whole <- !is.na(v) & v == round(v) & abs(v) < 1e15
   out <- .rmbl_fmt_num(v)
-  out[whole] <- formatC(v[whole], format = "f", digits = 0L, big.mark = ",")
-  formatC(out, width = max(c(0L, nchar(out))))
+  out[whole] <- .rmbl_fc(v[whole], format = "f", digits = 0L, big.mark = ",")
+  .rmbl_fc(out, width = max(c(0L, nchar(out))))
 }
 
 #' Text columns cut so that the first column and any other one fit side by

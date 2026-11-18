@@ -199,3 +199,60 @@ test_that("standardised keys print as boxes with their fingerprint", {
   class(oldp) <- c("bricklayer_oqs_public_key", "list")
   o1_expect_box(o1_box(oldp), oldp, "Public verification key", "ML-DSA-44")
 })
+
+test_that("cpsvrf() takes one spelling of a signature only", {
+  k <- fipskg("ML-DSA-44", seed = as.raw(1:32))
+  g <- cpssign("m", k, ctx = "abc")
+  expect_true(cpsvrf("m", g, fipspubkey(k), ctx = "abc"))
+  up <- g
+  up$signature <- toupper(g$signature)
+  expect_false(cpsvrf("m", up, fipspubkey(k), ctx = "abc"))
+  # the recorded context and pre-hash must be the ones verified under
+  other <- g
+  other$context <- charToRaw("xyz")
+  expect_false(cpsvrf("m", other, fipspubkey(k), ctx = "abc"))
+  other <- g
+  other$prehash <- "sha256"
+  expect_false(cpsvrf("m", other, fipspubkey(k), ctx = "abc"))
+  # as JSON carries it: the context's base64 text
+  js <- g
+  js$context <- jsb64enc(charToRaw("abc"))
+  expect_true(cpsvrf("m", js, fipspubkey(k), ctx = "abc"))
+  js$context <- "eHl6"
+  expect_false(cpsvrf("m", js, fipspubkey(k), ctx = "abc"))
+  # a field no writer makes
+  more <- g
+  more$reviewed <- "yes"
+  expect_false(cpsvrf("m", more, fipspubkey(k), ctx = "abc"))
+  h <- cpssign("m", "a secret", scheme = "hmac")
+  expect_true(cpsvrf("m", h, "a secret"))
+  h$signature <- toupper(h$signature)
+  expect_false(cpsvrf("m", h, "a secret"))
+  expect_true(.rmbl_vrf_fips_bound(list(), raw(0), "none"))
+})
+
+test_that("an empty hmac secret signs and verifies nothing", {
+  for (k in list("", raw(0), NA_character_, c("a", "b"))) {
+    expect_error(cpssign("m", k, scheme = "hmac"), "`key` is empty")
+  }
+  s <- cpssign("m", "a secret", scheme = "hmac")
+  for (k in list("", raw(0), NA_character_)) {
+    expect_false(cpsvrf("m", s, k))
+  }
+  s$signature <- chmac("", "m")
+  expect_false(cpsvrf("m", s, ""))
+  k <- as.raw(1:4)
+  expect_true(cpsvrf("m", cpssign("m", k, scheme = "hmac"), k))
+})
+
+test_that("a JSON file with a NUL byte is refused, not read in part", {
+  f <- withr::local_tempfile(fileext = ".json")
+  writeBin(c(charToRaw('{"a": 1,'), as.raw(0), charToRaw(' "b": 2\n}\n')), f)
+  expect_error(fromjs(f), "NUL byte")
+  expect_error(loadprov(f))
+  expect_error(cpsbndlrd(f), "NUL byte")
+  writeBin(charToRaw('{"a": 1,\r\n "b": [2, 3]}'), f)
+  expect_identical(fromjs(f)$b, c(2L, 3L))
+  writeBin(raw(0), f)
+  expect_error(fromjs(f))
+})

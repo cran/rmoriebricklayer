@@ -247,6 +247,17 @@ cpschkatst <- function(attest, man, keyexp = NULL, key = NULL) {
   }
   sig <- .rmbl_attest_sig_check(attest, key, length(missing) == 0L)
   rows <- c(rows, list(.rmbl_attest_row("signature", sig$ok, sig$detail)))
+  # a field no writer makes is covered by no signature (an "unsigned_claim"
+  # beside the signed ones was accepted without a word): reported, as a
+  # bundle reports files it does not list
+  extra <- setdiff(names(attest), needed)
+  if (length(extra)) {
+    rows <- c(rows, list(.rmbl_attest_row(
+      "no_unsigned_fields",
+      FALSE,
+      paste("not covered by the signature:", toString(extra))
+    )))
+  }
 
   df <- do.call(rbind, rows)
   rownames(df) <- NULL
@@ -317,7 +328,7 @@ format.bricklayer_attestation_check <- function(x, ...) {
   # a failed check that only warns (or notes) says so, not FAIL
   soft <- !pass & !is.na(sev) & sev %in% c("warn", "note")
   mark <- rep("FAIL", length(nm))
-  mark[soft] <- toupper(sev[soft])
+  mark[soft] <- .rmbl_upper(sev[soft])
   mark[pass] <- "ok  "
   # a name too long for the column goes on its own line, its detail under it
   long <- nchar(nm) > 34L
@@ -328,7 +339,8 @@ format.bricklayer_attestation_check <- function(x, ...) {
         paste0(strrep(" ", 7L), det[i])
       }))
     }
-    sprintf("%s %s  %s", mark[i], formatC(nm[i], width = w, flag = "-"), det[i])
+    sprintf("%s %s  %s", mark[i], formatC(nm[i], width = w, flag = "-"),
+            det[i])
   })
   sub(" +$", "", unlist(out))
 }
@@ -544,8 +556,8 @@ format.bricklayer_attestation_check <- function(x, ...) {
     as.character(keyexp)[1L]
   }
   key_ok <- identical(
-    tolower(as.character(expected_hex)),
-    tolower(as.character(attest$public %||% ""))
+    .rmbl_lower(as.character(expected_hex)),
+    .rmbl_lower(as.character(attest$public %||% ""))
   )
   .rmbl_attest_row(
     "key_as_expected",
@@ -607,7 +619,7 @@ format.bricklayer_attestation_check <- function(x, ...) {
     return(list(ok = FALSE, detail = "an hmac signature needs the shared key"))
   }
   kid <- tryCatch(.rmbl_hmac_key_id(key), error = function(e) NULL)
-  if (!identical(kid, tolower(as.character(attest$public)[1L]))) {
+  if (!identical(kid, .rmbl_lower(as.character(attest$public)[1L]))) {
     return(list(
       ok = FALSE,
       detail = "the key given is not the key the attestation names"

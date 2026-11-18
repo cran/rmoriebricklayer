@@ -428,7 +428,7 @@ polbrdn <- function(
   rare = FALSE,
   hirate = FALSE
 ) {
-  .rmbl_no_fn(poll = poll)
+  .pollution_poll_arg(poll)
   pol <- .pollution_pollutant(poll)
   if (is.na(pol)) {
     stop(
@@ -1124,7 +1124,7 @@ vrfpol <- function(
   rare = FALSE,
   hirate = FALSE
 ) {
-  poll <- .pollution_poll_key(poll)
+  poll <- .pollution_poll_key(.rmbl_valid_text(poll, "poll"))
   # the input contract is part of the report: an argument the pipeline cannot
   # use is an "error" report with exit status 2, never a raw stop() or a
   # silently truncated vector
@@ -1287,7 +1287,7 @@ format.rmbl_pollution_report <- function(x, ...) {
   }
   inp <- x$inputs
   .an_block(
-    sprintf("Pollution report: %s, %s", toupper(x$pollutant), x$outcome),
+    sprintf("Pollution report: %s, %s", .rmbl_upper(x$pollutant), x$outcome),
     facts = list(
       Status = x$status,
       Region = x$region,
@@ -1525,10 +1525,10 @@ format.rmbl_plr_boot <- function(x, ...) {
 #' @return \code{"PM2.5"}, \code{"NO2"} or NA.
 #' @noRd
 .pollution_pollutant <- function(pollutant) {
-  if (!is.character(pollutant) || length(pollutant) != 1L || is.na(pollutant)) {
+  if (!.rmbl_is_str1(pollutant) || !validEnc(pollutant)) {
     return(NA_character_)
   }
-  key <- gsub("[^a-z0-9]", "", tolower(pollutant))
+  key <- gsub("[^a-z0-9]", "", .rmbl_lower(pollutant))
   if (key %in% c("pm25", "pm2.5")) {
     return("PM2.5")
   }
@@ -1742,7 +1742,7 @@ format.rmbl_plr_boot <- function(x, ...) {
     sprintf(
       "brate finite: zero, or between %s and %s per 100k%s",
       if (isTRUE(rare_outcome)) "1e-6" else "1",
-      format(top, big.mark = ",", scientific = FALSE),
+      .rmbl_ntxt(top),
       if (isTRUE(rare_outcome)) " (a rare outcome)" else ""
     ),
     fin &&
@@ -1794,7 +1794,7 @@ format.rmbl_plr_boot <- function(x, ...) {
         "high): if the outcome really is",
         "this common, say so with hirate = TRUE"
       ),
-      format(baseline_rate, big.mark = ",", scientific = FALSE)
+      .rmbl_ntxt(baseline_rate)
     )
   } else if (fin && baseline_rate == 0) {
     "brate=0: a measured zero rate, so no cases"
@@ -2068,7 +2068,7 @@ format.rmbl_plr_boot <- function(x, ...) {
   if (!file.exists(expcsv)) {
     return(sprintf("exposure CSV not found: %s", expcsv))
   }
-  if (dir.exists(expcsv)) {
+  if (.rmbl_isdir(expcsv)) {
     return(sprintf("exposure CSV is a directory, not a file: %s", expcsv))
   }
   empty <- sprintf(
@@ -2111,7 +2111,7 @@ format.rmbl_plr_boot <- function(x, ...) {
   # refused
   raw <- if (is.character(df$value)) trimws(df$value)
   vals <- suppressWarnings(as.numeric(df$value))
-  unit <- tolower(trimws(as.character(df$unit)))
+  unit <- .rmbl_lower(trimws(as.character(df$unit)))
   ugm3 <- c("ug/m3", "\u00b5g/m3", "\u00b5g/m\u00b3", "ug/m\u00b3")
   is_ppb <- unit %in% c("ppb", "ppbv")
   bad <- !is.na(vals) & !(unit %in% ugm3) & !(is_ppb & poll == "no2")
@@ -2147,7 +2147,7 @@ format.rmbl_plr_boot <- function(x, ...) {
     return(NULL)
   }
   missing_tok <- is.na(raw) |
-    tolower(raw) %in% c("", "na", "n/a", "nan", "null", "-", ".", "missing")
+    .rmbl_lower(raw) %in% c("", "na", "n/a", "nan", "null", "-", ".", "missing")
   text_rows <- is.na(exposure) & !missing_tok
   if (!any(text_rows)) {
     return(NULL)
@@ -2307,7 +2307,7 @@ format.rmbl_plr_boot <- function(x, ...) {
     # goes through a text connection, several times slower on a large file
     src <- tempfile(fileext = ".csv")
     on.exit(unlink(src), add = TRUE)
-    writeLines(txt, src, useBytes = TRUE)
+    .rmbl_wlines(txt, src)
   }
   rm(txt)
   .pollution_csv_shape(src)
@@ -2436,7 +2436,7 @@ format.rmbl_plr_boot <- function(x, ...) {
     check.names = FALSE,
     encoding = "UTF-8"
   ))
-  dup <- unique(hdr[duplicated(tolower(trimws(hdr)))])
+  dup <- unique(hdr[duplicated(.rmbl_lower(trimws(hdr)))])
   if (length(dup)) {
     stop(
       sprintf(
@@ -2781,7 +2781,7 @@ format.rmbl_plr_boot <- function(x, ...) {
           "so with hirate = TRUE"
         ),
         format(rate),
-        format(rate * 1e5, big.mark = ",", scientific = FALSE)
+        .rmbl_ntxt(rate * 1e5)
       ),
       call. = FALSE
     )
@@ -3073,12 +3073,12 @@ format.rmbl_plr_boot <- function(x, ...) {
     if (fin(population) && population > 1e10) {
       sprintf(
         "population=%s is more people than live on Earth",
-        format(population, big.mark = ",", scientific = FALSE)
+        .rmbl_ntxt(population)
       )
     } else {
       sprintf(
         "population=%s",
-        format(population, big.mark = ",", scientific = FALSE)
+        .rmbl_ntxt(population)
       )
     }
   )
@@ -3096,9 +3096,10 @@ format.rmbl_plr_boot <- function(x, ...) {
       call. = FALSE
     )
   }
+  .rmbl_valid_text(poll, "poll")
   pol <- .pollution_pollutant(poll)
   if (is.na(pol)) {
-    tolower(as.character(poll))
+    .rmbl_lower(as.character(poll))
   } else if (pol == "NO2") {
     "no2"
   } else {
@@ -3418,7 +3419,7 @@ format.rmbl_plr_boot <- function(x, ...) {
     sprintf(
       "  %s -- %s -> %s",
       report$command,
-      toupper(report$pollutant),
+      .rmbl_upper(report$pollutant),
       report$outcome
     )
   )
@@ -3440,7 +3441,7 @@ format.rmbl_plr_boot <- function(x, ...) {
     sprintf("  baseline rate/100k: %.2f", inp$baserateper100k),
     sprintf(
       "  population:         %s",
-      format(inp$population, big.mark = ",", scientific = FALSE)
+      .rmbl_ntxt(inp$population)
     ),
     sprintf("  reference conc:     %s", format(inp$refconc)),
     if (isTRUE(inp$drorows > 0)) {
@@ -3594,4 +3595,16 @@ format.rmbl_plr_boot <- function(x, ...) {
       sprintf("Concentration index of exposure: %.4f", p$equity$concidx)
     }
   )
+}
+
+#' polbrdn()'s `poll` before it is looked up: not a function, and text,
+#' since bytes that are not text were printed in the refusal of an unknown
+#' pollutant (base R's "input string 1 is invalid").
+#' @param poll The pollutant name given.
+#' @return `poll`, invisibly.
+#' @noRd
+.pollution_poll_arg <- function(poll) {
+  .rmbl_no_fn(poll = poll)
+  .rmbl_valid_text(poll, "poll")
+  invisible(poll)
 }

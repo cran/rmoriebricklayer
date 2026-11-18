@@ -128,7 +128,7 @@ bldl <- function(
   # The transport calls this about ten times a second with the bytes so far
   # and the total the server announced (0 when it did not).
   draw <- function(got, total) .bl_dl_draw(st, got, total)
-  got <- if (grepl("^file://", url, ignore.case = TRUE)) {
+  got <- if (grepl(.rmbl_ci("^file://"), url, perl = TRUE, useBytes = TRUE)) {
     .bl_dl_file(url, dest, size, draw)
   } else {
     .bl_dl_net(url, dest, a, draw, quiet, label)
@@ -222,7 +222,7 @@ bldl <- function(
   fmt <- .bl_fmt_bytes
   if (!identical(unit, "B")) {
     fmt <- function(n) {
-      paste(format(round(n), big.mark = ",", scientific = FALSE), unit)
+      paste(.rmbl_ntxt(round(n)), unit)
     }
   }
   rate <- sprintf("%s/s", fmt(got / elapsed))
@@ -353,21 +353,23 @@ bldl <- function(
 #' @return The bytes copied.
 #' @noRd
 .bl_dl_file <- function(url, dest, size, draw) {
-  con <- file(sub("^file://", "", url, ignore.case = TRUE), open = "rb")
+  con <- file(sub(.rmbl_ci("^file://"), "", url, perl = TRUE, useBytes = TRUE),
+              open = "rb")
   on.exit(close(con), add = TRUE)
-  out <- file(dest, open = "wb")
-  on.exit(close(out), add = TRUE)
-  got <- 0
-  repeat {
-    chunk <- readBin(con, what = "raw", n = 1048576L)
-    if (!length(chunk)) {
-      break
+  n <- new.env(parent = emptyenv())
+  n$got <- 0
+  .rmbl_wfile(dest, function(out) {
+    repeat {
+      chunk <- readBin(con, what = "raw", n = 1048576L)
+      if (!length(chunk)) {
+        break
+      }
+      writeBin(chunk, out)
+      n$got <- n$got + length(chunk)
+      draw(n$got, if (is.na(size)) 0 else size)
     }
-    writeBin(chunk, out)
-    got <- got + length(chunk)
-    draw(got, if (is.na(size)) 0 else size)
-  }
-  got
+  })
+  n$got
 }
 
 #' A download through the package's transport.
@@ -378,19 +380,23 @@ bldl <- function(
 #' base R's url() did none of that (0.5.7 review) a server busy for a moment
 #' (429, 500, 502, 503 or 504; data.rmorie.com answers 503 when many clients
 #' fetch one table at once) is asked again up to three times, after its
-#' Retry-After (at most a minute) or else 1, 2 and 4 seconds with jitter; any
-#' other answer is final
+#' Retry-After (at most a minute) or else 1, 2 and 4 seconds with jitter, and
+#' never past `tmout`; any other answer is final
 #' @param url,dest,quiet,label As for bldl().
 #' @param a The checked arguments (.bl_dl_args()).
 #' @param draw The progress callback.
 #' @return The bytes written.
 #' @noRd
 .bl_dl_net <- function(url, dest, a, draw, quiet, label) {
+  t0 <- Sys.time()
   for (i in 0:3) {
+    # tmout is the whole download: an attempt gets what is left of it
+    left <- a$tmout - as.numeric(Sys.time() - t0, units = "secs")
     res <- .bl_http_download(
       url,
       dest,
-      as.integer(a$tmout),
+      # the first gets all of it; a later one whole seconds, at least one
+      as.integer(if (i == 0L) a$tmout else max(1, floor(left))),
       a$hdr_lines,
       draw,
       a$maxbytes,
@@ -404,6 +410,10 @@ bldl <- function(
       wait <- 2^i * (0.5 + (as.numeric(Sys.time()) * 1000) %% 1000 / 1000)
     }
     wait <- min(wait, 60)
+    # tmout is the whole download: a wait that would pass it ends here
+    if (wait >= a$tmout - as.numeric(Sys.time() - t0, units = "secs")) {
+      break
+    }
     if (!quiet) {
       cat(
         sprintf(

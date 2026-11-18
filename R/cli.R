@@ -9,12 +9,7 @@
 #' Run the rmoriebricklayer command line
 #'
 #' Dispatches the verbs of the \code{rmoriebricklayer} launcher: \describe{
-#' \item{\code{login [--token] [--email ADDRESS [--code CODE]]
-#' [--no-browser]}}{sign in for the curated tables at data.rmorie.com (a free
-#' MORIE data key, issued at \code{www.rmorie.com/access/}): a key you paste
-#' with \code{--token} (read from the terminal or a pipe when KEY is omitted), a
-#' code sent to \code{--email}, or the GitHub device flow}
-#' \item{\code{logout}}{forget the data key} \item{\code{doctor}}{report the
+#' \item{\code{doctor}}{report the
 #' language-model routes available here (own endpoint, each provider with your
 #' key, local Ollama), in the order \code{ask} tries them} \item{\code{models
 #' [--route ROUTE]}}{list the models your provider (or server) offers, the one
@@ -56,15 +51,13 @@
 #' \code{\link{wbsave}}, results in \code{--out} (default
 #' \code{FILE.wayback.jsonl}), so a stopped run carries on; \code{wayback
 #' --retry FILE.jsonl [--include-gone]} retries the failures of an earlier run
-#' (\code{\link{wbrtry}})} \item{\code{archive save URL... --reason TEXT
-#' [--dir D] [--private] [--also wayback]}}{save from this connection to
-#' archive.rmorie.com with \code{\link{arccap}}, keeping the files, their
-#' manifest and WARC copies in D (default \file{captures}); \code{archive
-#' push DIR [--reason TEXT] [--private] [--also wayback]} sends a capture
-#' kept in DIR on later, the same bytes, with \code{\link{arcpush}} (run it
-#' again to retry what failed); \code{archive find URL} and \code{archive
-#' get ID|URL -o FILE} list the captures of a URL and fetch one's exact bytes
-#' (\code{\link{arcfind}}, \code{\link{arcget}})}
+#' (\code{\link{wbrtry}})} \item{\code{archive save URL... [--reason TEXT]
+#' [--dir D] [--also wayback]}}{capture from this connection with
+#' \code{\link{arccap}}, keeping the files, their manifest and WARC copies in
+#' D (default \file{captures}), and with \code{--also wayback} ask the
+#' Wayback Machine too; \code{archive push DIR --also wayback} asks the
+#' Wayback Machine later for the addresses of a capture kept in DIR, with
+#' \code{\link{arcpush}} (run it again to retry what failed)}
 #' \item{\code{verify PATH [--json] [--fail-on LEVEL]
 #' [--public-key HEX]}}{check every capsule under PATH as the rmbl GitHub Action
 #' does (\code{\link{cpschk}}): each file against its JSON Schema
@@ -73,8 +66,10 @@
 #' \code{RMBL_KEY}, which is then removed from the environment. Prints the
 #' Markdown report, or JSON with \code{--json}; exits 1 when a failed row is at
 #' or above \code{--fail-on} (\code{error}, the default, \code{drift} or
-#' \code{warn}). \code{--base MANIFEST|DIR} compares each manifest with its base
-#' copy, \code{--manifests GLOB} checks only the capsule files matching GLOB,
+#' \code{warn}), and when no capsule is found under PATH (an error row:
+#' nothing was checked). \code{--base MANIFEST|DIR} compares each
+#' manifest with its base copy, \code{--manifests GLOB} checks only the
+#' capsule files matching GLOB,
 #' \code{--snapshot} looks up each source's latest Wayback snapshot and
 #' \code{--no-footprint} leaves the footprint (\code{\link{co2fp}}) out of the
 #' report. \code{--seen-log FILE} adds the signatures an XMSS seen-log lists to
@@ -121,19 +116,34 @@
 #' asked as \code{ask} would ask it.
 #'
 #' Errors are not raised: every error is written to \code{out} as
-#' \code{"PROG: message"} and turned into the exit status. The status is 0
-#' on success, 1 when the verb failed (an error, nothing found, no route), 2
-#' for a usage error (an unknown verb or option, a missing value) and 130 when
-#' interrupted (Ctrl-C). The command name in messages is the environment
-#' variable \code{RMBL_PROG}, else \code{rmoriebricklayer}.
+#' \code{"PROG: message"} and turned into the exit status, one table for
+#' every verb: 0 on success; 1 when the verb failed or refused (an error,
+#' nothing found, no route, a check that failed at or above
+#' \code{--fail-on}, a folder under PATH that cannot be read, a link out of
+#' PATH that the capsule verbs do not follow); 2 for a usage error, found
+#' while the arguments are checked and before anything is read (an unknown
+#' verb or option, a missing value, a value an option does not take, such
+#' as a PSI band that is no number, a \code{--base} or a folder PATH that
+#' does not exist, a \code{--seen-log} that cannot be read); and 130 when
+#' interrupted (Ctrl-C). \code{report} prints the report and exits 0 once
+#' it is made, whatever its rows say. An input that does not exist gives,
+#' verb by verb: 2 for the folder of \code{verify}, \code{drift},
+#' \code{report}, \code{refresh} and \code{sign}, and 1 for the project of
+#' \code{pack} and the results file of \code{wayback} (a failed verb). The
+#' capsule verbs search PATH as \code{\link{cpschk}} does: a link to a
+#' folder inside it is followed, a loop is not, and a link to any other
+#' folder outside it is not followed and is warned of, named. The options of
+#' \code{pack} and \code{sign} are checked
+#' before anything is read or a key is asked for. The command name in
+#' messages is the environment variable \code{RMBL_PROG}, else
+#' \code{rmoriebricklayer}.
 #'
 #' Side effects: during the call \code{options(morie.progress = TRUE)} is set,
 #' so downloads draw a progress bar; when \code{RMBL_PROG} is set (the
 #' launcher sets it) and \code{options(rmoriebricklayer.dcache)} is not,
 #' the data.rmorie.com manifest and tables are kept in
 #' \code{tools::R_user_dir("rmoriebricklayer", "cache")} rather than a fresh
-#' temporary folder. The verbs \code{login}, \code{logout} and
-#' \code{config} write the shared credentials and settings files;
+#' temporary folder. The verb \code{config} writes the settings file;
 #' \code{ask}, \code{models}, \code{data}, \code{bundle} and
 #' \code{wayback} use the network, and \code{drift} and \code{refresh}
 #' fetch each capsule's source (\code{refresh} writes the capsule),
@@ -225,12 +235,12 @@
 #' @examplesIf interactive()
 #' # these read every help page, which takes a few seconds
 #' blcli(c("functions", "json"))
-#' blcli(c("describe", "anltab"))
+#' blcli(c("describe", "anytab"))
 #' blcli(c("examples", "perdays"))
 #' @export
 blcli <- function(args = commandArgs(trailingOnly = TRUE), out = cat) {
-  if (!is.function(out) ||
-        (!is.primitive(out) && !length(formals(out)))) {
+  # a primitive (sum, c) takes text and writes none
+  if (!is.function(out) || is.primitive(out) || !length(formals(out))) {
     stop(
       "`out` must be a function that writes text, as cat() does",
       call. = FALSE
@@ -248,19 +258,16 @@ blcli <- function(args = commandArgs(trailingOnly = TRUE), out = cat) {
       call. = FALSE
     )
   }
-  a <- .bl_cli_words(as.character(args))
   prog <- .bl_prog()
-  st <- .bl_cli_precheck(a$verb, a$rest, prog, out)
-  if (!is.null(st)) {
-    return(invisible(st))
-  }
-  invisible(.bl_cli_dispatch(a$verb, a$rest, a$tail_args, out, prog))
+  a <- .bl_cli_parse(as.character(args), prog, out)
+  st <- a$st %||% .bl_cli_dispatch(a$verb, a$rest, a$tail_args, out, prog)
+  invisible(st)
 }
 
 #' Install the rmoriebricklayer command-line launcher
 #'
 #' Writes small launcher scripts into a directory on your PATH so that
-#' \code{rmoriebricklayer login}, \code{rmbl ask ...} and the other verbs of
+#' \code{rmoriebricklayer doctor}, \code{rmbl ask ...} and the other verbs of
 #' \code{\link{blcli}} work from any shell. Run it once after
 #' installing or upgrading the package. Nothing outside \code{dir} is
 #' touched, and only when you call this.
@@ -269,7 +276,8 @@ blcli <- function(args = commandArgs(trailingOnly = TRUE), out = cat) {
 #' On Unix-alikes each launcher is a \code{/bin/sh} script (mode 0755) that
 #' sets \code{RMBL_PROG} to its own name and runs
 #' \code{Rscript -e "rmoriebricklayer::blcli()"} with the shell's
-#' arguments, exiting with the function's status (130 on Ctrl-C). The library
+#' arguments, exiting with the function's status (130 on Ctrl-C, also one
+#' that lands while R is still starting or as it quits). The library
 #' this copy of the package is installed in is pinned inside R with
 #' \code{.libPaths()}, so an \code{R_LIBS} set in the shell or in
 #' \code{~/.Renviron} cannot make the command run another copy. An existing
@@ -311,7 +319,7 @@ instcli <- function(
   name = c("rmoriebricklayer", "rmbl")
 ) {
   .bl_cli_names_check(name)
-  dir <- .rmbl_string1(dir, "dir")
+  dir <- .rmbl_fspath(.rmbl_string1(dir, "dir"))
   src <- .bl_launcher()
   if (!nzchar(src)) {
     stop("the launcher is missing from this installation", call. = FALSE)
@@ -342,6 +350,32 @@ instcli <- function(
     if (on_path) "" else sprintf("; add %s to your PATH", dir)
   ))
   invisible(targets[[1L]]) # the primary launcher's path; rmbl sits beside it
+}
+
+#' The command line's words, or the status that ends the call.
+#'
+#' A word that is not valid text failed in gsub() with base R's traceback and
+#' "Execution halted" (audit of 21478080, P3): it is one line and a usage
+#' error. Otherwise the words are split and checked as before.
+#' @param args The words, as text.
+#' @param prog The program's name.
+#' @param out The function that writes text.
+#' @return The list of .bl_cli_words(), with `st` set when the call ends
+#'   here.
+#' @noRd
+.bl_cli_parse <- function(args, prog, out) {
+  bad <- which(.rmbl_nontext(args))
+  if (length(bad)) {
+    out(sprintf(
+      "%s: argument %d is not valid text in this locale\n",
+      prog,
+      bad[[1L]]
+    ))
+    return(list(st = 2L))
+  }
+  a <- .bl_cli_words(args)
+  a$st <- .bl_cli_precheck(a$verb, a$rest, prog, out)
+  a
 }
 
 #' Signals an interrupt condition and stops.
@@ -509,10 +543,10 @@ instcli <- function(
 
 #' Reads one typed line for a prompt.
 #'
-#' One typed line for a prompt (the key of `login --token`, the emailed code).
+#' One typed line for a prompt (a provider key for `config`).
 #' The launchers run Rscript, where readline() returns \code{""} at once, so
 #' outside an interactive session read one line of stdin: typed at a terminal,
-#' or piped (`echo KEY | rmbl login --token` keeps the key out of the shell
+#' or piped (`echo KEY | rmbl config set ...` keeps the key out of the shell
 #' history). Closed or empty stdin gives \code{""}.
 #' @param prompt The prompt text.
 #' @param con A connection to read from instead of the terminal or standard
@@ -731,28 +765,14 @@ instcli <- function(
   c(.bl_cli_opts_a(), .bl_cli_opts_b(rest))
 }
 
-#' The options of login, ask, models, data, app, wayback and archive.
+#' The options of ask, models, data, app, wayback and archive.
 #' @return A list by verb.
 #' @noRd
 .bl_cli_opts_a <- function() {
   list(
-    login = c(
-      "--email",
-      "--code",
-      "--no-browser",
-      "--token",
-      "--accept-terms",
-      "--name",
-      "--affiliation",
-      "--reason",
-      "--restricted",
-      "--supervisor-name",
-      "--supervisor-role",
-      "--supervisor-email"
-    ),
     ask = c("--model", "--route", "--fresh"),
     models = "--route",
-    data = "--out",
+    data = c("--out", "--names"),
     app = c("--port", "--no-browser"),
     wayback = c(
       "--out",
@@ -762,18 +782,7 @@ instcli <- function(
       "--retry",
       "--include-gone"
     ),
-    archive = c(
-      "--reason",
-      "--dir",
-      "--private",
-      "--also",
-      "--out",
-      "--sha256",
-      "--at",
-      "--from",
-      "--to",
-      "--json"
-    )
+    archive = c("--reason", "--dir", "--also")
   )
 }
 
@@ -820,20 +829,13 @@ instcli <- function(
   opts <- rest[startsWith(rest, "--")]
   values <- unlist(lapply(
     c(
-      "--email",
-      "--code",
-      "--token",
       "--model",
       "--route",
       "--out",
+      "--names",
       "--jobs",
       "--within",
-      "--name",
-      "--affiliation",
       "--reason",
-      "--supervisor-name",
-      "--supervisor-role",
-      "--supervisor-email",
       "--port",
       .bl_capsule_valued,
       "--html",
@@ -867,8 +869,6 @@ instcli <- function(
 #' @noRd
 .bl_cli_handlers <- function() {
   list(
-    login = .bl_v_login,
-    logout = function(ctx) .bl_v_noargs(ctx, "logout", dlogout),
     doctor = .bl_v_doctor,
     config = .bl_v_config,
     models = .bl_v_models,
@@ -1014,88 +1014,6 @@ instcli <- function(
   }
   fn()
   NULL
-}
-
-#' `login`: a pasted key, or GitHub or an emailed code.
-#' @param ctx The command's context.
-#' @return NULL (exit status 0).
-#' @noRd
-.bl_v_login <- function(ctx) {
-  rest <- ctx$rest
-  flag <- .bl_cli_flagger(rest)
-  has <- function(name) name %in% rest
-  if (has("--token")) {
-    .bl_v_login_token(ctx)
-  } else {
-    if (has("--code") && is.null(flag("--email"))) {
-      .bl_cli_usage_error(
-        "--code needs --email ADDRESS (the code was sent there)"
-      )
-    }
-    em <- flag("--email")
-    if (
-      !is.null(em) &&
-        !grepl("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", trimws(em))
-    ) {
-      .bl_cli_usage_error(sprintf(
-        "--email: '%s' is not an email address",
-        em
-      ))
-    }
-    dlogin(
-      email = flag("--email"),
-      code = flag("--code"),
-      openbro = !has("--no-browser") &&
-        interactive(),
-      accter = has("--accept-terms"),
-      name = flag("--name"),
-      affil = flag("--affiliation"),
-      purp = flag("--reason"),
-      restr = if (has("--restricted")) TRUE else NULL,
-      supnm = flag("--supervisor-name"),
-      suprole = flag("--supervisor-role"),
-      supemail = flag("--supervisor-email")
-    )
-  }
-  ctx$out(sprintf(
-    "Logged in: the curated tables at %s are open to you\n",
-    tryCatch(.bl_data_url(), error = function(e) "data.rmorie.com")
-  ))
-  NULL
-}
-
-#' `login --token`: the key given (with a warning: it stays in the shell
-#' history), or asked for.
-#' @param ctx The command's context.
-#' @noRd
-.bl_v_login_token <- function(ctx) {
-  rest <- ctx$rest
-  i <- match("--token", rest)
-  tok <- if (i < length(rest)) rest[[i + 1L]] else ""
-  if (nzchar(tok)) {
-    ctx$out(sprintf(
-      paste(
-        "%s: a key given on the command line stays in the",
-        "shell history and is visible",
-        "to other users in the process list; `%s login",
-        "--token` with no value asks for it\n"
-      ),
-      ctx$prog,
-      ctx$prog
-    ))
-  }
-  if (!nzchar(tok)) {
-    tok <- .bl_readline("Paste your MORIE key: ", secret = TRUE)
-  }
-  if (!nzchar(tok)) {
-    .bl_cli_usage_error(
-      paste0(
-        "--token needs a key: run `login --token` and paste it ",
-        "when asked"
-      )
-    )
-  }
-  dlogin(token = tok)
 }
 
 #' The usage error for a route the command line does not know.
@@ -1264,10 +1182,14 @@ instcli <- function(
     ctx$out(.bl_old_note(old))
     ctx$out(show(old$new))
   } else if (is.null(.bl_rd_for(rest[[1L]]))) {
-    ctx$out(sprintf(
-      "no help page for '%s' (%s functions lists them)\n",
-      rest[[1L]],
-      ctx$prog
+    ctx$out(paste0(
+      .bl_gone(rest[[1L]]) %||%
+        sprintf(
+          "no help page for '%s' (%s functions lists them)",
+          rest[[1L]],
+          ctx$prog
+        ),
+      "\n"
     ))
     return(1L)
   } else {
@@ -1396,7 +1318,7 @@ instcli <- function(
 #' @return TRUE or FALSE.
 #' @noRd
 .bl_bq_near_verb <- function(word) {
-  w <- tolower(gsub("[[:punct:]]+", "", word))
+  w <- .rmbl_lower(gsub("[[:punct:]]+", "", word))
   min(utils::adist(w, gsub("-", "", .bl_verb_names(), fixed = TRUE))) <= 2L
 }
 
@@ -1557,7 +1479,7 @@ instcli <- function(
 #' @return TRUE or FALSE for each.
 #' @noRd
 .bl_wordlike <- function(s) {
-  s <- tolower(s)
+  s <- .rmbl_lower(s)
   v <- nchar(gsub("[^aeiouy]", "", s))
   v / pmax(nchar(s), 1L) >= 0.25 & !grepl("[b-df-hj-np-tv-xz]{6,}", s)
 }
@@ -1626,7 +1548,7 @@ instcli <- function(
 #' @return TRUE or FALSE.
 #' @noRd
 .bl_verb_near <- function(word) {
-  w <- tolower(gsub("[\"'?!.,\uff1f[:punct:]]+", "", word))
+  w <- .rmbl_lower(gsub("[\"'?!.,\uff1f[:punct:]]+", "", word))
   n <- nchar(w)
   # three letters too, one edit away (`dat list` was sent; CRAN stress test of
   # 0.5.14): of the words a question opens with only "are" is that near a verb
@@ -1646,6 +1568,10 @@ instcli <- function(
 #' @return One string.
 #' @noRd
 .bl_unknown_verb <- function(verb, prog) {
+  gone <- .bl_gone(verb)
+  if (!is.null(gone)) {
+    return(gone)
+  }
   v <- .bl_verb_names()
   # quotes and a trailing ? or ! around a typo are not part of it: `"doctr?"` is
   # a near miss too the first word of a command typed as one argument (`"cnfig
@@ -1658,7 +1584,10 @@ instcli <- function(
   } else {
     verb
   }
-  d <- utils::adist(tolower(gsub("[\"'?!.,\uff1f\u3000[:space:]]+", "", w)), v)
+  d <- utils::adist(
+    .rmbl_lower(gsub("[\"'?!.,\uff1f\u3000[:space:]]+", "", w)),
+    v
+  )
   near <- if (min(d) <= 2L) {
     sprintf(" (did you mean `%s %s`?)", prog, v[which.min(d)])
   } else {
@@ -1697,20 +1626,11 @@ instcli <- function(
   sprintf("usage: %s %s\n", prog, u[[verb]])
 }
 
-#' The usage lines of the verbs login to examples.
+#' The usage lines of the verbs doctor to examples.
 #' @return A named character vector.
 #' @noRd
 .bl_usage_a <- function() {
   c(
-    login = paste(
-      "login [--email ADDRESS [--code CODE]] [--no-browser]",
-      "[--accept-terms] [--name NAME]",
-      "[--affiliation ORG] [--reason TEXT] [--restricted",
-      "--supervisor-name NAME",
-      "--supervisor-role ROLE --supervisor-email ADDRESS] | login --token",
-      "  sign in for the curated tables at data.rmorie.com"
-    ),
-    logout = "logout   forget the data key",
     doctor = "doctor   report the language-model routes available here",
     models = paste0(
       "models [--route ROUTE]   the models your provider (or server) ",
@@ -1761,8 +1681,9 @@ instcli <- function(
       "to 1.0.0 (shows the changes)"
     ),
     data = paste0(
-      "data list | data pull db/table [--out FILE.csv]   curated tables ",
-      "at data.rmorie.com (your MORIE key)"
+      "data list | data pull db/table [--out FILE.csv] [--names R|asis]   ",
+      "curated tables ",
+      "at data.rmorie.com (no sign-in)"
     ),
     app = paste0(
       "app [PATH] [--port N] [--no-browser]   the analysis dashboard ",
@@ -1776,16 +1697,11 @@ instcli <- function(
       "(keys: IA_S3_ACCESS_KEY and IA_S3_SECRET_KEY, or their _FILE twins)"
     ),
     archive = paste(
-      "archive save URL... --reason TEXT [--dir D] [--private] [--also",
-      "wayback]   save from this",
-      "connection to archive.rmorie.com (your key: login), with WARC",
-      "copies in D;",
-      "archive find URL [--from YYYY] [--to YYYY] [--json]   list its",
-      "captures (URL* for a prefix);",
-      "archive get ID|URL -o FILE [--sha256 HEX] [--at YYYYMMDD]   the",
-      "exact bytes, checked;",
-      "archive push DIR [--reason TEXT] [--private] [--also wayback]",
-      "  send a capture kept in DIR on later, the same bytes"
+      "archive save URL... [--reason TEXT] [--dir D] [--also wayback]",
+      "  capture from this connection, with WARC copies in D",
+      "(--also wayback: ask the Wayback Machine too);",
+      "archive push DIR --also wayback   ask the Wayback Machine later",
+      "for the addresses of a capture kept in DIR"
     ),
     pack = .bl_usage_p()
   )
@@ -1831,7 +1747,7 @@ instcli <- function(
       "compares each manifest with its base copy, --snapshot looks up",
       "each source's latest Wayback",
       "snapshot; an XMSS index the same key signed twice, under PATH or",
-      "in --seen-log, fails its row"
+      "in --seen-log, fails its row, and a PATH holding no capsule fails"
     ),
     drift = paste(
       "drift PATH [--json] [--fail-on error|warn|drift] [--psi-warn",
@@ -1975,7 +1891,17 @@ instcli <- function(
   keep <- if (is.null(pattern)) {
     rep(TRUE, length(ns))
   } else {
-    grepl(pattern, ns) | grepl(pattern, titles, ignore.case = TRUE)
+    tryCatch(
+      suppressWarnings(
+        grepl(pattern, ns) | .rmbl_grepl_ci(pattern, titles)
+      ),
+      error = function(e) {
+        stop(
+          sprintf("'%s' is not a regular expression", pattern),
+          call. = FALSE
+        )
+      }
+    )
   }
   data.frame(
     name = ns[keep],
@@ -2127,6 +2053,25 @@ instcli <- function(
   if (tab[["failed"]] > 0L || tab[["submitted"]] > 0L) 1L else 0L
 }
 
+#' Whether the file of URLs named on the command line can be read: a file
+#' that is missing is said to be, and so is a folder, a device, a pipe or a
+#' socket (a pipe has no end: readLines() waited on it for ever).
+#' @param p The file named on the command line.
+#' @param out The function that prints.
+#' @return TRUE when `p` is a regular file.
+#' @noRd
+.bl_cli_listfile <- function(p, out) {
+  why <- if (!file.exists(p)) {
+    "no such file"
+  } else if (!identical(.rmbl_path_kind(path.expand(p)), "regular")) {
+    "not a regular file (a folder, a device, a pipe or a socket)"
+  }
+  if (!is.null(why)) {
+    out(sprintf("%s: %s\n", why, .rmbl_printable(p)))
+  }
+  is.null(why)
+}
+
 #' Runs the wayback verb.
 #'
 #' The wayback verb: every URL in a file (one per line; blank lines and #
@@ -2156,11 +2101,10 @@ instcli <- function(
     out(.bl_verb_usage("wayback", .bl_prog()))
     return(if (length(pos) == 1L) 0L else 2L)
   }
-  if (!file.exists(pos[[1L]])) {
-    out(sprintf("no such file: %s\n", pos[[1L]]))
+  if (!.bl_cli_listfile(pos[[1L]], out)) {
     return(1L)
   }
-  urls <- trimws(readLines(pos[[1L]], warn = FALSE))
+  urls <- trimws(.rmbl_rlines(pos[[1L]]))
   urls <- urls[nzchar(urls) & !startsWith(urls, "#")]
   jobs <- flag("--jobs") %||% "4"
   res <- wbsave(
@@ -2186,13 +2130,60 @@ instcli <- function(
   if (tab[["failed"]] > 0L || ns > 0L) 1L else 0L
 }
 
+#' Writes a pulled table as CSV, NaN as NaN.
+#'
+#' write.csv() writes NaN as NA: a table holding NaN came back from its CSV
+#' with NA in its place (audit of 21478080, P1). A column holding NaN is
+#' written as write.csv() writes it, with each NaN put back; the other columns
+#' and the quoting are as write.csv() gives them.
+#' @param df The table to write.
+#' @param dest The CSV file.
+#' @return NULL, invisibly.
+#' @noRd
+.bl_write_pull <- function(df, dest) {
+  nan <- vapply(df, function(v) is.numeric(v) || is.complex(v), NA)
+  nan[nan] <- vapply(df[nan], function(v) any(is.nan(v)), NA)
+  if (!any(nan)) {
+    .rmbl_wfile(dest, function(con) {
+      utils::write.csv(df, con, row.names = FALSE)
+    }, binary = FALSE)
+    return(invisible(NULL))
+  }
+  q <- which(vapply(df, function(v) is.character(v) || is.factor(v), NA))
+  for (j in which(nan)) {
+    v <- df[[j]]
+    s <- utils::capture.output(utils::write.table(
+      data.frame(v),
+      sep = ",",
+      row.names = FALSE,
+      col.names = FALSE,
+      quote = FALSE
+    ))
+    s[is.nan(v)] <- as.character(v[is.nan(v)])
+    df[[j]] <- s
+  }
+  .rmbl_wfile(dest, function(con) {
+    utils::write.csv(df, con, row.names = FALSE, quote = q)
+  }, binary = FALSE)
+  invisible(NULL)
+}
+
 #' `data pull TABLE`: one table, written to a CSV file.
 #' @param rest,flag,out As for .bl_cli_data().
 #' @return The exit status.
 #' @noRd
 .bl_cli_data_pull <- function(rest, flag, out) {
-  dest <- flag("--out") %||%
-    paste0(gsub("[^A-Za-z0-9_.-]", "_", rest[[2L]]), ".csv")
+  key <- rest[[2L]]
+  if (.bl_cli_key_refused(key, out)) {
+    return(2L)
+  }
+  # the column names as R makes them (the default), or as the table has them
+  nms <- flag("--names") %||% "R"
+  if (!nms %in% c("R", "asis")) {
+    out(sprintf("`--names` must be R or asis, not %s\n", .rmbl_printable(nms)))
+    return(2L)
+  }
+  dest <- flag("--out") %||% paste0(gsub("/", "_", key, fixed = TRUE), ".csv")
   # refuse an unwritable destination before downloading the table, not after
   dir <- dirname(dest)
   if (!dir.exists(dir) || file.access(dir, 2L) != 0L || dir.exists(dest)) {
@@ -2202,10 +2193,10 @@ instcli <- function(
     ))
     return(1L)
   }
-  df <- dload(rest[[2L]])
+  df <- dload(rest[[2L]], names = nms)
   ok <- tryCatch(
     {
-      suppressWarnings(utils::write.csv(df, dest, row.names = FALSE))
+      suppressWarnings(.bl_write_pull(df, dest))
       TRUE
     },
     error = function(e) FALSE
@@ -2221,6 +2212,38 @@ instcli <- function(
   0L
 }
 
+#' Refuses, in one line, a `data pull` key that is not db/table.
+#'
+#' Anything but db/table is refused before the table list is downloaded to
+#' look it up, and before the default file name is made from it: a key not
+#' valid in the locale, or of thousands of bytes, gave base R's errors and
+#' warnings from gsub(), nchar() and dirname() (audit of 716154bd, N6). The
+#' pattern is matched byte by byte, so no byte is read as text.
+#' @param key The key given.
+#' @param out The function that prints.
+#' @return TRUE when the key was refused.
+#' @noRd
+.bl_cli_key_refused <- function(key, out) {
+  part <- "[A-Za-z0-9][A-Za-z0-9_.-]*"
+  ok <- nchar(key, type = "bytes") <= 200L &&
+    grepl(sprintf("^%s/%s$", part, part), key, useBytes = TRUE) &&
+    !grepl("..", key, fixed = TRUE, useBytes = TRUE)
+  if (ok) {
+    return(FALSE)
+  }
+  shown <- if (validEnc(key)) {
+    .rmbl_printable(key)
+  } else {
+    iconv(key, "latin1", "ASCII", sub = "?")
+  }
+  out(sprintf(
+    "'%s' is not a table key (`%s data list` shows them)\n",
+    substr(shown, 1L, 60L),
+    .bl_prog()
+  ))
+  TRUE
+}
+
 #' The data verb: the curated tables at data.rmorie.com.
 #' @param rest The arguments after `data`: `list`, or `pull` and a table key.
 #' @param flag Looks up an option's value (here `--out`), or gives NULL.
@@ -2228,13 +2251,16 @@ instcli <- function(
 #' @return The exit status.
 #' @noRd
 .bl_cli_data <- function(rest, flag, out) {
-  sub <- if (length(rest)) rest[[1L]] else "list"
+  # no subcommand is a usage line, not a download of the table list
+  sub <- if (length(rest)) rest[[1L]] else ""
   # the positional words, without --out and its value: an extra word was
   # silently ignored
   pos <- rest
-  i <- match("--out", pos)
-  if (!is.na(i)) {
-    pos <- pos[-c(i, i + 1L)]
+  for (f in c("--out", "--names")) {
+    i <- match(f, pos)
+    if (!is.na(i)) {
+      pos <- pos[-c(i, i + 1L)]
+    }
   }
   if (
     (identical(sub, "list") && length(pos) > 1L) ||
@@ -2242,8 +2268,8 @@ instcli <- function(
   ) {
     out(sprintf(
       paste0(
-        "usage: %s data list | data pull db/table [--out FILE.csv]  (one ",
-        "table per pull)\n"
+        "usage: %s data list | data pull db/table [--out FILE.csv] ",
+        "[--names R|asis]  (one table per pull)\n"
       ),
       .bl_prog()
     ))
@@ -2253,7 +2279,7 @@ instcli <- function(
     out(.bl_format_data_tables(
       dtabs(),
       hint = sprintf(
-        "`%s data pull KEY` downloads one (your MORIE key)",
+        "`%s data pull KEY` downloads one",
         .bl_prog()
       )
     ))
@@ -2262,7 +2288,7 @@ instcli <- function(
   } else {
     out(paste0(
       sprintf("usage: %s data list | ", .bl_prog()),
-      "data pull db/table [--out FILE.csv]\n"
+      "data pull db/table [--out FILE.csv] [--names R|asis]\n"
     ))
     # asking for help is not a mistake: --help exits 0 like every other verb's
     # help
@@ -2297,7 +2323,9 @@ instcli <- function(
   } else if (!is.null(.bl_verb_usage(topic, prog))) {
     out(.bl_verb_usage(topic, prog))
   } else {
-    out(sprintf("%s: no help topic '%s' (try: %s help)\n", prog, topic, prog))
+    why <- .bl_gone(topic) %||%
+      sprintf("no help topic '%s' (try: %s help)", topic, prog)
+    out(sprintf("%s: %s\n", prog, why))
     return(2L)
   }
   0L
@@ -2335,9 +2363,7 @@ instcli <- function(
     "  models [--route R]                        models your provider ",
     "or server offers\n",
     "  bundle REQUEST...                         agentbndl() from the shell\n",
-    "\nData and functions\n",
-    "  login [--token] [--email ADDRESS]         sign in for the ",
-    "curated tables at data.rmorie.com\n"
+    "\nData and functions\n"
   )
 }
 
@@ -2347,24 +2373,20 @@ instcli <- function(
 #' @noRd
 .bl_help_verbs2 <- function(prog) {
   paste0(
-    "        [--code CODE] [--no-browser]\n",
-    "  logout                                    forget the data key\n",
     "  data list                                 curated tables at ",
     "data.rmorie.com\n",
     "  data pull db/table [--out FILE.csv]       download one of them ",
-    "(your MORIE data key)\n",
+    "(no sign-in; --names asis keeps the table's column names)\n",
     "  app [PATH] [--port N] [--no-browser]      the analysis dashboard ",
     "on this machine (needs shiny)\n",
     "  wayback FILE [--out F.jsonl] [--jobs N]   archive every URL in ",
     "FILE (archive.org keys)\n",
     "  wayback --retry F.jsonl                   retry the failed URLs ",
     "of an earlier wayback run\n",
-    "  archive save URL... --reason TEXT         save from this ",
-    "connection to archive.rmorie.com\n",
-    "  archive find URL | get ID -o FILE         list its captures; ",
-    "fetch the exact bytes, checked\n",
-    "  archive push DIR --reason TEXT            send a capture kept ",
-    "here on later\n",
+    "  archive save URL... [--dir D]             capture from this ",
+    "connection, with WARC copies\n",
+    "  archive push DIR --also wayback           ask the Wayback ",
+    "Machine later for a kept capture\n",
     "  pack DIR [--dest D] [--data FILE]         a reproducibility ",
     "bundle a reviewer double-clicks\n",
     "  pack --new DIR [--title T]                start a bundle project ",
@@ -2482,12 +2504,13 @@ instcli <- function(
       prog,
       prog
     ),
-    "5. The curated tables (data.rmorie.com) need a free MORIE data key:\n",
+    "5. The curated tables (data.rmorie.com) need no key or sign-in:\n",
     sprintf(
       paste0(
-        "     %s login                  (GitHub, or --email ADDRESS for a ",
-        "code)\n"
+        "     %s data list              (`%s data pull KEY` downloads ",
+        "one)\n"
       ),
+      prog,
       prog
     )
   )
@@ -2586,9 +2609,7 @@ instcli <- function(
     "  llmcfg(own.url = \"http://localhost:1234/v1\", own.model = \"m\")\n",
     "  llmcfg(route = NULL)                       # back to auto\n",
     "  llmmdls()\n",
-    "  llmask(\"What can a Benford screen show?\")\n",
-    "  dlogin()                                    # the data key, for ",
-    "data.rmorie.com\n\n",
+    "  llmask(\"What can a Benford screen show?\")\n\n",
     "From the shell:\n",
     "  Rscript -e 'cat(rmoriebricklayer::llmask(\"What can a Benford ",
     "screen show?\"), \"\\n\")'\n"
@@ -2599,7 +2620,8 @@ instcli <- function(
 #' @param pos The URLs.
 #' @param args The verb's arguments.
 #' @param flag,out As for .bl_cli_archive().
-#' @return The exit status.
+#' @return The exit status: 0 when every file was captured (and, with
+#'   `--also wayback`, taken by the Wayback Machine), else 1.
 #' @noRd
 .bl_cli_archive_save <- function(pos, args, flag, out) {
   also <- flag("--also")
@@ -2607,24 +2629,13 @@ instcli <- function(
     out("--also takes one value: wayback\n")
     return(2L)
   }
-  reason <- flag("--reason")
-  if (is.null(reason)) {
-    out(
-      paste0(
-        "save needs --reason \"why you keep it\" (one sentence, 20 ",
-        "characters or more)\n"
-      )
-    )
-    return(2L)
-  }
   dir <- flag("--dir") %||% file.path(getwd(), "captures")
   cap <- arccap(
     pos,
     dir,
     tsa = NULL,
-    upload = c("rmorie", if (!is.null(also)) "wayback"),
-    reason = reason,
-    visibility = if ("--private" %in% args) "private" else "public"
+    upload = also,
+    reason = flag("--reason")
   )
   d <- as.data.frame(unclass(cap))
   for (i in seq_len(nrow(d))) {
@@ -2632,57 +2643,43 @@ instcli <- function(
       "%s  %s%s\n",
       d$status[i],
       d$url[i],
-      if (!is.na(d$archive[i])) paste0("\n  ", d$archive[i]) else ""
+      if (!is.na(d$wayback[i])) paste0("\n  wayback: ", d$wayback[i]) else ""
     ))
   }
   out(sprintf("local copies and WARC files: %s\n", dir))
-  if (all(d$status == "archived")) 0L else 1L
+  .bl_cli_archive_done(d, also)
 }
 
-#' `archive push`: a capture kept here, sent on to archive.rmorie.com (and
-#' the Wayback Machine) later.
+#' Whether every file of a capture was kept, and taken by the Wayback
+#' Machine when it was asked.
+#' @param d The capture table.
+#' @param also "wayback", or NULL.
+#' @return The exit status: 0 or 1.
+#' @noRd
+.bl_cli_archive_done <- function(d, also) {
+  ok <- !startsWith(d$status, "failed")
+  if (!is.null(also)) {
+    ok <- ok & grepl("^(saved|existing)", .bl_push_na(d$wayback))
+  }
+  if (all(ok)) 0L else 1L
+}
+
+#' `archive push`: a capture kept here, sent on to the Wayback Machine later.
 #' @param pos The capture folder.
 #' @param args The verb's arguments.
 #' @param flag,out As for .bl_cli_archive().
-#' @return The exit status: 0 when every file is archived, else 1.
+#' @return The exit status: 0 when the Wayback Machine took every file, else
+#'   1.
 #' @noRd
 .bl_cli_archive_push <- function(pos, args, flag, out) {
   also <- flag("--also")
-  if (!is.null(also) && !identical(also, "wayback")) {
-    out("--also takes one value: wayback\n")
+  if (!identical(also, "wayback")) {
+    out("push needs --also wayback (where the capture goes)\n")
     return(2L)
   }
-  if (is.null(flag("--reason"))) {
-    out("push needs --reason \"why you keep it\" (20 characters or more)\n")
-    return(2L)
-  }
-  cap <- arcpush(
-    pos[[1L]],
-    upload = c("rmorie", if (!is.null(also)) "wayback"),
-    reason = flag("--reason"),
-    visibility = if ("--private" %in% args) "private" else "public",
-    tsa = NULL
-  )
+  cap <- arcpush(pos[[1L]], upload = also, tsa = NULL)
   out(paste0(paste(utils::capture.output(print(cap)), collapse = "\n"), "\n"))
-  if (all(cap$status == "archived")) 0L else 1L
-}
-
-#' `archive find`: a URL's captures, as a table or JSON.
-#' @param pos The URL.
-#' @param args The verb's arguments.
-#' @param flag,out As for .bl_cli_archive().
-#' @return The exit status.
-#' @noRd
-.bl_cli_archive_find <- function(pos, args, flag, out) {
-  f <- arcfind(pos[[1L]], from = flag("--from"), to = flag("--to"))
-  if ("--json" %in% args) {
-    d <- as.data.frame(unclass(f))
-    d$captured <- format(d$captured, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
-    out(paste0(tojs(d, dataframe = "rows", auto_unbox = TRUE), "\n"))
-  } else {
-    out(paste0(paste(utils::capture.output(print(f)), collapse = "\n"), "\n"))
-  }
-  if (nrow(f)) 0L else 1L
+  .bl_cli_archive_done(as.data.frame(unclass(cap)), also)
 }
 
 #' The words of an archive subcommand that are not options or their values.
@@ -2691,19 +2688,15 @@ instcli <- function(
 #' @noRd
 .bl_cli_archive_pos <- function(args) {
   pos <- args
-  valued <- c(
-    "--reason", "--dir", "--also", "-o", "--out", "--sha256", "--at",
-    "--from", "--to"
-  )
-  for (f in valued) {
+  for (f in c("--reason", "--dir", "--also")) {
     i <- match(f, pos)
     if (!is.na(i)) pos <- pos[-c(i, i + 1L)]
   }
-  setdiff(pos, c("--private", "--json"))
+  pos
 }
 
-#' The archive verb: archive.rmorie.com from a terminal (arccap(upload =
-#' "rmorie"), arcfind(), arcget()).
+#' The archive verb: captures kept on this computer (arccap()) and sent on to
+#' the Wayback Machine (arcpush()) from a terminal.
 #' @param rest The arguments after `archive`: the subcommand and its arguments.
 #' @param flag Looks up an option's value.
 #' @param out Writes text.
@@ -2717,34 +2710,27 @@ instcli <- function(
     out(.bl_verb_usage("archive", .bl_prog()))
     code
   }
+  if (sub %in% c("find", "get", "mine", "private", "public", "withdraw")) {
+    out(sprintf(
+      paste0(
+        "`%s archive %s` was removed in 1.1.1: nothing in the package ",
+        "uses archive.rmorie.com any more\n"
+      ),
+      .bl_prog(),
+      sub
+    ))
+    return(2L)
+  }
   if (sub %in% c("help", "--help", "-h")) {
     return(usage(0L))
   }
-  if (!sub %in% c("save", "find", "get", "push") || !length(pos)) {
+  if (!sub %in% c("save", "push") || !length(pos)) {
     return(usage(2L))
   }
   if (sub == "push") {
     return(.bl_cli_archive_push(pos, args, flag, out))
   }
-  if (sub == "save") {
-    return(.bl_cli_archive_save(pos, args, flag, out))
-  }
-  if (sub == "find") {
-    return(.bl_cli_archive_find(pos, args, flag, out))
-  }
-  dest <- flag("-o") %||% flag("--out")
-  if (is.null(dest)) {
-    out("get needs -o FILE (where to write the bytes)\n")
-    return(2L)
-  }
-  g <- arcget(pos[[1L]], dest, sha256 = flag("--sha256"), at = flag("--at"))
-  out(sprintf(
-    "%s  capture %s, SHA-256 %s\n",
-    dest,
-    attr(g, "capture_id"),
-    attr(g, "sha256")
-  ))
-  0L
+  .bl_cli_archive_save(pos, args, flag, out)
 }
 
 #' Writes one launcher of instcli().
@@ -2824,12 +2810,36 @@ instcli <- function(
         lib
       ),
       sprintf("export RMBL_PROG=%s", nm),
-      sprintf("exec Rscript --no-save --no-restore -e '%s' \"$@\"", body)
+      .bl_launcher_sh_stdout(),
+      # as inst/bin/rmbl: the shell stays (no exec) and notes a Ctrl-C, so
+      # one that ends R while it is still starting ("Execution halted",
+      # status 1), or as R quits (status 0), is reported as 130; any other
+      # failure keeps its status (audit of 21478080, L7)
+      "rc=",
+      "trap 'rc=130' INT",
+      sprintf("Rscript --no-save --no-restore -e '%s' \"$@\"", body),
+      "st=$?",
+      "[ -n \"$rc\" ] && st=130",
+      "exit $st"
     ),
     target
   )
   Sys.chmod(target, "0755")
   target
+}
+
+#' The lines of a /bin/sh launcher that stop it, status 1, when its
+#' standard output is closed: R would take descriptor 1 for a file of its
+#' own and write its output there (as inst/bin/rmbl).
+#' @return Character.
+#' @noRd
+.bl_launcher_sh_stdout <- function() {
+  c(
+    "if ! (exec 3>&1) 2>/dev/null; then",
+    "  echo \"$RMBL_PROG: standard output is closed\" >&2",
+    "  exit 1",
+    "fi"
+  )
 }
 
 #' Stops unless instcli()'s `name` is one or more command names.
@@ -2918,6 +2928,9 @@ instcli <- function(
 #' @noRd
 .bl_cli_pack <- function(rest, flag, out) {
   pos <- .bl_cli_packpos(rest)
+  # an option without its value is a usage error before anything runs:
+  # `pack . --dest` reported the folder as having no config.json (status 1)
+  for (f in .bl_pack_valued) flag(f)
   ow <- "--overwrite" %in% rest
   show <- function(x) {
     out(paste0(paste(utils::capture.output(print(x)), collapse = "\n"), "\n"))

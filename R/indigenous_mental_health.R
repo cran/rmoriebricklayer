@@ -20,9 +20,10 @@
 #'
 #' @details Each label of the statistics column is read as an estimate or as one
 #' of its measures of precision, in every form the tables use: \itemize{ \item
-#' \code{"Low 95\% confidence interval"}; \item \code{"High 95\% confidence
-#' interval, age-standardized rate"}; \item \code{"Confidence interval lower
-#' bound of count"}; \item \code{"95\% confidence interval (upper limit)"};
+#' \code{"Low 95\% confidence interval"}; \item
+#' \code{"High 95\% confidence interval, age-standardized rate"}; \item
+#' \code{"Confidence interval lower bound of count"}; \item
+#' \code{"95\% confidence interval (upper limit)"};
 #' \item \code{"95\% confidence interval lower bound, 2020"}; \item
 #' \code{"Coefficient of variation for percent"}; \item \code{"Standard error"}.
 #' } A limit that names its measure is matched to it (ignoring case and
@@ -108,7 +109,7 @@ scests <- function(x) {
   }
   sc <- cols[is_stat]
   lab <- gsub("\\s+", " ", .rmbl_utf8(trimws(as.character(x[[sc]]))))
-  low <- tolower(lab)
+  low <- .rmbl_lower(lab)
   rt <- .sce_roles(low)
   conf <- .sce_conf(low)
   dims <- setdiff(cols, sc)
@@ -489,7 +490,7 @@ plot.rmbl_dsr <- function(x, ..., main = NULL, col = NULL, palette = NULL) {
     .bl_main(main, "Age-standardised rates"),
     sprintf(
       "Rate per %s, with its gamma interval",
-      format(attr(x, "per"), big.mark = ",", scientific = FALSE)
+      .rmbl_ntxt(attr(x, "per"))
     ),
     .bl_cols(nrow(d), col, palette),
     ...
@@ -1892,10 +1893,9 @@ indiex <- function(
       (grepl("^(Statistics|Characteristics)\\b", n) && text) ||
         (text &&
           any(grepl(
-            "confidence interval|coefficient of variation|standard error",
-            v,
-            ignore.case = TRUE
-          )))
+            .rmbl_ci(paste0("confidence interval|coefficient of variation|",
+                            "standard error")),
+            v, perl = TRUE, useBytes = TRUE)))
     },
     NA
   )
@@ -1973,11 +1973,11 @@ indiex <- function(
   t <- m$target[i[1L]]
   cand <- m$ests
   if (nzchar(t)) {
-    exact <- m$ests[tolower(m$ests) == t]
+    exact <- m$ests[.rmbl_lower(m$ests) == t]
     cand <- if (length(exact)) {
       exact
     } else {
-      m$ests[grepl(t, tolower(m$ests), fixed = TRUE)]
+      m$ests[grepl(t, .rmbl_lower(m$ests), fixed = TRUE)]
     }
   }
   if (length(cand) > 1L && any(nzchar(m$uom))) {
@@ -2278,7 +2278,7 @@ indiex <- function(
 #' @return `std`, invisibly.
 #' @noRd
 .sp_check_std <- function(std) {
-  if (!length(std) || anyNA(std) || any(std < 0) || sum(std) <= 0) {
+  if (!length(std) || !all(is.finite(std)) || any(std < 0) || sum(std) <= 0) {
     stop(
       "stdprev: `std` must be non-negative counts, one per age group, ",
       "not all zero",

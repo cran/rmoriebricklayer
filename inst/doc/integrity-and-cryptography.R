@@ -417,7 +417,15 @@ state$used$generation
 # the old copy is refused: the bundles show indices it does not know are used
 blcli(
   c("sign", root, "--scheme", "xmss-sha256", "--key-file", copy, "--overwrite"),
-  out = function(s) cat(grep("stale", s, fixed = TRUE, value = TRUE))
+  # the bundle named by its capsule, not by the temporary folder
+  out = function(s) {
+    cat(sub(
+      "seen in \\S*/([^/]+/capsule_bundle[.]json)",
+      "seen in \\1",
+      grep("stale", s, fixed = TRUE, value = TRUE),
+      perl = TRUE
+    ))
+  }
 )
 xmssidxseen(root)[, c("index", "reused")]
 
@@ -512,7 +520,7 @@ for (k in 1:60) {
   honest[k] <- tm(sent$ciphertext)
   tampered[k] <- tm(bad)
 }
-plotecdf(
+plotcdfs(
   c(honest, tampered),
   rep(c("honest ciphertext", "one digit changed"), each = 60),
   main = "ML-KEM-512 decapsulation time (microseconds)"

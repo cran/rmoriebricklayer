@@ -30,7 +30,8 @@ cpschk(
 }
 \arguments{
 \item{path}{Character scalar, the folder searched recursively
-(\code{.git} and \code{.rmbl-cache} folders skipped).}
+(\code{.git} and \code{.rmbl-cache} folders skipped; links as the
+details say).}
 
 \item{mode}{\code{"verify"} (the default), \code{"drift"},
 \code{"refresh"} or \code{"report"} (the verify checks).}
@@ -40,7 +41,8 @@ cpschk(
 
 \item{pubkey}{Character scalar: the public key (hex) every bundle must be
 signed with (for an HMAC bundle, its key id), or \code{""}. Given, a
-capsule with no signed bundle fails: there is nothing the key checks.}
+capsule with no signed bundle fails: there is nothing the key checks,
+as a path holding no capsule fails.}
 
 \item{psiwarn, psifail}{Non-negative numbers, \code{psiwarn} at most
 \code{psifail}: the PSI bands, by default 0.1 and 0.25, the bands
@@ -72,7 +74,8 @@ http(s) source in the Wayback Machine first (archive.org keys, as
 \code{wbsave()} reads them).}
 
 \item{glob}{Character scalar: check only the capsule files whose path
-matches this glob (\code{*} also matches \code{/}), or \code{""}.}
+matches this glob (\code{*} also matches \code{/}), or \code{""}; at
+most 4,096 bytes.}
 
 \item{fp}{Logical: measure the footprint of the checks
 (\code{\link{co2fp}}) for the last lines of the report.}
@@ -83,13 +86,10 @@ or \code{""}. Every XMSS bundle gets an \code{xmss_index} row, failed
 when the same key signed its index with another signature in what was
 seen.}
 
-\item{archive}{Logical: use archive.rmorie.com when a source cannot be
-fetched. In \code{"drift"} and \code{"refresh"}, a source that neither
-answers nor has its pinned Wayback snapshot is fetched from a copy kept
-there with the pinned SHA-256 (public copies need no key); with
-\code{wayback = TRUE}, a changed source the Wayback Machine refuses is
-saved there instead (\code{wbsave(fallback = "rmorie")}, which needs a
-key: \code{dlogin()} or \env{MORIE_HOSTED_KEY}).}
+\item{archive}{Ignored, with a warning when \code{TRUE}: the hosted copy of
+sources it fell back to is gone. Kept so that callers written for
+earlier versions (the rmbl GitHub Action passes it) still run; use
+\code{cache} for a copy kept by an earlier run.}
 
 \item{x}{An \code{rmbl_cpschk} result.}
 
@@ -142,7 +142,25 @@ result is the worst severity among its failed rows, and \code{status} the
 worst over all capsules: \code{ok}, \code{warn}, \code{drift} or
 \code{error}. Each failed row adds a note, and one more from
 \code{\link{explerr}} where it finds what the row means or where its
-message is raised.
+message is raised. When no capsule is found under \code{path} (outside
+the skipped folders, and matching \code{glob}), nothing was checked: the
+result is one failed \code{no_capsule} row, no capsules and the status
+\code{error}, also with \code{pubkey} given.
+
+Links: a link to a folder inside \code{path} is followed, each real
+folder checked once; a link to a folder on the way down or above it (a
+loop) is not followed. A link to any other folder outside \code{path} is
+not followed, and is not passed over in silence: one
+\code{links_not_followed} row, of severity \code{warn}, names every such
+link (\code{rmbl verify --fail-on warn} exits 1 on it). A capsule
+behind one is not checked here: check that folder where it lies. It is a
+warning, not an error, because ordinary project trees hold such links
+(a project library that links each package to a cache, a shared data
+folder) beside capsules that are sound. A folder under
+\code{path} that cannot be read stops the check, named.
+
+A data file is found to read as a table, and its rows counted, as
+\code{\link{vrfcps}} does: a block of rows at a time, in bounded memory.
 
 Drift: when the fetched source's SHA-256 differs from the pin and the
 pinned data file is a CSV, \code{cpsdrft()} runs with
@@ -174,8 +192,9 @@ Side effects: \code{"drift"} and \code{"refresh"} fetch each source
 (the network for http(s) ones), as \code{snapshot = TRUE} asks the
 Wayback Machine once per capsule (\code{\link{wbsnpurl}});
 \code{"refresh"} writes the capsules; a cache folder is written to.
-Errors: \code{path} is not a directory; a bad argument. A capsule whose
-checks stop is one failed row, not an error.
+Errors: \code{path} is not a directory; a bad argument; a folder under
+\code{path} that cannot be read. A capsule whose checks stop is one
+failed row, not an error.
 }
 \examples{
 \dontshow{if (isTRUE(getOption("rmbl.examples"))) withAutoprint(\{ # examplesIf}

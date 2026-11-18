@@ -379,13 +379,14 @@ test_that("masked = FALSE and the session option give the same signatures", {
   expect_error(kemdecap(k, c$ciphertext), "masked")
 })
 
-# ---- D6: the services fallback points at the www host with its trailing
-# slashes ---
+# ---- D6: the services fallback points at an address that exists, with its
+# trailing slash (the www pages it named are gone; 1.1.1) ---
 
-test_that("the offline services fallback uses the www host", {
+test_that("the offline services fallback points at data.rmorie.com", {
   svc <- .rmbl_services_off()
-  expect_identical(svc$llm$request_access, "https://www.rmorie.com/access/")
-  expect_identical(svc$data$license, "https://www.rmorie.com/data-license/")
+  expect_identical(svc$llm$request_access, "https://data.rmorie.com/")
+  expect_identical(svc$data$license, "https://data.rmorie.com/")
+  expect_identical(svc$data$request_access, "https://data.rmorie.com/")
 })
 
 # ---- D7: the two-part hash entry refuses a non-integer split -----------------
@@ -417,7 +418,7 @@ test_that("yoypdf keeps every row on the page whatever the height", {
     area = rep(sprintf("a%02d", 1:60), 2),
     n = c(rep(10, 60), 8:67)
   )
-  y <- yoy(seg, value = "n", prd = "year", by = "area")
+  y <- yoychg(seg, value = "n", prd = "year", by = "area")
   f <- tempfile(fileext = ".pdf")
   on.exit(unlink(f))
   yoypdf(y, f, height = 14)

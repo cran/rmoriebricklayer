@@ -568,6 +568,7 @@ clncolnms <- function(
   quiet <- .rmbl_flag1(quiet, "quiet")
   .cln_data(data)
   nms <- if (is.data.frame(data)) names(data) else as.character(data)
+  .rmbl_valid_text(nms, "data")
   if (length(nms) == 0L) {
     if (is.data.frame(data)) {
       return(data)
@@ -651,7 +652,8 @@ clncolnms <- function(
   if (length(w) == 0L) {
     return(character(0))
   }
-  paste0(toupper(substring(w, 1L, 1L)), tolower(substring(w, 2L)))
+  paste0(toupper(.rmbl_upper(substring(w, 1L, 1L))),
+         tolower(.rmbl_lower(substring(w, 2L))))
 }
 
 #' The vector freqtbl() tabulates: `data` itself or its column `col`.
@@ -660,7 +662,7 @@ clncolnms <- function(
 #' @noRd
 .rmbl_freq_values <- function(data, col) {
   if (!is.data.frame(data)) {
-    return(data)
+    return(.rmbl_valid_text(data, "data"))
   }
   if (is.null(col)) {
     stop("`col` is required when `data` is a data frame", call. = FALSE)
@@ -725,10 +727,10 @@ clncolnms <- function(
 .rmbl_case_words <- function(w, case, sep) {
   switch(
     case,
-    snake = paste(tolower(w), collapse = sep),
-    screaming_snake = paste(toupper(w), collapse = sep),
+    snake = paste(tolower(.rmbl_lower(w)), collapse = sep),
+    screaming_snake = paste(toupper(.rmbl_upper(w)), collapse = sep),
     lower_camel = paste0(
-      tolower(w[1L]),
+      tolower(.rmbl_lower(w[1L])),
       paste(.rmbl_capitalise(w[-1L]), collapse = "")
     ),
     upper_camel = paste(.rmbl_capitalise(w), collapse = ""),

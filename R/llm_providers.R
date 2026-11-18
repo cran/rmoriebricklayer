@@ -240,7 +240,7 @@
 #' @param id The provider id.
 #' @return The variable name.
 #' @noRd
-.bl_preset_model_env <- function(id) paste0("MORIE_", toupper(id), "_MODEL")
+.bl_preset_model_env <- function(id) paste0("MORIE_", .rmbl_upper(id), "_MODEL")
 
 #' Finds a provider's key.
 #'
@@ -436,6 +436,10 @@
     )
   })
   txt <- msg$content
+  # text, parts or nothing: a number is not a reply in this format
+  if (!is.null(txt) && !is.character(txt) && !is.list(txt)) {
+    stop("content is not text")
+  }
   list(
     text = if (is.character(txt)) paste(txt, collapse = "\n") else "",
     tool_calls = calls,
@@ -570,7 +574,7 @@
     return(s)
   }
   if (is.character(s$type)) {
-    s$type <- toupper(s$type)
+    s$type <- .rmbl_upper(s$type)
   }
   if (is.list(s$properties)) {
     s$properties <- lapply(s$properties, .bl_gemini_schema)
@@ -759,11 +763,26 @@
 #' @return A list with `text`, `tool_calls` and `finish`.
 #' @noRd
 .bl_llm_parse <- function(rt, json) {
-  switch(
-    rt$api %||% "openai",
-    anthropic = .bl_anthropic_parse(json),
-    gemini = .bl_gemini_parse(json),
-    .bl_openai_parse(json)
+  api <- rt$api %||% "openai"
+  tryCatch(
+    switch(
+      api,
+      anthropic = .bl_anthropic_parse(json),
+      gemini = .bl_gemini_parse(json),
+      .bl_openai_parse(json)
+    ),
+    error = function(e) {
+      stop(
+        sprintf(
+          paste0(
+            "the model's server answered, but not with a reply in the %s ",
+            "format (a member has the wrong type)"
+          ),
+          api
+        ),
+        call. = FALSE
+      )
+    }
   )
 }
 

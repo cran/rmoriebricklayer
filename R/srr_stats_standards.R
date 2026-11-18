@@ -37,7 +37,8 @@
 #' @srrstats {G5.11a} skip_if_no_internet()/online_now() skip with a message
 #'   ("no internet", "no network") when a download fails.
 #' @srrstats {EA1.3} Every export's @param gives the accepted input type (for
-#'   example yoy x: data frame, numeric vector or ts; ginicoef x: non-negative
+#'   example yoychg x: data frame, numeric vector or ts; ginicoef x:
+#'   non-negative
 #'   numeric vector).
 #' @srrstats {EA6.0} 159 testthat files check return values: classes,
 #'   dimensions, names and numeric values against reference computations.
@@ -73,9 +74,10 @@ NULL
 #'
 #' @srrstatsNA {G1.5} No associated publication is cited in inst/CITATION.
 #'   README's OTIS recomputation ships as the bundle example
-#' (inst/bundle/otis-mrp/). @srrstatsNA {G2.14c} Imputation
-#' is deliberately excluded: published tables'
-#'   suppressed cells are never imputed (comment at top of R/indigenous.R).
+#'   (inst/bundle/otis-mrp/).
+#' @srrstatsNA {G2.14c} Imputation is deliberately excluded: the suppressed
+#'   cells of published tables are never imputed (comment at top of
+#'   R/indigenous.R).
 #' @srrstatsNA {EA2.0} The package does no extensive table filtering or joining;
 #'   its only internal merge fills missing periods into one user table.
 #' @srrstatsNA {EA2.1} No index-column system, because no multi-table joins
@@ -94,7 +96,7 @@ NULL
 #'   (inst/drift/drift.js, no library), and drftapp() uses shiny from Suggests.
 #' @srrstatsNA {TS1.0} Series are short published tables keyed by period columns
 #'   (fiscal years, dates), not regular ts objects; plain vectors and data
-#'   frames are deliberate, and yoy() also accepts ts.
+#'   frames are deliberate, and yoychg() also accepts ts.
 #' @srrstatsNA {TS1.7} Inputs are dimensionless counts or periods and days the
 #'   user sets; there is no physical-unit arithmetic for the units package to
 #'   protect.

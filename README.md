@@ -15,43 +15,60 @@
 
 ## What it is
 
-`rmoriebricklayer` is for individuals who work from a variety of published and unpublished tables: a
-ministry's open-data portal, Statistics Canada, a police oversight agency, or your own data. It
-does three things with such a table.
+`rmoriebricklayer` is for anyone whose analysis depends on data, from any field: any file or
+dataset an analysis reads, whether CSV and other tables, spreadsheets, survey microdata, model
+outputs, or documents and archives captured as sources, and whether it comes from a ministry's
+open-data portal, Statistics Canada, a police oversight agency, a research archive or your own
+work. It does four things with that data.
 
-1. **It analyzes the table.** `anltab()` takes counts by period and group and reports what changed
-   between periods, with exact intervals, trends and rates, and says how far the publisher's
-   rounding and suppressed cells could move each figure.
-2. **It pins the data the result came from.** A *capsule* records where the table came from, the
-   SHA-256 digest of the exact file, the columns and values it should have, and the address of an
-   archived copy. Rerun later, `rmbl verify` says whether the source still matches, and
+1. **It analyzes published tables.** `anytab()` takes counts by period and group and reports what
+   changed between periods, with exact intervals, trends and rates, and says how far the
+   publisher's rounding and suppressed cells could move each figure.
+2. **It pins the data the result came from.** A *capsule* records where each source came from,
+   the SHA-256 digest of the exact file, the columns and values it should have, and the address
+   of an archived copy. Rerun later, `rmbl verify` says whether the source still matches, and
    `rmbl drift` says, column by column, what moved if it does not.
 3. **It signs the record.** A capsule can be signed (with a shared key, or with the post-quantum
    signature standards), so a reader can check who produced a result and that nothing changed
    afterwards.
+4. **It estimates what a policy changed.** From a panel of such tables, `plndid()`, `stgatt()`,
+   `syndid()`, `plndml()` and the functions around them give difference-in-differences,
+   staggered-adoption, synthetic-control and double machine learning estimates with their
+   diagnostics; `vignette("statistical-methods")` and `vignette("statistical-methods")` work through them.
 
-The rest of the package (the statistics for administrative tables, the plots, the dashboard, the
-cryptography written from the standards) serves one of these three.
+The rest of the package serves one of these four: the statistics for published administrative
+tables and for survey microdata, the drift and schema checks, the archived copies an analysis
+falls back on, signing and verification written from the standards, the plots and the dashboard,
+reproducibility bundles, the command line (`rmbl`) and the GitHub Action that checks capsules on
+every change.
 
 ## Why it exists
 
-I analyze Canadian justice and health statistics from published tables. Three things kept
-going wrong, and a checksum alone catches none of them.
+Data an analysis depends on can change or vanish without anyone noticing, and a checksum alone
+catches few of the ways it does. Four come up again and again.
 
-- **Sources go down or move.** The federal open-data portal, `open.canada.ca`, was unreachable in
+- **Sources go down or move.** A portal goes offline, a file moves to a new address or is
+  replaced. For example, the federal open-data portal, `open.canada.ca`, was unreachable in
   October 2026 while analyses depended on it. A capsule keeps the address of an archived copy of
   every source in the Internet Archive, so the analysis still runs, and it says that it used the
   archived copy.
-- **The same table comes back different.** A re-released extract can hold the same numbers in a
-  different byte layout, or keep a column's name and type while the column has been rescaled. The
-  drift checks compare distributions, not bytes.
-- **Labels end up on the wrong groups.** In 2020 the Ontario Human Rights Commission reported
-  Black people in Toronto as 30 to 58 times as likely as White people to face police use of
-  force; its 2023 correction gives 4 to 5 times, because four race codes had been rotated between
-  two statistical programs. The package relabels only by a named map, never by position, and can
-  say which rotation reproduces a set of published ratios (`vignette("describing-data-and-tables")`).
+- **The same data comes back different.** A re-release can hold the same values in a different
+  byte layout, or keep a column's name and type while its values change meaning. For example, an
+  extract can keep a column called `count` while the column has been rescaled. The drift checks
+  compare distributions, not bytes, and the schema checks compare names, types and value sets.
+- **Labels end up on the wrong groups.** Codes are matched to labels by position, and one shift
+  moves every figure onto another group. For example, in 2020 the Ontario Human Rights Commission
+  reported Black people in Toronto as 30 to 58 times as likely as White people to face police use
+  of force; its 2023 correction gives 4 to 5 times, because four race codes had been rotated
+  between two statistical programs. The package relabels only by a named map, never by position,
+  and can say which rotation reproduces a set of published ratios
+  (`vignette("describing-data-and-tables")`).
+- **A result cannot be checked later.** A figure in a report rarely says which bytes it came from
+  or whether anything changed after it was computed. A capsule records that, can be signed and
+  timestamped, and runs again on a reader's machine (`rmbl verify`), or as a reproducibility
+  bundle a reviewer opens with nothing but R.
 
-## How I use it
+## An example
 
 A table of people in Ontario's adult correctional institutions (OTIS, shipped with the package),
 analyzed, plotted and written up:
@@ -60,7 +77,7 @@ analyzed, plotted and written up:
 library(rmoriebricklayer)
 f <- system.file("extdata", "otis_a01_individuals.csv", package = "rmoriebricklayer")
 otis <- read.csv(f)
-a <- anltab(otis, value = "individuals", prd = "year", by = c("table", "group"), rnd = 5)
+a <- anytab(otis, value = "individuals", prd = "year", by = c("table", "group"), rnd = 5)
 a                                              # what changed, how sure, what was withheld
 plot(a)
 rptanl(a, file.path(tempdir(), "otis.html"))   # one self-contained page
@@ -88,7 +105,7 @@ A capsule does this for every source of an analysis at once; `usecpstmpl()` star
 
 ## What it does
 
-- **One call for a published table** — `anltab()` takes a table of
+- **One call for a published table** — `anytab()` takes a table of
   counts by period and group and returns what changed with exact intervals,
   p-values adjusted over the whole scan, the envelope that rounding and
   suppression in the release imply (`pubbnd()`), trend, rates if
@@ -109,8 +126,8 @@ A capsule does this for every source of an analysis at once; `usecpstmpl()` star
 - **Distributions and plots** — `dstfit()` fits and ranks candidate distributions by maximum
   likelihood (continuous, proportions and counts with zero inflation), with bootstrap intervals,
   a Hill tail index and density, QQ, PP and tail plots; `mksyncol(list(type = "fitted"))` draws
-  from a fit. `plotrdg()`, `plotecdf()`, `plotvln()`, `plothex()`, `plotgain()`, `plotcal()`,
-  `plothrz()`, `plotsm()` and `plotbump()` draw distributions and many series in the house style;
+  from a fit. `plotrdg()`, `plotcdfs()`, `plotvln()`, `plothex()`, `plotgain()`, `plotcal()`,
+  `plothrz()`, `plotmult()` and `plotbump()` draw distributions and many series in the house style;
   `plothwk()` and `chwksim()` show and simulate a fitted Hawkes process.
 - **Proof ledgers** — `ldgrread()` reads a ledger of formal proofs (Lean theorems, their status
   and the package functions they cover) against `schemapath("ledger")`; `ldgrchk()` checks each
@@ -201,7 +218,7 @@ A capsule does this for every source of an analysis at once; `usecpstmpl()` star
   published table. `ratechg()` gives the change in a rate between
   periods, conditioning on the two counts and correcting for the exposure
   ratio rather than treating two rates as measured numbers.
-- **Change tables** — `yoy()` computes period-over-period change matched on
+- **Change tables** — `yoychg()` computes period-over-period change matched on
   the period's own value rather than on row order, so a missing year is a
   gap instead of a quietly multi-year comparison. A percent off a small
   base is withheld with its reason; a column already in percent is
@@ -284,21 +301,15 @@ A capsule does this for every source of an analysis at once; `usecpstmpl()` star
   polled, not sent again), `wbrtry()` for the failures, and a live
   animated progress bar (drawn in C, shared with `bldl()`).
 - **Your own archive copy** — `arccap()` saves files from your own
-  connection (for servers that refuse the Wayback Machine) as WARC files,
-  and with `upload = "rmorie"` keeps them at archive.rmorie.com with their
-  SHA-256 (`upload = "wayback"` asks the Wayback Machine too). `arcfind()`
-  lists the captures of an address and `arcget()` fetches the exact bytes;
-  `fetchvrf()` falls back to the archive and to your WARC files on its own,
-  and `wbsave(fallback = "rmorie")` saves what the Wayback Machine refused.
+  connection (for servers that refuse the Wayback Machine) with their
+  SHA-256, a timestamped manifest and WARC files that pywb and warcio read;
+  with `item` it publishes them as an archive.org item, and
+  `upload = "wayback"` asks the Wayback Machine too. `fetchvrf()` falls back
+  to the item and to your WARC files on its own.
   When an archive is down, the capture is still whole on your computer:
   `arcpush()` sends those same files on later (checked against their
   SHA-256, never downloaded again), and running it again retries only what
-  failed. From a terminal: `rmbl archive save | push | find | get`. In CI, `cpschk(archive = TRUE)`
-  (the rmbl action's `archive: true`) takes the archived copy when a source and
-  its Wayback snapshot are down. Reading a public copy needs no key; saving needs
-  one, except in a GitHub Actions job allowed `id-token: write`, where the
-  package uses the job's short-lived OIDC token and the repository is the saver,
-  so no secret is stored.
+  failed. From a terminal: `rmbl archive save | push`.
 - **Courts and police-reported crime** — `caseflow()` (clearance rate with
   exact intervals, rolling clearance, net flow and months to clear the
   pending inventory), `lifetbl()` (actuarial life table with Greenwood
@@ -454,12 +465,11 @@ A capsule does this for every source of an analysis at once; `usecpstmpl()` star
   base64 and base64url codecs beside it.
 - **Curated tables** — `dtabs()` lists the tables served
   at data.rmorie.com (Google BigQuery public datasets and the survey, court
-  and justice data the MORIE ledger uses), and `dload("db/table")` opens one with your
-  MORIE key (`rmoriebricklayer login` signs in with GitHub or an emailed
-  code; or ask at `www.rmorie.com/access/`), under the terms at
-  `www.rmorie.com/data-license/`, cached locally. The ICPSR, NCVS
-  38604 and a2aj tables open once you accept their terms at
-  `data.rmorie.com/terms`. `blfetch()` downloads any URL with an Internet Archive
+  and justice data the MORIE ledger uses), and `dload("db/table")` opens one,
+  with no sign-in, checked against the SHA-256 its manifest lists and cached
+  locally; each table keeps its source's licence. The ICPSR studies (the NCVS
+  38604 extract among them) are not served: ICPSR's terms do not allow it, so
+  `dtabs()` leaves them out and `dload()` points to ICPSR before any request. `blfetch()` downloads any URL with an Internet Archive
   fallback (libcurl).
 
 ## Security posture
@@ -623,14 +633,14 @@ expected against observed for every reported number. `mkbndlproj()`
 starts a project of your own:
 
 ```r
-p <- mkbndlproj(file.path(tempdir(), "my-study"), title = "My study")
+p <- mkbndlproj(file.path(tempdir(), "a-study"), title = "A study")
 # the reviewer's copy finds or downloads the data, or runs on synthetic data
 b <- mkbndl(p$dir, dest = tempdir(), overwrite = TRUE)
 # before shipping, run it as a reviewer will and check its counts
 mkbndlchk(b$path, synthetic = TRUE)
 # or carry the data inside, to run offline
 dat <- data.frame(group = rep(c("a", "b"), 50), value = rep(c(4, 6), 50))
-csv <- file.path(tempdir(), "my_data.csv")
+csv <- file.path(tempdir(), "study_data.csv")
 utils::write.csv(dat, csv, row.names = FALSE)
 mkbndl(p$dir, dest = tempdir(), data = csv, overwrite = TRUE)
 # the OTIS example above
@@ -654,7 +664,7 @@ against the `survey` package's `svymean()`, `svytotal()`, `svyratio()`,
 p-values; the Hawkes-process fits (`chwkfit()`) against the reference fits of
 MORIE's Python package, which uses the same C++ core; and the hashes and
 signatures against `digest`, `openssl` and published test vectors (see
-Verification above). Others are, as far as we know, new in R: the bounds
+Verification above). Others have, to the package authors' knowledge, no earlier implementation in R: the bounds
 that a release's rounding and suppression imply for its cells (`pubbnd()`)
 and the reproducible data capsules with signed manifests.
 
@@ -741,7 +751,7 @@ The shortest path, on the OTIS table that ships with the package:
 library(rmoriebricklayer)
 otis <- read.csv(system.file("extdata", "otis_a01_individuals.csv",
                              package = "rmoriebricklayer"))
-a <- anltab(otis, value = "individuals", prd = "year",
+a <- anytab(otis, value = "individuals", prd = "year",
             by = c("table", "group"), rnd = 5)
 a                                   # what changed, how sure, what was withheld
 rptanl(a, file.path(tempdir(), "otis.html"))   # one self-contained file
@@ -794,7 +804,7 @@ df     <- read.csv(path)
 issues <- valsch(df, prov)             # names, types, value sets, rows
 
 # 4. The manifest: named cross-checks, then the two capsule artifacts.
-man <- mkmnf(list(project = "my-study", synthetic = TRUE))
+man <- mkmnf(list(project = "a-study", synthetic = TRUE))
 man <- recrd(man, "rows", obs = nrow(df), expd = gen$rows, syn = TRUE)
 wrmnfjs(man, file.path(tempdir(), "manifest.json"))
 wrsmrytxt(man, tempdir(),
@@ -863,7 +873,7 @@ See `vignette("capsules-and-provenance")` for the distributional checks and
 
 ## Finding a function
 
-The names are short (`anltab()`, `mkbndl()`, `svyest()`), so look for a
+The names are short (`anytab()`, `mkbndl()`, `svyest()`), so look for a
 function by what it does:
 
 ```r
@@ -924,7 +934,7 @@ library(rmoriebricklayer)
 llmprvd()   # the providers, their addresses and key variables
 llmstat()      # which route would answer from this machine, and why
 Sys.setenv(ANTHROPIC_API_KEY = "...")    # or llmcfg(anthropic.key = "...")
-llmask("How do I estimate a weighted proportion with bootstrap replicate weights?")
+llmask("How is a weighted proportion estimated with bootstrap replicate weights?")
 llmask("The same question, on the local model.", route = "ollama")
 llmmdls(route = "anthropic")   # the models that route offers; attr(, "default")
 ```
@@ -941,7 +951,7 @@ llmcfg()                                        # every setting, its value and s
 llmcfg(route = "anthropic")                     # always this provider
 llmcfg(anthropic.model = "claude-opus-5-5")     # its model
 llmcfg(ollama.url = "http://192.168.1.20:11434", ollama.model = "qwen3:8b")
-llmcfg(own.url = "http://localhost:1234/v1", own.model = "my-model", own.key = "sk-...")
+llmcfg(own.url = "http://localhost:1234/v1", own.model = "a-model", own.key = "sk-...")
 llmcfg(route = NULL)                            # back to the automatic order
 ```
 
@@ -955,8 +965,7 @@ llmcfg(route = NULL)                            # back to the automatic order
 With `route = "auto"`, a local Ollama server that has no model pulled is
 passed over.
 
-Signing in (`dlogin()`, `rmbl login`) is for the curated tables
-at data.rmorie.com only; it is never a language model.
+The curated tables at data.rmorie.com need no key and no sign-in.
 
 The same verbs exist on the command line once the launcher is on your
 `PATH`:
@@ -980,21 +989,15 @@ rmoriebricklayer config unset route             # back to the automatic order
 rmoriebricklayer config reset --force           # move an unreadable settings file aside
 rmoriebricklayer explain-error "the error text" # where an error comes from, no model needed
 rmoriebricklayer models --route ollama          # the models a route offers, the one in use marked
-rmoriebricklayer login --token                  # the data key: paste the key you were issued
-rmoriebricklayer login --email you@example.com  # or: a code is emailed, type it at the prompt
-rmoriebricklayer login --email you@example.com --code 123456   # the same, code passed (scripts)
-rmoriebricklayer login                          # or: GitHub device flow
-rmoriebricklayer login --no-browser             # server / SSH: prints a link + code for any device
-rmoriebricklayer logout                         # forget the data key
 rmoriebricklayer data list                      # the curated tables at data.rmorie.com
-rmoriebricklayer data pull db/table --out t.csv # download one (your MORIE key)
+rmoriebricklayer data pull db/table --out t.csv # download one
 rmoriebricklayer app [PATH]                     # the analysis dashboard (needs shiny)
 rmoriebricklayer wayback urls.txt --out w.jsonl # archive every URL in a file (archive.org keys)
 rmoriebricklayer wayback --retry w.jsonl        # retry the ones that failed
-rmoriebricklayer archive save URL --reason TEXT # save from this connection to archive.rmorie.com
-rmoriebricklayer archive find URL               # its captures; archive get ID -o FILE fetches one
-rmoriebricklayer pack --new my-study            # start a reproducibility bundle project (mkbndlproj())
-rmoriebricklayer pack my-study --data data.csv  # its zip, data inside; a reviewer double-clicks it (mkbndl())
+rmoriebricklayer archive save URL --also wayback  # capture from this connection (WARC), ask the Wayback Machine
+rmoriebricklayer archive push captures --also wayback  # ask the Wayback Machine later for a kept capture
+rmoriebricklayer pack --new a-study             # start a reproducibility bundle project (mkbndlproj())
+rmoriebricklayer pack a-study --data data.csv   # its zip, data inside; a reviewer double-clicks it (mkbndl())
 rmoriebricklayer bundle "your request"          # agentbndl() from the shell
 rmoriebricklayer verify capsules --fail-on warn # every capsule under a folder, as the rmbl GitHub Action checks it
 rmoriebricklayer verify capsules --json         # the check rows as JSON (hmac secret: RMBL_KEY)
@@ -1021,8 +1024,7 @@ rmbl config setup
 rmbl ask "your question"
 rmbl aye "your question"
 rmbl tellme "your question"
-rmbl "how do I weight a survey?"               # a quoted question with no verb is asked too
-rmbl login --token
+rmbl "how is a survey weighted?"                # a quoted question with no verb is asked too
 rmbl models
 ```
 
@@ -1046,20 +1048,20 @@ Waakebiness-Bryce Institute for Indigenous Health at the University of
 Toronto's Dalla Lana School of Public Health, and Professor Angela
 Mashford-Pringle (Timiskaming First Nation), its Associate Director. Their
 research made it possible to bring their frameworks into this library as
-estimators. Any error in that translation is ours.
+estimators. Any error in that translation is the package's, not theirs.
 
 ## Citation
 
 If you use rmoriebricklayer in your research, please cite the software:
 
-> Ruhela, V. S. (2026). *rmoriebricklayer: Reproducible Data Capsules with Provenance and Fallback.* R package version 1.1.0. doi:10.32614/CRAN.package.rmoriebricklayer. https://CRAN.R-project.org/package=rmoriebricklayer
+> Ruhela, V. S. (2026). *rmoriebricklayer: Reproducible Data Capsules with Provenance.* R package version 1.1.1. doi:10.32614/CRAN.package.rmoriebricklayer. https://CRAN.R-project.org/package=rmoriebricklayer
 
 BibTeX (or run `citation("rmoriebricklayer")` after installation for the entry
 stamped with the exact installed version, sourced from `inst/CITATION`):
 
 ```bibtex
 @Manual{ruhela_rmoriebricklayer_2026,
-  title  = {rmoriebricklayer: Reproducible Data Capsules with Provenance and Fallback},
+  title  = {rmoriebricklayer: Reproducible Data Capsules with Provenance},
   author = {Ruhela, Vansh Singh},
   year   = {2026},
   doi    = {10.32614/CRAN.package.rmoriebricklayer},

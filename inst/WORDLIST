@@ -140,7 +140,6 @@ CAVP
 cb
 CBD
 cdot
-CDX
 CDXJ
 Centre
 centre
@@ -286,6 +285,7 @@ deux
 devtools
 df
 DGUID
+difftime
 diffusivities
 DigestInfo
 Dijk
@@ -374,6 +374,7 @@ fnigc
 FO
 FORS
 FP
+fromjs
 fromJSON
 FTCS
 Fujisaki
@@ -473,6 +474,7 @@ IANA
 ias
 iconv
 ICPSR
+ICPSR's
 iD
 ideation
 ideographic
@@ -970,6 +972,7 @@ Shor's
 SHS
 sigGen
 SIGINT
+SIGPIPE
 sigVer
 SIMD
 simplifier's
@@ -1067,6 +1070,7 @@ Townsley
 TP
 TPS
 tps
+traceback
 Transcultural
 trc
 Tremblay
@@ -1187,6 +1191,7 @@ yajl
 Yellowhead
 Yellowknives
 yoy
+yoychg
 Zemor
 Zhao
 zlib
@@ -1239,3 +1244,16 @@ subreaper
 webhook
 systemd
 withr
+aer
+ectj
+café
+lz
+zstd
+FFFF
+LPT
+PRN
+xmssidxseen
+caseless
+SIGKILL
+SIGTERM
+EOF

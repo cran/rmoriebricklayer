@@ -65,127 +65,6 @@ test_that(
 # ---- G2, G3: a stored key is bound to an address; a new token is checked at
 # the document's ----
 
-test_that(
-  paste0(
-    "G2: with the model tier off, a key saved for another address is not ",
-    "sent to the data service"
-  ),
-  {
-    withr::local_envvar(
-      XDG_CONFIG_HOME = withr::local_tempdir(),
-      MORIE_HOSTED_BASE_URL = NA,
-      MORIE_DATA_URL = NA,
-      MORIE_HOSTED_KEY = NA
-    )
-    p <- ns(".bl_credentials_path")()
-    dir.create(dirname(p), recursive = TRUE, showWarnings = FALSE)
-    writeLines(
-      paste0(
-        '{"hosted_key": "sk-other", "hosted_base_url": ',
-        '"https://gw.company.example"}'
-      ),
-      p
-    )
-    st <- ns(".bl_hosted_key_state")()
-    expect_identical(st$state, "other_address")
-    expect_null(st$key)
-    expect_null(ns(".bl_data_key")())
-    # saved for the data address (what a new login writes): used
-    writeLines(
-      sprintf(
-        '{"hosted_key": "sk-data", "hosted_base_url": "%s"}',
-        ns(".bl_key_address")()
-      ),
-      p
-    )
-    expect_identical(ns(".bl_hosted_key_state")()$state, "ok")
-    # and a new login records that address
-    ns(".bl_store_key")("sk-new", "someone")
-    cred <- ns(".bl_read_credentials")()
-    expect_identical(
-      sub("/+$", "", cred$hosted_base_url),
-      ns(".bl_key_address")()
-    )
-    expect_match(cred$hosted_base_url, "^https://")
-  }
-)
-
-test_that(
-  paste0(
-    "G2 note: a key a pre-0.5.12 login saved for llm.rmorie.com goes to the ",
-    "data address, nowhere else"
-  ),
-  {
-    withr::local_envvar(
-      XDG_CONFIG_HOME = withr::local_tempdir(),
-      MORIE_HOSTED_BASE_URL = NA,
-      MORIE_DATA_URL = NA,
-      MORIE_HOSTED_KEY = NA
-    )
-    p <- ns(".bl_credentials_path")()
-    dir.create(dirname(p), recursive = TRUE, showWarnings = FALSE)
-    for (u in c("https://llm.rmorie.com", "https://llm.rmorie.com/")) {
-      writeLines(
-        sprintf('{"hosted_key": "sk-old", "hosted_base_url": "%s"}', u),
-        p
-      )
-      st <- ns(".bl_hosted_key_state")()
-      expect_identical(st$state, "ok", info = u)
-      expect_identical(st$key, "sk-old", info = u)
-    }
-    # only that exact address: a look-alike stays bound to itself
-    for (u in c(
-      "https://llm.rmorie.com.evil.example",
-      "http://llm.rmorie.com",
-      "https://llm2.rmorie.com"
-    )) {
-      writeLines(
-        sprintf('{"hosted_key": "sk-old", "hosted_base_url": "%s"}', u),
-        p
-      )
-      expect_identical(
-        ns(".bl_hosted_key_state")()$state,
-        "other_address",
-        info = u
-      )
-    }
-    # and only toward the signed document's data address: with the key address
-    # moved elsewhere it is held back
-    writeLines(
-      '{"hosted_key": "sk-old", "hosted_base_url": "https://llm.rmorie.com"}',
-      p
-    )
-    local_mocked_bindings(
-      .bl_key_address = function() "https://gw.company.example",
-      .package = "rmoriebricklayer"
-    )
-    expect_identical(ns(".bl_hosted_key_state")()$state, "other_address")
-  }
-)
-
-test_that(
-  paste0(
-    "G3: `login --token` checks the key at the signed document's data ",
-    "address, never MORIE_DATA_URL"
-  ),
-  {
-    rec <- new.env()
-    rec$seen <- character()
-    local_mocked_bindings(.bl_http_get = function(url, timeout, headers) {
-      rec$seen <- c(rec$seen, url)
-      list(status = 200L, body = charToRaw("{}"), error = "")
-    })
-    withr::local_envvar(MORIE_DATA_URL = "https://data2.stub.example")
-    expect_true(ns(".bl_check_token")("sk-under-test"))
-    expect_length(rec$seen, 1L)
-    expect_false(grepl("data2.stub.example", rec$seen))
-    expect_true(startsWith(
-      rec$seen,
-      sub("/+$", "", ns(".rmbl_services_data")()$base_url)
-    ))
-  }
-)
-
 # ---- G4, F3: the answer cache ------------------------------------------------
 
 test_that(
@@ -914,7 +793,7 @@ test_that(
     d2 <- data.frame(a = 1:6, b = 1:6)
     names(d2) <- c("a", "a")
     expect_error(svydes(d2, w = "a"), "two columns named a")
-    expect_error(anltab(d2, value = "a", prd = "a"), "two columns named a")
+    expect_error(anytab(d2, value = "a", prd = "a"), "two columns named a")
   }
 )
 
@@ -930,23 +809,43 @@ test_that("the CSV reader gives read.csv's table, byte for byte of meaning", {
   same("a,b\n1,NA\n\"NA\",2\nNA,\n")
   same("a b,c-d,1x\n1,2,3\n")
   same("a,a,b\n1,2,3\n")
-  same("id,text\n07035394,\"0001\"\n2,x\n")
   same("a,b\n1.5,1e3\n2,1e400\n")
   same("a,b\n1,2\n3\n")
   same("a,b\n")
   same("x\n1\n2")
   same("a,b\n\"\",\"\"\n")
   same("a,b,c\nTRUE,1,T\n1,TRUE,F\n")
-  same("a,b,c,d\n2147483647,2147483648,-2147483648,+5\n1,2,3,05\n")
-  same("a,b,c\n1e3,0x10,Inf\n2.,.5,-inf\n")
-  same("a,b\n 1,1 \n2,2\n")
   same("a,b\n,\n,\n")
   same("a,b\n1,\n2,\n")
   same("a\n1d5\n2\n")
   same("a,b\n1,2\n3,4.5\n")
-  same("a\n12345678901234567890\n1\n")
   same("a,b\nT,F\ntrue,False\n")
   same("a,b\n1,2\nNA,NA\n")
+  # where the table differs from that of read.csv(): a value is a number only
+  # when R gives it back as written, so a code keeps its zeros, "+5" its sign,
+  # a hex or a 20-digit number every character, and the column is text
+  rd <- function(txt) ns(".bl_csv_from_bytes")(charToRaw(txt))
+  expect_identical(
+    rd("id,text\n07035394,\"0001\"\n2,x\n"),
+    data.frame(id = c("07035394", "2"), text = c("0001", "x"))
+  )
+  expect_identical(
+    rd("a,b,c,d\n2147483647,2147483648,-2147483648,+5\n1,2,3,05\n"),
+    data.frame(
+      a = c(2147483647L, 1L), b = c(2147483648, 2),
+      c = c(-2147483648, 3), d = c("+5", "05")
+    )
+  )
+  expect_identical(
+    rd("a,b,c\n1e3,0x10,Inf\n2.,.5,-inf\n"),
+    data.frame(a = c(1000, 2), b = c("0x10", ".5"), c = c("Inf", "-inf"))
+  )
+  # blanks around a number are not part of it
+  expect_identical(rd("a,b\n 1,1 \n2,2\n"), data.frame(a = 1:2, b = 1:2))
+  expect_identical(
+    rd("a\n12345678901234567890\n1\n"),
+    data.frame(a = c("12345678901234567890", "1"))
+  )
   # a NUL byte is dropped, as skipNul = TRUE drops it; a byte-order mark is not
   # part of a name
   expect_identical(
@@ -979,8 +878,11 @@ test_that("the CSV reader gives read.csv's table, byte for byte of meaning", {
   con <- gzfile(f, "w")
   writeLines(c("k,v,flag", "1,alpha,TRUE", "2,\"b,eta\",FALSE", "3,NA,NA"), con)
   close(con)
+  # the text NA is the text in a text column and missing in a logical one
   expect_identical(
     ns(".bl_read_csv_gz")(f),
-    utils::read.csv(gzfile(f), stringsAsFactors = FALSE, skipNul = TRUE)
+    data.frame(
+      k = 1:3, v = c("alpha", "b,eta", "NA"), flag = c(TRUE, FALSE, NA)
+    )
   )
 })

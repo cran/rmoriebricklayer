@@ -209,6 +209,32 @@
       call. = FALSE
     )
   }
+  .rmbl_valid_text(x, what)
+}
+
+#' Refuses text that is not valid in its encoding.
+#'
+#' Bytes that are not text (`"a\xffb"` where the session is UTF-8) reached
+#' gsub(), grepl() or trimws() and failed there in base R's words, "input
+#' string 1 is invalid", after warnings "unable to translate ... to a wide
+#' string" (audit of 21478080, P3). Each text guard of the package refuses
+#' them here, once, before anything reads them as text.
+#' @param x The argument's value; anything but character passes.
+#' @param what The argument's name, quoted in the refusal.
+#' @return `x`.
+#' @noRd
+.rmbl_valid_text <- function(x, what) {
+  if (is.character(x) && any(.rmbl_nontext(x))) {
+    stop(
+      .rmbl_fn(),
+      sprintf(
+        "`%s` holds text that is not valid %s",
+        what,
+        if (isTRUE(l10n_info()[["UTF-8"]])) "UTF-8" else "in this locale"
+      ),
+      call. = FALSE
+    )
+  }
   x
 }
 
@@ -272,6 +298,7 @@
 #' @return `x`, through `.rmbl_utf8()`.
 #' @noRd
 .rmbl_string1 <- function(x, what) {
+  .rmbl_valid_text(x, what)
   if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(trimws(x))) {
     stop(
       .rmbl_fn(),
@@ -343,26 +370,6 @@
     )
   }
   unique(choices[i])
-}
-
-#' Refuses an abbreviated choice, in .rmbl_arg()'s words, where a guess
-#' must not be made (`visibility = "pub"`): one string that is not a whole
-#' choice. Anything else is left to .rmbl_arg().
-#' @param x The value given.
-#' @param choices The accepted values.
-#' @inheritParams .bl_str0
-#' @return NULL, invisibly.
-#' @noRd
-.rmbl_whole <- function(x, choices, what) {
-  if (is.character(x) && length(x) == 1L && !is.na(x) && !x %in% choices) {
-    stop(
-      .rmbl_fn(),
-      sprintf("`%s` must be one of %s, not %s", what,
-              toString(dQuote(choices, FALSE)), .rmbl_printable(deparse(x))),
-      call. = FALSE
-    )
-  }
-  invisible(NULL)
 }
 
 #' Checks that a data frame has unique, non-empty column names.
@@ -551,6 +558,7 @@
 .rmbl_num <- function(x, what, integer = FALSE) {
   .rmbl_num_kind(x, what, integer)
   if (is.character(x)) {
+    .rmbl_valid_text(x, what)
     v <- suppressWarnings(as.numeric(x))
     bad <- !is.na(x) & is.na(v) & nzchar(trimws(x)) & x != "NA"
     if (any(bad)) {
@@ -602,7 +610,7 @@
   if (connection && (is.null(file) || inherits(file, "connection"))) {
     return(file)
   }
-  file <- .rmbl_string1(file, what)
+  file <- .rmbl_fspath(.rmbl_string1(file, what))
   # a folder, or a file in a folder that is not there, reached file() and
   # failed as "cannot open the connection"
   if (dir.exists(file)) {
@@ -634,7 +642,7 @@
 #' @return `path`, invisibly.
 #' @noRd
 .rmbl_name_ok <- function(path, what) {
-  parts <- strsplit(path, "[/\\\\]")[[1L]]
+  parts <- strsplit(path, "[/\\\\]", useBytes = TRUE)[[1L]]
   if (any(nchar(parts, type = "bytes") > 255L)) {
     stop(.rmbl_fn(),
          sprintf(paste0("`%s` has a name longer than the 255 bytes a file ",
@@ -671,7 +679,7 @@
       call. = FALSE
     )
   }
-  x
+  .rmbl_valid_text(x, what)
 }
 
 #' Checks a scalar numeric argument against a range.
@@ -772,27 +780,281 @@
   invisible(TRUE)
 }
 
-#' A file the function reads: one path that exists and is a file (not a
-#' directory)
-#' @param path The path passed by the user.
-#' @param what The argument's name (`path`), quoted if the file is missing.
-#' @return The path.
+#' What a path is: "missing", "regular", "directory" or "other" (a device,
+#' a pipe, a socket), from stat() in rmbl_flock.c. Sourced into a bundle,
+#' where there is no compiled code, base R tells only a folder from a file,
+#' and every existing path that is not a folder counts as regular.
+#' @param path The path to look at, expanded.
+#' @return One string.
 #' @noRd
-.rmbl_file1 <- function(path, what = "path") {
-  path <- .rmbl_string1(path, what)
-  if (!file.exists(path)) {
-    stop(
-      .rmbl_fn(),
-      sprintf("`%s`: no such file: %s", what, path),
-      call. = FALSE
-    )
+.rmbl_path_kind <- function(path) {
+  if (exists("C_rmbl_path_kind")) {
+    return(.Call(C_rmbl_path_kind, path))
   }
   if (dir.exists(path)) {
-    stop(
-      .rmbl_fn(),
-      sprintf("`%s` is a directory, not a file: %s", what, path),
-      call. = FALSE
-    )
+    "directory"
+  } else if (file.exists(path)) {
+    "regular"
+  } else {
+    "missing"
+  }
+}
+
+#' Whether a path is a folder, by stat(): base R's dir.exists() says TRUE
+#' for a Unix socket too (its mode shares the directory bit), and readers
+#' called a socket a folder.
+#' @param path The path to look at.
+#' @return TRUE or FALSE.
+#' @noRd
+.rmbl_isdir <- function(path) {
+  identical(.rmbl_path_kind(path.expand(path)), "directory")
+}
+
+#' A file the function reads: one path that exists, is a regular file (not
+#' a directory, a device, a pipe or a socket), can be read, and is no
+#' larger than `max` bytes.
+#'
+#' Every reader checks its file here. A file that could not be read
+#' reached file() and failed as "cannot open the connection" with base R's
+#' warning; a device such as /dev/zero has no end, and readLines() grew
+#' until memory ran out, or a hash never returned.
+#' @param path The path passed by the user.
+#' @param what The argument's name (`path`), quoted if the file is missing.
+#' @param max The largest size read, in bytes.
+#' @return The path.
+#' @noRd
+# Whether a text-or-file argument that exists on disk is taken as a file: a
+# regular file is, and so is anything written as a path (it has a
+# separator), which .rmbl_file1() then refuses when it is a device. A bare
+# word that is also a device's name (nul, con on Windows) stays text.
+.rmbl_isreg <- function(path) {
+  identical(.rmbl_path_kind(path.expand(path)), "regular") ||
+    grepl("[/\\\\]", path, useBytes = TRUE)
+}
+
+#' A path as a message shows it: with control and non-text bytes escaped
+#' where the package's printing code is loaded. A capsule bundle sources
+#' this file before that code (and need not source it at all), so there the
+#' path is shown as it is rather than the reader stopping for want of a
+#' function.
+#' @param x A path.
+#' @return One string.
+#' @noRd
+.rmbl_shown <- function(x) {
+  if (exists(".rmbl_ctl_escape", mode = "function")) .rmbl_ctl_escape(x) else x
+}
+
+#' Which strings are not text.
+#'
+#' validEnc() calls every byte valid in the C locale, so a file name or an
+#' argument with a stray byte was shown raw and bundled there: a string is
+#' not text when it is no valid UTF-8 and the session's locale cannot vouch
+#' for it (it is neither marked Latin-1 nor valid in a locale that has
+#' characters beyond ASCII). Latin-1 text is converted by R as Windows-1252,
+#' which has no character for the bytes 0x81, 0x8d, 0x8f, 0x90 and 0x9d: a
+#' name holding one was valid Latin-1, and grepl() then warned "input string
+#' 1 is invalid UTF-8"; such a string is not text either.
+#' @param s The character vector whose elements are judged.
+#' @return A logical vector, FALSE for NA.
+#' @noRd
+.rmbl_nontext <- function(s) {
+  li <- l10n_info()
+  ascii <- !isTRUE(li[["UTF-8"]]) && !isTRUE(li[["Latin-1"]]) &&
+    !isTRUE(li[["MBCS"]])
+  enc <- Encoding(s)
+  lat <- enc == "latin1" |
+    (enc == "unknown" & isTRUE(li[["Latin-1"]]) & !validUTF8(s))
+  hole <- lat
+  hole[lat] <- vapply(s[lat], function(x) {
+    any(charToRaw(x) %in% as.raw(c(0x81, 0x8d, 0x8f, 0x90, 0x9d)))
+  }, NA, USE.NAMES = FALSE)
+  bad <- !validUTF8(s) & enc != "latin1" & (ascii | !validEnc(s))
+  !is.na(s) & (hole | bad)
+}
+
+#' A path as the file system names it: by its bytes.
+#'
+#' .rmbl_string1() marks a valid UTF-8 path as UTF-8, and R translates a
+#' marked path to the session's encoding before it opens the file: in a C
+#' locale the name "caf\\u00e9" became "caf<U+00E9>" (with a warning), in a
+#' Latin-1 locale the byte e9, and neither named the file. A path marked
+#' UTF-8 is handed to the system as its bytes, which is how the system
+#' itself stores the name. Windows takes a marked path as wide characters,
+#' which is right there, so it is left as it is.
+#' @param p A character vector of paths.
+#' @return `p`, its UTF-8 marks dropped (the bytes unchanged).
+#' @noRd
+.rmbl_fspath <- function(p) {
+  if (!is.character(p) || .Platform$OS.type == "windows") {
+    return(p)
+  }
+  u <- !is.na(p) & Encoding(p) == "UTF-8"
+  if (any(u)) {
+    v <- p[u]
+    Encoding(v) <- "unknown"
+    p[u] <- v
+  }
+  p
+}
+
+#' Strings compared by their bytes.
+#'
+#' match() and == compare a name read from a folder (no mark) and the same
+#' name read from JSON (marked UTF-8) after translating one of them, which in
+#' a C or Latin-1 locale changed it or failed with a warning. A string
+#' marked "bytes" is for == and %in% only: startsWith(), sprintf(),
+#' basename(), file.path(), sort() and most other functions refuse one that
+#' is not ASCII ("translating strings with "bytes" encoding is not
+#' allowed"); a prefix is compared with .rmbl_bstarts().
+#' @param x The strings to compare.
+#' @return `x` with every non-ASCII element marked "bytes", for comparing.
+#' @noRd
+.rmbl_bytes <- function(x) {
+  x <- as.character(x)
+  Encoding(x) <- "bytes"
+  x
+}
+
+#' Strings sorted by their bytes, the same in every locale: sort() follows
+#' the locale's collation, and its radix method refuses text that is not
+#' UTF-8 or Latin-1 unless it is marked as bytes.
+#' @param x Strings to sort.
+#' @return `x`, sorted.
+#' @noRd
+.rmbl_bsort <- function(x) x[order(.rmbl_bytes(x), method = "radix")]
+
+#' Whether strings start with a prefix, by their bytes.
+#'
+#' startsWith() of strings marked "bytes" stopped every walk under a folder
+#' with a name that is not ASCII ("donn\\u00e9es"); the raw bytes are
+#' compared instead, in any locale and whatever the strings' marks.
+#' @param x Strings whose start is tested.
+#' @param pre One prefix.
+#' @return A logical vector.
+#' @noRd
+.rmbl_bstarts <- function(x, pre) {
+  p <- charToRaw(pre)
+  vapply(as.character(x), function(s) {
+    r <- charToRaw(s)
+    length(r) >= length(p) && identical(r[seq_along(p)], p)
+  }, NA, USE.NAMES = FALSE)
+}
+
+#' Paths joined by a slash, whatever their bytes.
+#'
+#' file.path() refuses a name that is not text before R 4.2, so a folder
+#' holding such a file stopped a walk in base R's words.
+#' @param a A folder, or folders.
+#' @param b Names in it.
+#' @return The joined paths; none when `a` or `b` is empty.
+#' @noRd
+.rmbl_jpath <- function(a, b) {
+  if (!length(a) || !length(b)) {
+    return(character())
+  }
+  sl <- "/"
+  paste0(a, sl, b)
+}
+
+#' Strings with each byte that is not part of valid UTF-8 shown as <xx>.
+#'
+#' iconv(sub = "byte") left a 5- or 6-byte form and a code point above
+#' U+10FFFF as they were (the system's decoder takes them), and base R then
+#' warned "input string 1 is invalid UTF-8". Each sequence is cut from the
+#' bytes by the length its first byte gives and kept only when validUTF8()
+#' calls it valid: one rule for what is text.
+#' @param x Strings to escape.
+#' @param drop TRUE to leave such bytes out instead.
+#' @return `x`; each element changed is valid UTF-8, marked so.
+#' @noRd
+.rmbl_esc8 <- function(x, drop = FALSE) {
+  bad <- !is.na(x) & !validUTF8(x)
+  x[bad] <- vapply(x[bad], .rmbl_esc8one, "", drop = drop,
+                   USE.NAMES = FALSE)
+  x
+}
+
+#' One string escaped as .rmbl_esc8() escapes it.
+#' @param s The string.
+#' @param drop As for .rmbl_esc8().
+#' @return The string, marked UTF-8.
+#' @noRd
+.rmbl_esc8one <- function(s, drop) {
+  r <- charToRaw(s)
+  b <- as.integer(r)
+  n <- length(r)
+  # the length a first byte gives (0: a byte that starts nothing)
+  k <- c(1L, 0L, 2L, 3L, 4L, 0L)[
+    findInterval(b, c(0, 128, 194, 224, 240, 245))
+  ]
+  keep <- k == 1L
+  at <- which(k > 1L & seq_len(n) + k - 1L <= n)
+  seqs <- lapply(at, function(i) i + seq_len(k[i]) - 1L)
+  ok <- validUTF8(vapply(seqs, function(j) rawToChar(r[j]), ""))
+  keep[unlist(seqs[ok])] <- TRUE
+  run <- rle(keep)
+  end <- cumsum(run$lengths)
+  out <- vapply(seq_along(end), function(i) {
+    j <- (end[i] - run$lengths[i] + 1L):end[i]
+    if (run$values[i]) {
+      rawToChar(r[j])
+    } else if (drop) {
+      ""
+    } else {
+      paste(sprintf("<%02x>", b[j]), collapse = "")
+    }
+  }, "")
+  y <- paste(out, collapse = "")
+  Encoding(y) <- "UTF-8"
+  y
+}
+
+#' The lines of a file from its bytes as they are on disk.
+#'
+#' readLines() of a path inflates a gzip, bzip2 or xz file as it reads, so
+#' a 41 KB file was read as 40 MiB and cost a gigabyte: every reader of a
+#' file the user names reads through this.
+#' @param path A regular file.
+#' @param ... Passed to readLines() (`encoding`, `n`).
+#' @return A character vector, one element per line.
+#' @noRd
+.rmbl_rlines <- function(path, ...) {
+  con <- file(path, "rb")
+  on.exit(close(con), add = TRUE)
+  readLines(con, warn = FALSE, ...)
+}
+
+.rmbl_file1 <- function(path, what = "path", max = Inf) {
+  path <- .rmbl_fspath(.rmbl_string1(path, what))
+  kind <- .rmbl_path_kind(path.expand(path))
+  # stat() failed for another reason than a missing file: a folder on the
+  # way that cannot be searched, a loop of links
+  if (kind == "other" && !file.exists(path)) {
+    kind <- "missing"
+  }
+  # shown with control and non-text bytes escaped, as sha256file() shows it
+  shown <- .rmbl_shown(path)
+  why <- switch(kind,
+    missing = sprintf("`%s`: no such file: %s", what, shown),
+    directory = sprintf("`%s` is a directory, not a file: %s", what, shown),
+    other = sprintf(
+      "`%s` is not a regular file (a device, a pipe or a socket): %s",
+      what,
+      shown
+    ),
+    if (file.access(path, 4L) != 0L) {
+      sprintf("`%s` cannot be read (permission denied): %s", what, shown)
+    } else if (file.size(path) > max) {
+      sprintf(
+        "`%s` is larger than the %s bytes read: %s",
+        what,
+        .rmbl_ntxt(max),
+        shown
+      )
+    }
+  )
+  if (!is.null(why)) {
+    stop(.rmbl_fn(), why, call. = FALSE)
   }
   path
 }
@@ -884,7 +1146,8 @@
   x
 }
 
-# 0.5.x argument names reaching a function through `...` (yoy() kept its name,
+# 0.5.x argument names reaching a function through `...` (yoychg(), yoy() before
+# 1.1.1,
 # so it has no alias): when the call that is running used one, returns that call
 # with the new names and the frame to evaluate it in, else NULL. A call naming
 # both forms is refused.
@@ -962,7 +1225,8 @@
 
 # ---- 0.5.x result names ------------------------------------------------------
 # Results keep their 1.0.0 names when a 1.0.0 function is called. Called through
-# a 0.5.x alias (or yoy() with its 0.5.x argument names), the result comes back
+# a 0.5.x alias (or yoychg() with its 0.5.x argument names), the result comes
+# back
 # under its 0.5.x column and field names, from
 # inst/compat/compat_results_map.tsv: the names of that page, then the
 # unambiguous ones of every page (a 1.0.0 name no 0.5.13 result used). The
@@ -1237,10 +1501,42 @@ if (!exists("%||%", envir = baseenv(), inherits = FALSE)) {
 #' @noRd
 .rmbl_notdir <- function(path, arg, fn = "") {
   if (is.character(path) && length(path) == 1L && !is.na(path) &&
-        dir.exists(path)) {
+        .rmbl_isdir(path)) {
     stop(sprintf("%s`%s` is a folder (%s), not a file",
                  if (nzchar(fn)) paste0(fn, ": ") else "", arg, path),
          call. = FALSE)
   }
   invisible(path)
+}
+
+#' formatC() with "." as its decimal mark: by default it takes
+#' options(OutDec), so a report read "5,5" in one session and "5.5" in
+#' another, and with a thousands mark of "," it warned once per number.
+#' @param x Numbers, as formatC() takes them.
+#' @param ... formatC()'s other arguments.
+#' @return Strings.
+#' @noRd
+.rmbl_fc <- function(x, ...) formatC(x, ..., decimal.mark = ".")
+
+#' Numbers as text, the same whatever the session's options and locale.
+#'
+#' format() takes its decimal mark from options(OutDec) (with
+#' big.mark = "," and OutDec = "," it warned once per number, an error
+#' under warn = 2), its notation from scipen and its digits from digits;
+#' formatC() takes OutDec as its decimal mark. Every number the package
+#' writes as text with a thousands mark goes through here: whole numbers in
+#' full (1,234,567, never 1.234567e+06), others with 7 significant digits,
+#' as format() gives them by default, the decimal mark always ".".
+#' @param x Numbers to write as text.
+#' @param big The thousands mark ("" for none).
+#' @return Strings, one per number; NA as "NA".
+#' @noRd
+.rmbl_ntxt <- function(x, big = ",") {
+  x <- as.numeric(x)
+  whole <- is.finite(x) & x == round(x) & abs(x) < 1e15
+  out <- .rmbl_fc(x, format = "fg", digits = 7L, big.mark = big)
+  # "f" with no decimals: "d" makes a whole number an integer first, and
+  # one past 2^31 became NA
+  out[whole] <- .rmbl_fc(x[whole], format = "f", digits = 0L, big.mark = big)
+  trimws(out)
 }

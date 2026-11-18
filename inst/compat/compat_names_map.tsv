@@ -3,7 +3,7 @@ admissions	admits	adp,alos,t	adp,alos,t
 adp_from_counts	adpcnts	counts,t	cnts,t	
 advection_diffusion_2d	advdif2d	c0,u,v,kx,ky,dx,dy,dt,n_steps,source,max_work	c0,u,v,kx,ky,dx,dy,dt,nsteps,source,maxwork	
 agent_bundle	agentbndl	request,model,route	req,model,route	
-analyse_table	anltab	data,value,period,by,population,prior,units,rounding,rounding_kind,suppression_limit,direction,per,conf_level,alpha,adjust	data,value,prd,by,pop,prior,units,rnd,rndkind,suplim,dir,per,conflvl,alpha,adjust	direction:higher_is_better=higher;direction:lower_is_better=lower
+analyse_table	anytab	data,value,period,by,population,prior,units,rounding,rounding_kind,suppression_limit,direction,per,conf_level,alpha,adjust	data,value,prd,by,pop,prior,units,rnd,rndkind,suplim,dir,per,conflvl,alpha,adjust	direction:higher_is_better=higher;direction:lower_is_better=lower
 apply_schema_validation	schval	df_raw,provenance	dfraw,prov	
 ascii_fallback	asciifb	x,force	x,force	
 attributable_fraction	attrfrac	rr,exposure_prevalence,rr_lower,rr_upper	rr,expoprev,rrlo,rrup	
@@ -28,8 +28,6 @@ bricklayer_json_unserialize	jsunser	txt,trusted	txt,trusted
 bricklayer_llm_ask	llmask	prompt,model,timeout,system_prompt,route,docs,packages,fresh	prompt,model,tmout,syspro,route,docs,pkgs,fresh	
 bricklayer_llm_chat	llmchat	messages,model,route,timeout	msgs,model,route,tmout	
 bricklayer_llm_config	llmcfg	...	...	
-bricklayer_llm_login	dlogin	token,email,code,open_browser,poll_max_seconds	token,email,code,openbro,pollmaxsec	
-bricklayer_llm_logout	dlogout			
 bricklayer_llm_models	llmmdls	route,timeout	route,tmout	
 bricklayer_llm_providers	llmprvd			
 bricklayer_llm_route_info	llmrte	route	route	
@@ -299,3 +297,10 @@ yoy_pdf	yoypdf	x,file,title,subtitle,palette,digits,interval,notes,width,height,
 yoy_pvalues	yoypv	y	y	
 yoy_tsv	yoytsv	x,file,digits,na,metadata,comment,...	x,file,digits,na,meta,comment,...	
 yoy_write	yoywr	x,file,format,...	x,file,format,...	...:subtitle=sub;...:palette=pal;...:interval=intv;...:metadata=meta
+rate	rtcalc	x,count,population,by,per,conf_level,min_count	x,count,pop,by,per,conflvl,mincnt	
+rate_change	ratechg	x,count,population,period,by,lag,per,conf_level,min_count	x,count,pop,prd,by,lag,per,conflvl,mincnt	
+share	shrs	x,count,by,total,conf_level	x,count,by,total,conflvl	
+anltab	anytab	data,value,prd,by,pop,prior,units,rnd,rndkind,suplim,dir,per,conflvl,alpha,adjust,prdord	data,value,prd,by,pop,prior,units,rnd,rndkind,suplim,dir,per,conflvl,alpha,adjust,prdord	
+plotecdf	plotcdfs	x,grp,...,main,col,pal	x,grp,...,main,col,pal	
+plotsm	plotmult	y,prd,grp,...,main,col,pal	y,prd,grp,...,main,col,pal	
+yoy	yoychg	x,value,prd,by,lag,fun,units,minbase,conflvl,dir,complete,prdord,...	x,value,prd,by,lag,fun,units,minbase,conflvl,dir,complete,prdord,...	

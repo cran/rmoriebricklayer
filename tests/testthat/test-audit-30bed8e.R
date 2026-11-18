@@ -4,102 +4,40 @@
 # a result an alias returned, in its 1.0.0 names again
 nn <- function(x) .rmbl_new_names(x)
 
-test_that(
-  paste0(
-    "rate, rate_change, share and yoy_summary are S3 generics again, with ",
-    "the old arguments"
-  ),
-  {
-    # a dispatching body with a default method, read so that it holds under covr
-    # too, whose tracing wraps the body and makes isS3stdGeneric() FALSE
-    ns <- asNamespace("rmoriebricklayer")
-    for (g in c("rate", "rate_change", "share", "yoy_summary")) {
-      f <- get(g, envir = ns)
-      expect_true("UseMethod" %in% all.names(body(f)), info = g)
-      expect_false(
-        is.null(utils::getS3method(g, "default", optional = TRUE, envir = ns)),
-        info = g
-      )
-      expect_identical(environment(f), ns, info = g)
-    }
-    d <- data.frame(
-      n = c(5, 8, 3),
-      pop = c(1000, 1200, 900),
-      g = c("a", "b", "c"),
-      stringsAsFactors = FALSE
+test_that("yoy_summary is an S3 generic again, with the old arguments", {
+  # a dispatching body with a default method, read so that it holds under covr
+  # too, whose tracing wraps the body and makes isS3stdGeneric() FALSE
+  ns <- asNamespace("rmoriebricklayer")
+  f <- get("yoy_summary", envir = ns)
+  expect_true("UseMethod" %in% all.names(body(f)))
+  expect_false(
+    is.null(utils::getS3method(
+      "yoy_summary",
+      "default",
+      optional = TRUE,
+      envir = ns
+    ))
+  )
+  expect_identical(environment(f), ns)
+  y <- yoychg(
+    data.frame(year = 2019:2022, n = c(10, 12, 9, 15)),
+    value = "n",
+    prd = "year"
+  )
+  expect_identical(nn(yoy_summary(y)), yoysmry(y))
+  expect_error(yoy_summary(1), "yoy")
+  # a method written for the old generic dispatches
+  local({
+    yoy_summary.mycls <- function(object, ...) "mine"
+    registerS3method(
+      "yoy_summary",
+      "mycls",
+      yoy_summary.mycls,
+      envir = asNamespace("rmoriebricklayer")
     )
-    expect_identical(
-      nn(rate(d, count = "n", population = "pop", by = "g")),
-      rtcalc(d, count = "n", pop = "pop", by = "g")
-    )
-    expect_identical(nn(rate(10, population = 1000)), rtcalc(10, pop = 1000))
-    # conf_level reaches the method instead of vanishing in `...`
-    expect_identical(
-      rate(d, count = "n", pop = "pop", conf_level = 0.5)$lower,
-      rtcalc(d, count = "n", pop = "pop", conflvl = 0.5)$lower
-    )
-    expect_equal(
-      share(c(1, 2, 3), conf_level = 0.5)$lower,
-      c(8.85, 21.9, 36.7),
-      tolerance = 0.01
-    )
-    expect_identical(
-      nn(share(d, count = "n", conf_level = 0.5)),
-      shrs(d, count = "n", conflvl = 0.5)
-    )
-    # bare column names still read as columns through the old generic
-    expect_identical(
-      nn(rate(d, n, pop, by = "g")),
-      rtcalc(d, count = "n", pop = "pop", by = "g")
-    )
-    ch <- data.frame(
-      year = rep(2019:2021, 2),
-      g = rep(c("a", "b"), each = 3),
-      n = c(4, 6, 9, 3, 2, 5),
-      pop = 1000,
-      stringsAsFactors = FALSE
-    )
-    expect_identical(
-      nn(rate_change(
-        ch,
-        count = "n",
-        population = "pop",
-        period = "year",
-        by = "g",
-        conf_level = 0.9,
-        min_count = 3
-      )),
-      ratechg(
-        ch,
-        count = "n",
-        pop = "pop",
-        prd = "year",
-        by = "g",
-        conflvl = 0.9,
-        mincnt = 3
-      )
-    )
-    expect_error(rate_change(1:3), "data frame")
-    y <- yoy(
-      data.frame(year = 2019:2022, n = c(10, 12, 9, 15)),
-      value = "n",
-      prd = "year"
-    )
-    expect_identical(nn(yoy_summary(y)), yoysmry(y))
-    expect_error(yoy_summary(1), "yoy")
-    # a method written for the old generic dispatches
-    local({
-      rate.mycls <- function(x, ...) "mine"
-      registerS3method(
-        "rate",
-        "mycls",
-        rate.mycls,
-        envir = asNamespace("rmoriebricklayer")
-      )
-      expect_identical(nn(rate(structure(1, class = "mycls"))), "mine")
-    })
-  }
-)
+    expect_identical(nn(yoy_summary(structure(1, class = "mycls"))), "mine")
+  })
+})
 
 test_that(
   paste0(
@@ -122,12 +60,12 @@ test_that(
 
 test_that(
   paste0(
-    "yoy() takes its 0.5.x argument names and ",
+    "yoychg() takes its 0.5.x argument names and ",
     "values; giving both is refused"
   ),
   {
     seg <- data.frame(year = 2019:2022, n = c(10, 12, 9, 15))
-    new <- yoy(
+    new <- yoychg(
       seg,
       value = "n",
       prd = "year",
@@ -136,7 +74,7 @@ test_that(
       dir = "higher"
     )
     expect_identical(
-      nn(yoy(
+      nn(yoychg(
         seg,
         value = "n",
         period = "year",
@@ -147,7 +85,7 @@ test_that(
       new
     )
     expect_identical(
-      nn(yoy(
+      nn(yoychg(
         seg,
         value = n,
         period = year,
@@ -158,27 +96,30 @@ test_that(
       new
     )
     expect_identical(
-      yoy(seg, value = "n", prd = "year", dir = "lower_is_better"),
-      yoy(seg, value = "n", prd = "year", dir = "lower")
+      yoychg(seg, value = "n", prd = "year", dir = "lower_is_better"),
+      yoychg(seg, value = "n", prd = "year", dir = "lower")
     )
     expect_error(
-      yoy(seg, value = "n", period = "year", prd = "year"),
-      "yoy: give `prd` or its 0.5.x name `period`, not both"
+      yoychg(seg, value = "n", period = "year", prd = "year"),
+      "yoychg: give `prd` or its 0.5.x name `period`, not both"
     )
     expect_identical(
-      nn(yoy(c(10, 12, 9), period = 2001:2003)),
-      yoy(c(10, 12, 9), prd = 2001:2003)
+      nn(yoychg(c(10, 12, 9), period = 2001:2003)),
+      yoychg(c(10, 12, 9), prd = 2001:2003)
     )
     expect_identical(
-      nn(yoy(c(10L, 12L, 9L), period = 2001:2003)),
-      yoy(c(10L, 12L, 9L), prd = 2001:2003)
+      nn(yoychg(c(10L, 12L, 9L), period = 2001:2003)),
+      yoychg(c(10L, 12L, 9L), prd = 2001:2003)
     )
     tsx <- stats::ts(
       c(10, 12, 9, 15, 11, 13, 12, 14),
       frequency = 4,
       start = 2020
     )
-    expect_identical(nn(yoy(tsx, conf_level = 0.5)), yoy(tsx, conflvl = 0.5))
+    expect_identical(
+      nn(yoychg(tsx, conf_level = 0.5)),
+      yoychg(tsx, conflvl = 0.5)
+    )
   }
 )
 
@@ -188,7 +129,7 @@ test_that(
     "periods compare on calendar steps"
   ),
   {
-    y <- yoy(
+    y <- yoychg(
       data.frame(
         d = as.Date(c("2019-01-01", "2020-01-01", "2021-01-01")),
         n = c(10, 12, 15)
@@ -198,7 +139,7 @@ test_that(
     )
     expect_identical(nrow(y), 3L)
     expect_identical(y$previous, c(NA, 10, 12))
-    y0 <- yoy(
+    y0 <- yoychg(
       data.frame(
         d = as.Date(c("2019-01-01", "2020-01-01", "2021-01-01")),
         n = c(10, 12, 15)
@@ -209,7 +150,7 @@ test_that(
     )
     expect_identical(y0$previous, c(NA, 10, 12))
     # a missing year is inserted as one row, not 365 days
-    yg <- yoy(
+    yg <- yoychg(
       data.frame(
         d = as.Date(c("2018-07-01", "2019-07-01", "2021-07-01")),
         n = c(5, 6, 8)
@@ -226,31 +167,31 @@ test_that(
       d = seq(as.Date("2020-01-15"), by = "month", length.out = 40),
       n = 1:40 + 10
     )
-    y12 <- yoy(m, value = "n", prd = "d", lag = 12)
+    y12 <- yoychg(m, value = "n", prd = "d", lag = 12)
     expect_identical(nrow(y12), 40L)
     expect_identical(sum(!is.na(y12$previous)), 28L)
     # a month missing: complete = TRUE puts it back, complete = FALSE leaves the
     # gap uncompared
-    yc <- yoy(m[-5, ], value = "n", prd = "d")
+    yc <- yoychg(m[-5, ], value = "n", prd = "d")
     expect_identical(c(nrow(yc), sum(!is.na(yc$previous))), c(40L, 38L))
-    yn <- yoy(m[-5, ], value = "n", prd = "d", complete = FALSE)
+    yn <- yoychg(m[-5, ], value = "n", prd = "d", complete = FALSE)
     expect_identical(c(nrow(yn), sum(!is.na(yn$previous))), c(39L, 37L))
     q <- data.frame(
       d = seq(as.Date("2020-01-01"), by = "3 months", length.out = 8),
       n = 1:8
     )
     expect_identical(
-      yoy(q, value = "n", prd = "d", lag = 4)$previous,
+      yoychg(q, value = "n", prd = "d", lag = 4)$previous,
       c(rep(NA, 4), 1:4 + 0)
     )
     me <- data.frame(
       d = seq(as.Date("2020-02-01"), by = "month", length.out = 6) - 1,
       n = 1:6
     )
-    expect_identical(yoy(me[-3, ], value = "n", prd = "d")$d, me$d)
+    expect_identical(yoychg(me[-3, ], value = "n", prd = "d")$d, me$d)
     # daily and weekly data keep the grid of days
     wk <- data.frame(d = as.Date("2020-01-06") + 7 * c(0, 1, 3), n = c(3, 4, 5))
-    expect_identical(nrow(yoy(wk, value = "n", prd = "d")), 4L)
+    expect_identical(nrow(yoychg(wk, value = "n", prd = "d")), 4L)
     # the plot draws every period
     grDevices::pdf(NULL)
     on.exit(grDevices::dev.off(), add = TRUE)
@@ -384,7 +325,7 @@ test_that("text periods are drawn in time order", {
   expect_identical(.bl_period_axis(f)$at, 1:2)
   grDevices::pdf(NULL)
   on.exit(grDevices::dev.off(), add = TRUE)
-  r <- plot(yoy(
+  r <- plot(yoychg(
     data.frame(
       fy = c("2019/20", "2021/22", "2020/21"),
       grp = c("A", "A", "B"),
@@ -402,7 +343,7 @@ test_that("text periods are drawn in time order", {
 
 test_that(
   paste0(
-    "plot(yoy()) labels a period after a gap, and refuses a result with no ",
+    "plot(yoychg()) labels a period after a gap, and refuses a result with no ",
     "values"
   ),
   {
@@ -430,7 +371,7 @@ test_that(
       .package = "rmoriebricklayer"
     )
     d1 <- data.frame(year = 2015:2022, n = c(0, 10, 0, 5, NA, 12, 15, 9))
-    plot(yoy(d1, value = "n", prd = "year"))
+    plot(yoychg(d1, value = "n", prd = "year"))
     why <- seen$note[[1]]
     expect_identical(why[1], "first period: nothing to compare with")
     expect_identical(why[5], "no data")
@@ -442,7 +383,7 @@ test_that(
       q = factor(c("q1", "q2", "q4"), levels = lv, ordered = TRUE),
       n = c(3, 4, 6)
     )
-    plot(yoy(of, value = "n", prd = "q"))
+    plot(yoychg(of, value = "n", prd = "q"))
     expect_identical(seen$note[[2]][4], "no data in the previous period")
     g <- data.frame(
       year = c(2019, 2020, 2022, 2019, 2020, 2021),
@@ -450,12 +391,12 @@ test_that(
       n = c(5, 6, 7, 2, 3, 4),
       stringsAsFactors = FALSE
     )
-    plot(yoy(g, value = "n", prd = "year", by = "grp", complete = FALSE))
+    plot(yoychg(g, value = "n", prd = "year", by = "grp", complete = FALSE))
     w <- seen$note[[3]]
     expect_identical(sum(w == "first period: nothing to compare with"), 2L)
     expect_identical(sum(w == "no data in the previous period"), 1L)
     expect_error(
-      plot(yoy(
+      plot(yoychg(
         data.frame(year = 2019:2022, n = NA_real_),
         value = "n",
         prd = "year"
@@ -486,10 +427,6 @@ test_that("refusals name the current arguments and the function", {
   )
   expect_error(blcli(NA_character_), "blcli: `args` must be a character vector")
   expect_error(blcli(function() 1), "blcli: `args` must be a character vector")
-  expect_error(
-    dlogin(email = function() 1),
-    "dlogin: `email` must be one string"
-  )
   od <- tempfile()
   dir.create(od)
   writeLines("", file.path(od, "x"))
@@ -552,7 +489,6 @@ test_that("the readers of the renamed options take the 0.5.x names", {
   expect_identical(normalizePath(ns$.bl_answer_dir()), normalizePath(d))
   expect_null(ns$.bl_answer_get("nokey"))
   expect_silent(ns$.bl_answer_prune(d))
-  expect_identical(ns$.bl_check_email("A@Example.org"), "a@example.org")
   expect_error(
     stepchg(c(1, 2, 3, 4, 5, 6), x = c(1, 3, 2, 4, 5, 6)),
     "stepchg: `x` must be strictly increasing"

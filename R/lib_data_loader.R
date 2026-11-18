@@ -44,7 +44,8 @@
 #' \dQuote{nothing pinned}.
 #'
 #' Errors: \code{path} that is not a single non-empty string; \code{path}
-#' that is a directory; a file that is not valid JSON.
+#' that is a directory, or not a regular file, or over 32 MiB; a file that
+#' is not valid JSON.
 #'
 #' @param path Path to the provenance JSON file, a single string.
 #' @return The parsed provenance as a nested named list (JSON objects become
@@ -70,23 +71,22 @@
 #' try(loadprov(tempdir()))
 #' @export
 loadprov <- function(path) {
-  path <- .rmbl_string1(path, "path")
+  path <- .rmbl_fspath(.rmbl_string1(path, "path"))
   if (!file.exists(path)) {
     return(NULL)
   }
-  if (dir.exists(path)) {
+  if (.rmbl_isdir(path)) {
     stop(
       sprintf("`path` is a directory, not a provenance file: %s", path),
       call. = FALSE
     )
   }
-  p <- .rmbl_read_json(path, simplify = FALSE)
-  if (is.list(p) && !is.data.frame(p) && !is.object(p)) {
-    p <- .rmbl_cls(p, "rmbl_provenance")
-  }
-  p
+  # a device, a pipe or a socket is refused in the shared file check's words
+  .rmbl_prov_obj(.rmbl_read_json(
+    .rmbl_file1(path, "path", max = 32 * 2^20),
+    simplify = FALSE
+  ))
 }
-
 #' @export
 format.rmbl_provenance <- function(x, ...) {
   fl <- .mf_flat(unclass(x))
@@ -188,6 +188,7 @@ rslvckan <- function(prov) {
       call. = FALSE
     )
   }
+  prov <- .rmbl_prov_shape(prov)
   api_url <- .rmbl_ckan_endpoint(prov)
   if (is.null(api_url)) {
     return(NULL)
@@ -197,7 +198,7 @@ rslvckan <- function(prov) {
     .rmbl_read_json(api_url, simplify = FALSE, strict = FALSE),
     error = function(e) NULL
   )
-  if (is.null(resp) || !isTRUE(resp$success)) {
+  if (!is.list(resp) || !isTRUE(resp$success) || !is.list(resp$result)) {
     return(NULL)
   }
   .rmbl_ckan_pick(resp$result$resources, prov$resource$name_match_pattern)
@@ -277,6 +278,7 @@ rslvckns <- function(prov) {
       call. = FALSE
     )
   }
+  prov <- .rmbl_prov_shape(prov)
   res <- prov$resource
   q <- res$search_query
   if (is.null(q) || !nzchar(q)) {
@@ -307,7 +309,7 @@ rslvckns <- function(prov) {
     .rmbl_read_json(api_url, simplify = FALSE, strict = FALSE),
     error = function(e) NULL
   )
-  if (is.null(resp)) {
+  if (!is.list(resp) || !is.list(resp$result)) {
     return(NULL)
   }
   .rmbl_ckan_match(resp, res)
@@ -627,14 +629,14 @@ vrfsha256 <- function(path, expsha) {
   # provenance JSON hands the pinned digest over as a length-1 list;
   # identical() on list-vs-character never matched, so every intact
   # capsule reported a mismatch between two identical strings.
-  expected <- tolower(trimws(as.character(unlist(expsha))))
+  expected <- .rmbl_lower(trimws(as.character(unlist(expsha))))
   if (length(expected) != 1L || is.na(expected)) {
     stop("`expsha` must be a single SHA-256 hex string", call. = FALSE)
   }
   list(
     actual = actual,
     expected = expected,
-    match = identical(tolower(actual), expected)
+    match = identical(.rmbl_lower(actual), expected)
   )
 }
 
@@ -948,6 +950,7 @@ rslvsoc <- function(prov) {
       call. = FALSE
     )
   }
+  prov <- .rmbl_prov_shape(prov)
   domain <- prov$dataset$socrata_domain
   id <- prov$dataset$socrata_id
   if (is.null(domain) || is.null(id)) {
@@ -959,7 +962,7 @@ rslvsoc <- function(prov) {
     .rmbl_read_json(meta_url, strict = FALSE),
     error = function(e) NULL
   )
-  if (is.null(meta) || is.null(meta$id)) {
+  if (!is.list(meta) || is.null(meta$id)) {
     return(NULL)
   }
   file.path(base, "api", "views", id, "rows.csv?accessType=DOWNLOAD")
@@ -1024,6 +1027,7 @@ rslvarc <- function(prov) {
       call. = FALSE
     )
   }
+  prov <- .rmbl_prov_shape(prov)
   layer <- prov$dataset$arcgis_layer_url
   if (is.null(layer)) {
     return(NULL)
@@ -1033,7 +1037,7 @@ rslvarc <- function(prov) {
     .rmbl_read_json(paste0(layer, "?f=json"), strict = FALSE),
     error = function(e) NULL
   )
-  if (is.null(meta) || !is.null(meta$error) || is.null(meta$name)) {
+  if (!is.list(meta) || !is.null(meta$error) || is.null(meta$name)) {
     return(NULL)
   }
   file.path(layer, "query?where=1%3D1&outFields=*&f=geojson")
@@ -1047,13 +1051,14 @@ rslvarc <- function(prov) {
 #' @noRd
 .rmbl_ckan_match <- function(resp, res) {
   pat <- res$name_match_pattern
-  for (pkg in resp$result$results) {
-    for (r in pkg$resources) {
+  for (pkg in .rmbl_recs(resp$result$results)) {
+    for (r in .rmbl_recs(pkg$resources)) {
       name <- if (is.null(r$name)) "" else r$name
-      fmt <- toupper(r$format %||% "")
+      fmt <- .rmbl_upper(r$format %||% "")
       if (
-        grepl(pat, name, ignore.case = TRUE) &&
-          (fmt == "CSV" || is.null(res$format) || toupper(res$format) == fmt)
+        .rmbl_grepl_ci(pat, name) &&
+          (fmt == "CSV" || is.null(res$format) ||
+             .rmbl_upper(res$format) == fmt)
       ) {
         return(.rmbl_check_public_url(r$url, "the CKAN resource URL"))
       }
@@ -1077,12 +1082,13 @@ rslvarc <- function(prov) {
   url <- .rmbl_check_public_url(url, "url", allow_file = allow_file)
   if (exists("bldl", mode = "function")) {
     bldl(url, dest, quiet = FALSE, allowfile = allow_file)
-  } else if (grepl("^file://", url, ignore.case = TRUE)) {
+  } else if (grepl(.rmbl_ci("^file://"), url, perl = TRUE, useBytes = TRUE)) {
     # allowed only when asked for (offline tests): a local copy
-    src <- sub("^file://", "", url, ignore.case = TRUE)
-    if (!file.exists(src) || !file.copy(src, dest, overwrite = TRUE)) {
+    src <- sub(.rmbl_ci("^file://"), "", url, perl = TRUE)
+    if (!file.exists(src)) {
       stop(sprintf("cannot open the file %s", src), call. = FALSE)
     }
+    .rmbl_fcopy(src, dest, "url")
     invisible(dest)
   } else {
     .rmbl_bfetch(url, dest)
@@ -1140,7 +1146,7 @@ rslvarc <- function(prov) {
 #' @param msg The failed download's error message, matched for known causes.
 #' @noRd
 .fdl_causes <- function(msg) {
-  has <- function(p) grepl(p, msg, ignore.case = TRUE)
+  has <- function(p) grepl(.rmbl_ci(p), msg, perl = TRUE, useBytes = TRUE)
   known <- has(paste0(
     "429|too ",
     "many|rate|SSL|TLS|certificate|handshake|UNEXPECTED_EOF|could ",
@@ -1613,9 +1619,9 @@ rslvarc <- function(prov) {
 #' @return The resource's checked URL, or NULL.
 #' @noRd
 .rmbl_ckan_pick <- function(resources, pat) {
-  for (r in resources) {
+  for (r in .rmbl_recs(resources)) {
     name <- if (is.null(r$name)) "" else r$name
-    if (grepl(pat, name, ignore.case = TRUE)) {
+    if (.rmbl_grepl_ci(pat, name)) {
       # a hostile record is an error in words, not "source unreachable"
       return(.rmbl_check_public_url(r$url, "the CKAN resource URL"))
     }
@@ -1732,4 +1738,66 @@ rslvarc <- function(prov) {
     )
   }
   invisible(NULL)
+}
+
+#' A provenance list whose object members are objects.
+#'
+#' `dataset`, `resource`, `source`, `script` and `schema` are read member by
+#' member; one that is a string or a number (a hand-edited file) is dropped,
+#' and so is a text member of `dataset` or `resource` that is not one string,
+#' so the check that needs it fails as a row instead of stopping inside R.
+#' @param prov A provenance list.
+#' @return `prov` without the object members that are not lists.
+#' @noRd
+.rmbl_prov_shape <- function(prov) {
+  for (m in c("dataset", "resource", "source", "script", "schema")) {
+    if (!is.null(prov[[m]]) && !is.list(prov[[m]])) {
+      prov[[m]] <- NULL
+    }
+  }
+  # the members read as one string: a number, a list or NA there is dropped
+  # too (search_query = 42 stopped a resolver in strsplit())
+  text <- list(
+    dataset = c(
+      "ckan_api_endpoint", "socrata_domain", "socrata_id",
+      "arcgis_layer_url", "package_slug"
+    ),
+    resource = c(
+      "search_query", "name_match_pattern", "format", "name",
+      "direct_url", "filename"
+    )
+  )
+  for (m in names(text)) {
+    for (k in intersect(text[[m]], names(prov[[m]]))) {
+      v <- prov[[m]][[k]]
+      # JSON written without unboxing gives a one-element list: the string
+      if (is.list(v) && length(v) == 1L) {
+        v <- v[[1L]]
+      }
+      if (is.character(v) && length(v) == 1L && !is.na(v)) {
+        prov[[m]][[k]] <- v
+      } else {
+        prov[[m]][[k]] <- NULL
+      }
+    }
+  }
+  prov
+}
+
+#' The records of a portal's reply: its list members that are lists.
+#' @param x A member of a parsed reply.
+#' @return A list of lists, possibly empty.
+#' @noRd
+.rmbl_recs <- function(x) if (is.list(x)) Filter(is.list, x) else list()
+
+#' A provenance as loadprov() returns it, from its parsed JSON: cpsseal()'s
+#' look-ahead reads the provenance it is about to write so.
+#' @param p The JSON, parsed with simplify = FALSE.
+#' @return The provenance.
+#' @noRd
+.rmbl_prov_obj <- function(p) {
+  if (is.list(p) && !is.data.frame(p) && !is.object(p)) {
+    p <- .rmbl_cls(.rmbl_prov_shape(p), "rmbl_provenance")
+  }
+  p
 }

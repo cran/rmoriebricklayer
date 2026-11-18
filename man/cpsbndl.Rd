@@ -79,7 +79,9 @@ attribute
 \code{cpsbndlvrf()}: a list of class \code{bricklayer_bundle_check} with
 \code{ok} (logical) and \code{checks} (a data frame of \code{check}, logical \code{ok}
 and
-\code{detail}: one \code{file:PATH} row per listed file, \code{no_unlisted_files}, the
+\code{detail}: one \code{file:PATH} row per listed file, \code{no_unlisted_files}, a
+failed \code{no_unsigned_fields} row when the bundle or its attestation holds
+fields \code{cpsbndl()} does not write (no signature covers them), the
 \verb{attestation:} rows, with a manifest \code{manifest_digest}, and with \code{seen}
 \code{xmss_index}). For an XMSS bundle the \code{attestation:signature} row's
 detail names the signature's index and the key fingerprint.
@@ -112,12 +114,58 @@ whose \code{meta} is that payload, and the bundle (payload plus attestation) is
 written as pretty JSON with doubles at 17 digits. With \code{files = NULL} every
 regular file under \code{dir} is hashed, recursively and including dot-files
 (a \code{.Rprofile} dropped into a capsule runs code), except the bundle file
-itself. A progress bar is shown when \code{options(morie.progress)} allows it.
+itself; a temporary left by a write that was cut short
+(\code{.rmbl-*.tmp}) is refused, as the check reports it. The folder is
+walked one level at a time: a link that stays inside is content like any
+other file or folder, but a link to the capsule folder or a folder above
+it, a link that leaves the folder, a folder that cannot be read and
+links that would list one folder more than 64 times are refused, all of
+them named at once. An empty folder holds no content: it is not bundled
+and the check does not report it. File names are kept by their bytes: a
+name that is UTF-8 is bundled in every locale (C and Latin-1 too). A
+bundle lists only names that verify on every system, so a name is
+refused, with its reason, when it is not UTF-8 (its bytes shown as
+\code{<e9>}), starts with \code{~} or a drive letter (\code{c:}), holds
+a backslash, a double quote, one of \code{< > : | ? *} or a control
+character, or has
+a part that ends in a dot or a space or that Windows reserves (CON, PRN,
+AUX, NUL, COM1 to COM9, LPT1 to LPT9, and COM and LPT followed by a
+superscript 1, 2 or 3, with any extension), letters compared by their
+ASCII bytes in every locale. Names that differ only by letter case or by
+Unicode normalisation (\code{A.txt} and \code{a.txt}, \code{sub/x} and
+\code{SUB/x}, an accented letter written as one character and as a letter
+with a combining accent) are one name on Windows and macOS, so they are
+refused together, each set named: every name and every folder above one
+is compared by Unicode's canonical caseless match (the canonical
+decomposition of the simple case folding of the canonical decomposition,
+Unicode 15.1, section 3.13), from the Unicode Character Database's tables
+and never the locale's. Simple folding maps one character to one, so
+\code{ss} and a sharp s are two names (as Windows takes them); the Turkish
+dotted capital I folds to an i with a dot above, not to a plain i. The
+check of a bundle does not apply these rules, so a bundle made before them
+still verifies. A progress bar is shown when \code{options(morie.progress)}
+allows it.
+
+Each file is read through the real path it had when it was checked,
+below \code{dir}, so a link changed while the bundle is made is not followed
+out of the folder. Before anything is signed every file is looked at
+again: its real path, a link's target, its size and its modification and
+status-change times must be those it had before it was read, and a file
+of at most 1 MiB is read a second time and must give the same digest;
+anything else stops \code{cpsbndl()} with the files named and nothing signed.
+What remains unseen is a change to a file over 1 MiB that keeps its size
+and both times: the system sets the status-change time on every write
+and no program can set it back, so only a file system that records
+whole seconds, written twice within one, can hide such a change.
 
 How it is checked. \code{cpsbndlvrf()} re-hashes every listed file
 (a path that is absolute or climbs out of \code{dir} fails its row), reports
 every file on disk the bundle does not list (the bundle's own file
-excepted), checks the attestation with
+excepted, when it is the file checked: a \code{capsule_bundle.json}
+in \code{dir} is unlisted when another bundle file is checked) and what the
+walk of \code{dir} cannot cover (the links and folders \code{cpsbndl()} refuses),
+in the \code{no_unlisted_files} row,
+checks the attestation with
 \code{\link[=cpschkatst]{cpschkatst()}}
 (signature, digest, and \code{keyexp} when given; an \code{"hmac"}
 signature needs the shared secret as \code{key}), and, when \code{man}
@@ -127,9 +175,12 @@ not
 an error.
 
 Errors: \code{dir} missing or not a directory; no files to bundle, or a named
-file not in \code{dir}; a key \code{\link[=cpsatst]{cpsatst()}} cannot
+file not in \code{dir}, or a link whose target does not exist; the links,
+folders and names above; a file changed while it was read; a file that cannot
+be read, or a bundle file or its folder that cannot be written to (all
+before any file is hashed); a key \code{\link[=cpsatst]{cpsatst()}} cannot
 sign with;
-\code{cpsbndlrd()} given a file that is not a bundle;
+\code{cpsbndlrd()} given a file that is not a bundle, or one over 32 MiB;
 \code{cpsbndlvrf()} given something other than a bundle or a path.
 Reading a bundle whose signature records a stateful key's state warns (see
 \code{\link[=cpsatst]{cpsatst()}}).

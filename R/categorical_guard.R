@@ -776,6 +776,8 @@ format.rmbl_or_check <- function(x, ...) {
 #' try(grdbin(c(0, 1, 2), "treated"))
 #' @export
 grdbin <- function(x, col) {
+  # the name is quoted in every refusal: a function there failed in paste()
+  col <- .rmbl_text1(col, "col")
   if (is.null(x) || !.rmbl_is_atomic(x)) {
     stop("Column `", col, "` must be an atomic vector", call. = FALSE)
   }
@@ -874,6 +876,7 @@ grdbin <- function(x, col) {
 #' @export
 rcdmnf <- function(orig, recd, map, pub = NULL, key = NULL, ctx = NULL) {
   .rmbl_no_fn(ctx = ctx)
+  .rcd_map_named(map)
   vrfrcd(orig, recd, map)
   marg <- if (!is.null(pub)) {
     vrfmrg(recd, pub)
@@ -1033,9 +1036,10 @@ wrrcdmnf <- function(man, path) {
 #' @export
 vrfrcdmnf <- function(path, orig, recd) {
   .rmbl_no_fn(recd = recd)
-  path <- .rmbl_file1(path, "path")
+  # within the 32 MiB the package's JSON documents are held to
+  path <- .rmbl_file1(path, "path", max = 32 * 2^20)
   m <- .rmbl_json_text(paste(
-    readLines(path, warn = FALSE, encoding = "UTF-8"),
+    .rmbl_json_file_lines(path),
     collapse = "\n"
   ))
   mapping <- unlist(m$mapping)
@@ -1304,22 +1308,7 @@ rlblfrns <- function(vlabs, obs, cnts = NULL) {
   if (!is.null(cnts)) {
     cnts <- stats::setNames(.rmbl_num(cnts, "cnts"), names(cnts))
   } # read by label
-  if (is.null(names(vlabs)) || is.null(names(obs))) {
-    stop(
-      "rlblfrns: `vlabs` (code = label) and `obs` ",
-      "(true = seen) ",
-      "must both be named",
-      call. = FALSE
-    )
-  }
-  labs <- unname(vlabs)
-  if (!setequal(names(obs), labs) || !setequal(unname(obs), labs)) {
-    stop(
-      "rlblfrns: `obs` must be a permutation of the labels ",
-      "in `vlabs`",
-      call. = FALSE
-    )
-  }
+  labs <- .rlbl_check(vlabs, obs)
   .obs <- unname(obs[labs])
   mech <- .rlbl_mechanisms(vlabs, labs, cnts)
   rows <- lapply(names(mech), function(nm) {
@@ -1718,8 +1707,10 @@ format.rmbl_transfer_check <- function(x, ...) {
 #' @return list(orig, recd).
 #' @noRd
 .vrf_inputs <- function(orig, recd) {
-  if (!.rmbl_is_atomic(orig) || !.rmbl_is_atomic(recd)) {
-    stop("`orig` and `recd` must be atomic vectors", call. = FALSE)
+  # raw bytes are no labels: order() refused them in base R's words
+  if (!.rmbl_is_atomic(orig) || !.rmbl_is_atomic(recd) || is.raw(orig) ||
+        is.raw(recd)) {
+    stop("`orig` and `recd` must be atomic vectors of labels", call. = FALSE)
   }
   if (is.factor(orig)) {
     orig <- as.character(orig)
@@ -1753,15 +1744,20 @@ format.rmbl_transfer_check <- function(x, ...) {
 #' @return NULL, invisibly.
 #' @noRd
 .vrf_mapping <- function(tab, decl) {
-  realized <- apply(tab, 1L, function(r) colnames(tab)[which(r > 0)])
-  for (old in names(realized)) {
-    expected <- if (old %in% names(decl)) unname(decl[old]) else old
-    if (!identical(realized[[old]], expected)) {
+  # by position: apply() simplified to a vector, and a category named ""
+  # (an empty label) could not be looked up by name ("subscript out of
+  # bounds")
+  for (i in seq_len(nrow(tab))) {
+    old <- rownames(tab)[i]
+    got <- colnames(tab)[tab[i, ] > 0]
+    k <- match(old, names(decl))
+    expected <- if (is.na(k)) old else unname(decl[k])
+    if (!identical(got, expected)) {
       stop(
         "vrfrcd: ",
         .rmbl_squote(old),
         " was mapped to ",
-        .rmbl_squote(realized[[old]]),
+        .rmbl_squote(got),
         " but the declared mapping says ",
         .rmbl_squote(expected),
         ". THIS is how groups get swapped; fix the ",
@@ -1882,7 +1878,11 @@ format.rmbl_transfer_check <- function(x, ...) {
 .rcm_counts <- function(m, recd) {
   after <- table(as.character(recd), useNA = "no")
   after_num <- stats::setNames(as.numeric(after), names(after))
-  man_num <- vapply(m$counts_after, as.numeric, numeric(1))
+  man_num <- vapply(
+    m$counts_after,
+    function(v) suppressWarnings(as.numeric(v)[1L]),
+    numeric(1)
+  )
   if (
     !identical(names(after_num), names(man_num)) ||
       !isTRUE(all.equal(unname(after_num), unname(man_num)))
@@ -2159,7 +2159,7 @@ format.rmbl_transfer_check <- function(x, ...) {
 .ac_label_hazards <- function(lv, core) {
   hazards <- character(0)
   sentinels <- c("NA", "N/A", "NAN", "NULL", "NONE", ".", "-", "?")
-  sentinel <- lv[toupper(core) %in% sentinels]
+  sentinel <- lv[.rmbl_upper(core) %in% sentinels]
   if (length(sentinel)) {
     hazards <- c(
       hazards,
@@ -2183,7 +2183,8 @@ format.rmbl_transfer_check <- function(x, ...) {
       )
     )
   }
-  lc <- tolower(core)
+  # the user's labels, not file names: accented capitals fold too
+  lc <- .rmbl_fold(core)
   # a case-variant pair is two DIFFERENT trimmed labels that agree once
   # lower-cased; a pair that differs only by whitespace was reported above
   case_groups <- split(core, lc)
@@ -2244,4 +2245,50 @@ format.rmbl_transfer_check <- function(x, ...) {
     ))
   }
   NULL
+}
+
+#' rlblfrns()'s `vlabs` and `obs`, checked: named vectors (a data frame, a
+#' list, has names and failed in `[` in base R's words), `obs` a
+#' permutation of the labels.
+#' @param vlabs,obs As for rlblfrns().
+#' @return The labels, unnamed.
+#' @noRd
+.rlbl_check <- function(vlabs, obs) {
+  if (
+    !.rmbl_is_atomic(vlabs) || !.rmbl_is_atomic(obs) ||
+      is.null(names(vlabs)) || is.null(names(obs))
+  ) {
+    stop(
+      "rlblfrns: `vlabs` (code = label) and `obs` ",
+      "(true = seen) ",
+      "must both be named vectors",
+      call. = FALSE
+    )
+  }
+  labs <- unname(vlabs)
+  if (!setequal(names(obs), labs) || !setequal(unname(obs), labs)) {
+    stop(
+      "rlblfrns: `obs` must be a permutation of the labels ",
+      "in `vlabs`",
+      call. = FALSE
+    )
+  }
+  labs
+}
+
+#' Stops unless a recode map names every code it maps: a map with no names
+#' was taken by rcdmnf(), and printing the manifest then failed in
+#' data.frame()'s words.
+#' @param map The map, old = new.
+#' @return NULL, invisibly.
+#' @noRd
+.rcd_map_named <- function(map) {
+  nm <- names(map)
+  fine <- c(is.atomic(map) | is.list(map), length(map) > 0L,
+            length(nm) == length(map), !anyNA(nm), all(nzchar(nm)))
+  if (!all(fine)) {
+    stop(.rmbl_fn(), "`map` must be a named vector, old = new, with a name ",
+         "for every code", call. = FALSE)
+  }
+  invisible(NULL)
 }

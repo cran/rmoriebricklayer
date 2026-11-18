@@ -420,11 +420,14 @@ test_that("C8: parallel refreshes each use their own temporary file", {
       error = function(e) conditionMessage(e)
     )
   }
+  skip_if_lowmem()
   res <- parallel::mclapply(
     1:12,
     refresh3,
-    # R CMD check --as-cran caps child processes at 2 (_R_CHECK_LIMIT_CORES_)
-    mc.cores = if (nzchar(Sys.getenv("_R_CHECK_LIMIT_CORES_"))) 2L else 12L
+    # two writers at a time are enough for the race; each forked child is a
+    # copy of this test process (about 850 MB under covr), and 12 at once ran
+    # a 2 GB machine out of memory, killing the test run (pkgcheck's covr)
+    mc.cores = 2L
   )
   expect_identical(unique(unlist(res)), "ok")
   expect_length(list.files(d, pattern = "[.]part$"), 0L)
@@ -459,7 +462,11 @@ test_that(
     local_mocked_bindings(.bl_data_get = function(...) {
       stop("could not resolve host")
     })
-    expect_identical(nrow(dload("db/t")), 1L)
+    # the warning is given once a session: cleared, so it comes whatever
+    # file ran before
+    suppressWarnings(rm(list = "db/t", envir = .bl_data_nodigest))
+    expect_warning(n <- nrow(dload("db/t")), "without a SHA-256")
+    expect_identical(n, 1L)
     # no manifest anywhere: refused, and the cached table is kept for the next
     # run
     unlink(file.path(d, "manifest.json"))
@@ -577,7 +584,7 @@ test_that("C10: Ctrl-C at a real terminal prompt exits 130 (not mocked)", {
   launcher <- system.file("bin", "rmbl", package = "rmoriebricklayer")
   skip_if_not(nzchar(launcher))
   h <- withr::local_tempdir()
-  for (args in c("login --token", "config set own.key")) {
+  for (args in "config set own.key") {
     # the terminal's transcript is kept, so a failure shows what the child
     # printed
     ty <- withr::local_tempfile(fileext = ".typescript")
@@ -585,16 +592,28 @@ test_that("C10: Ctrl-C at a real terminal prompt exits 130 (not mocked)", {
     # not after a fixed sleep: on a loaded runner R was still starting at 5 s,
     # and an interrupt during startup exits 1 (C-locale leg, 01200ae and
     # 2c1f5c1: the transcript was empty)
+    # ^C goes in as soon as the prompt is there, with no sleep after it, and
+    # the input stays open until the command has answered: closed at once,
+    # script sent the end of input a moment after the ^C, and on a loaded
+    # machine the read could end on it first (exit 2; audit of 21478080)
     wait <- sprintf(
       paste(
         "i=0; while [ $i -lt 240 ] && ! grep -q 'key: ' %s 2>/dev/null;",
-        "do sleep 0.5; i=$((i+1)); done; sleep 1"
+        "do sleep 0.5; i=$((i+1)); done"
+      ),
+      shQuote(ty)
+    )
+    done <- sprintf(
+      paste(
+        "i=0; while [ $i -lt 240 ] && ! grep -qE 'interrupted|usage' %s",
+        "2>/dev/null; do sleep 0.5; i=$((i+1)); done"
       ),
       shQuote(ty)
     )
     cmd <- sprintf(
-      "(%s; printf '\\003') | script -qfec %s %s > /dev/null 2>&1",
+      "(%s; printf '\\003'; %s) | script -qfec %s %s > /dev/null 2>&1",
       wait,
+      done,
       shQuote(paste("sh", shQuote(launcher), args)),
       shQuote(ty)
     )
@@ -603,6 +622,7 @@ test_that("C10: Ctrl-C at a real terminal prompt exits 130 (not mocked)", {
     # `Rscript` first on PATH that refuses to run ("should not be used without a
     # path"), so the launcher starts this R's own (every Linux CI leg, fc5ccfc
     # and d6f3616; the transcript showed the second)
+    skip_if_lowmem()
     st <- withr::with_envvar(
       c(
         HOME = h,
@@ -699,49 +719,6 @@ test_that(
         "not a whole number >= 0 \\(below 2\\^31\\)"
       )
     }
-  }
-)
-
-test_that(
-  paste0(
-    "L3: a key saved for another hosted address is said once, and the ",
-    "summary says so"
-  ),
-  {
-    d <- withr::local_tempdir()
-    withr::local_envvar(
-      XDG_CONFIG_HOME = d,
-      MORIE_HOSTED_KEY = "",
-      MORIE_HOSTED_BASE_URL = "https://llm.example.org/v1"
-    )
-    dir.create(file.path(d, "morie"))
-    writeLines(
-      paste0(
-        '{"hosted_key": "sk-test", "hosted_base_url": ',
-        '"https://old.example.org/v1"}'
-      ),
-      file.path(d, "morie", "credentials.json")
-    )
-    rm(
-      list = ls(.bl_said_once),
-      envir = .bl_said_once
-    )
-    expect_message(
-      expect_null(.bl_hosted_key()),
-      "issued for https://old.example.org/v1"
-    )
-    expect_silent(expect_null(.bl_hosted_key()))
-    got <- new.env()
-    got$out <- character()
-    .bl_cli_doctor(function(x) got$out <- c(got$out, x))
-    expect_true(any(grepl(
-      paste0(
-        "data key: issued for https://old.example.org/v1, so not sent to ",
-        "https://llm.example.org/v1"
-      ),
-      got$out,
-      fixed = TRUE
-    )))
   }
 )
 

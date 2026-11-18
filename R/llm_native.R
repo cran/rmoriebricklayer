@@ -3,13 +3,9 @@
 # Language models, bring your own key: an OpenAI-compatible endpoint of your own
 # (MORIE_LLM_BASE_URL), each provider whose key is set (R/llm_providers.R), and
 # a local Ollama server (OLLAMA_HOST, default http://localhost:11434). The
-# hosted MORIE language-model tier is retired. The MORIE key that remains is the
-# data key for data.rmorie.com: personal, issued by the GitHub / emailed-code
-# sign-in at data.rmorie.com/auth or on request at
-# https://www.rmorie.com/access, stored in a credentials file the other MORIE
-# packages read as well; its sign-in addresses come from the signed services
-# document (svcs()). Every request goes through the package's own libcurl
-# binding.
+# hosted MORIE language-model tier is retired, and the package signs in
+# nowhere: the curated tables at data.rmorie.com need no key. Every request
+# goes through the package's own libcurl binding.
 
 #' The language-model route that would answer
 #'
@@ -532,228 +528,6 @@ llmask <- function(
   ans
 }
 
-#' Sign in for the curated tables at data.rmorie.com
-#'
-#' Stores your personal MORIE data key in
-#' \code{$XDG_CONFIG_HOME/morie/credentials.json} (owner-only; the file
-#' the \code{morie}, \code{rmorie} and \code{rmoriedata} packages read too,
-#' so one sign-in serves all of them). The key opens the curated tables
-#' (\code{\link{dload}}); it is not used for language models,
-#' which run on your own key or a local model (\code{\link{llmask}}).
-#' Keys are personal: the GitHub or emailed-code sign-in issues one, or ask at
-#' \code{www.rmorie.com/access/}.
-#' The sign-in addresses come from \code{\link{svcs}}. Three ways in:
-#' \itemize{
-#'   \item \code{token}: a key you already have, from the website or an
-#'     email. It is checked with the service first and stored only when
-#'     it is accepted; a refused key, or no answer, stores nothing.
-#'   \item \code{email}: a one-time code is sent to the address (valid
-#'     ten minutes, single use); you type it, or pass \code{code}.
-#'   \item neither: the GitHub device flow; a code is shown to enter at
-#'     github.com, and the key arrives once you approve.
-#' }
-#' Nothing is written except by this explicit call.
-#'
-#' @details
-#' The credentials file is edited as text: only the three members this
-#' package owns (\code{hosted_key}, \code{hosted_user} and
-#' \code{hosted_base_url}, the address the key was issued for) are set, and
-#' every other byte stays, so entries written by the other packages survive.
-#' The file is written through a fresh temporary name, created owner-only
-#' (mode 0600, folder 0700 on Unix) before the key is written. A file that
-#' is not a JSON object, is not valid JSON or names a member twice is
-#' refused rather than overwritten. \code{XDG_CONFIG_HOME} moves the file;
-#' when unset it is \code{~/.config/morie/credentials.json}.
-#'
-#' The sign-in service address is the signed services document's
-#' \code{data.auth_url} (see \code{\link{svcs}}), or the environment variable
-#' \code{MORIE_HOSTED_AUTH_URL} when set (it must be a public \code{https}
-#' address). The device flow polls every \code{interval} seconds the
-#' service names (5 by default), prints a progress line about every 30
-#' seconds, and stops with an error after \code{pollmaxsec}.
-#'
-#' Errors: an empty \code{token}; a \code{token} the data service does not
-#' accept, or no answer from it (nothing is stored); an \code{email} that is
-#' empty or not of the form \code{name@domain.tld}; no code typed at the
-#' prompt; a refused code; a sign-in service that answers with an error or
-#' returns no key; a credentials file that cannot be edited safely.
-#'
-#' @param token Character scalar or \code{NULL} (the default): a key you
-#'   already have, issued at \code{www.rmorie.com/access/}.
-#'   Surrounding spaces are removed. Takes precedence over \code{email}.
-#' @param email Character scalar or \code{NULL} (the default): sign in with
-#'   a one-time code sent to this address. Lower-cased before use.
-#' @param code Character scalar or \code{NULL} (the default): the emailed
-#'   code when you already have it; \code{NULL} sends a new code and asks
-#'   for it at the console. Used only with \code{email}.
-#' @param openbro Logical scalar, default \code{interactive()}: open
-#'   the GitHub page for the device flow in the system browser (only a
-#'   public \code{https} address is opened).
-#' @param pollmaxsec Numeric scalar, default \code{600}: how many
-#'   seconds the device flow waits for you to approve the sign-in.
-#' @param accter Logical scalar, default \code{FALSE}: \code{TRUE}
-#'   accepts the data access terms (read them at
-#'   \code{data.rmorie.com/terms}) without the console asking. A new
-#'   key is issued only once they are accepted, here or at the prompt.
-#' @param name Character scalar or \code{NULL}: your name (asked for when
-#'   \code{NULL}). Required for a new key.
-#' @param affil Character scalar or \code{NULL}: your university,
-#'   employer or organisation (optional; asked for when \code{NULL}).
-#' @param purp Character scalar or \code{NULL}: why you need the data, a
-#'   sentence or two (asked for when \code{NULL}). Required for a new key.
-#' @param restr Logical scalar or \code{NULL}: \code{TRUE} also accepts
-#'   Schedule B of the terms, which opens the restricted tables (ICPSR, NCVS
-#'   38604, A2AJ case law); \code{NULL} asks at the console.
-#' @param supnm,suprole,supemail Character scalars
-#'   or \code{NULL}: the supervisor, department chair, director or
-#'   coordinator who knows of your use, their role and their email. Required
-#'   with \code{restricted = TRUE}; asked for when \code{NULL}. The role is
-#'   one of \code{"supervisor"}, \code{"chair"}, \code{"director"},
-#'   \code{"coordinator"} or \code{"other"}.
-#' @return The key (character scalar), invisibly. A message names the file
-#'   it was stored in.
-#' @seealso \code{\link{dlogout}} to remove the key.
-#' @examplesIf isTRUE(getOption("rmbl.examples"))
-#' old <- Sys.getenv("XDG_CONFIG_HOME", unset = NA)
-#' Sys.setenv(XDG_CONFIG_HOME = tempfile()) # never touch your real credentials
-#'
-#' # input checks that need no network
-#' try(dlogin(token = "   "))
-#' try(dlogin(email = "not-an-email"))
-#'
-#' if (is.na(old)) {
-#'   Sys.unsetenv("XDG_CONFIG_HOME")
-#' } else {
-#'   Sys.setenv(XDG_CONFIG_HOME = old)
-#' }
-#'
-#' @examplesIf interactive()
-#' # these contact the sign-in service
-#' dlogin(token = "<key issued at https://www.rmorie.com/access/>")
-#' dlogin(email = "you@example.com")
-#' dlogin(email = "you@example.com", code = "123456")
-#' dlogin() # GitHub device flow; asks for the terms, name and reason
-#' # everything given up front, for a script
-#' dlogin(accter = TRUE, name = "Ada Lovelace",
-#'                      purp = "Course project on court delays in Ontario.")
-#' @export
-dlogin <- function(
-  token = NULL,
-  email = NULL,
-  code = NULL,
-  openbro = interactive(),
-  pollmaxsec = 600,
-  accter = FALSE,
-  name = NULL,
-  affil = NULL,
-  purp = NULL,
-  restr = NULL,
-  supnm = NULL,
-  suprole = NULL,
-  supemail = NULL
-) {
-  if (!is.null(token)) {
-    if (!is.character(token) && !is.numeric(token)) {
-      stop("`token` must be one string", call. = FALSE)
-    }
-    token <- trimws(as.character(token))
-    if (length(token) != 1L || !nzchar(token)) {
-      stop("an empty token cannot be stored", call. = FALSE)
-    }
-    # ask the gateway first: a mistyped key in the shared file breaks rmorie and
-    # morie too
-    .bl_check_token(token)
-    p <- .bl_store_key(token)
-    message(sprintf("Token stored in %s", p))
-    return(invisible(token))
-  }
-  if (!is.null(email)) {
-    .bl_check_email(email)
-  }
-  # a new key: the terms are accepted, and who is asking and why is said, before
-  # any sign-in starts
-  profile <- .bl_signin_profile(
-    accept_terms = accter,
-    name = name,
-    affiliation = affil,
-    purpose = purp,
-    restricted = restr,
-    supervisor_name = supnm,
-    supervisor_role = suprole,
-    supervisor_email = supemail
-  )
-  if (!is.null(email)) {
-    return(.bl_login_email(email, code, profile))
-  }
-  .bl_login_device(openbro, pollmaxsec, profile)
-}
-
-#' Forget the MORIE data key
-#'
-#' Removes the MORIE data key that \code{\link{dlogin}}
-#' stored, so this machine can no longer load the curated tables at
-#' data.rmorie.com until you sign in again. Use it on a shared machine, or
-#' to switch to another key. Nothing is contacted.
-#'
-#' @details The shared credentials file is \code{credentials.json} in the folder
-#' \code{$XDG_CONFIG_HOME/morie}, else in \code{~/.config/morie}. It is edited
-#' as text. Three members are removed: \code{hosted_key}, \code{hosted_user} and
-#' \code{hosted_base_url}. Every other entry (written by \code{morie},
-#' \code{rmorie} or \code{rmoriedata}) is kept byte for byte. When nothing else
-#' is left the file is deleted. A key set in the environment variable
-#' \code{MORIE_HOSTED_KEY} is not touched. A message says whether a key was
-#' removed.
-#'
-#' Errors when the file is not a JSON object (or not valid JSON, or names a
-#' member twice), and when the key cannot be removed without damaging the
-#' file; in both cases the file is left as it was.
-#'
-#' @return Logical scalar, invisibly: \code{TRUE} when a key was removed,
-#'   \code{FALSE} when none was stored.
-#' @seealso \code{\link{dlogin}}.
-#' @examplesIf isTRUE(getOption("rmbl.examples"))
-#' old <- Sys.getenv("XDG_CONFIG_HOME", unset = NA)
-#' Sys.setenv(XDG_CONFIG_HOME = tempfile()) # a scratch credentials folder
-#'
-#' # nothing stored yet
-#' dlogout()
-#'
-#' # a file holding a key and another tool's entry: only the key goes
-#' d <- file.path(Sys.getenv("XDG_CONFIG_HOME"), "morie")
-#' dir.create(d, recursive = TRUE)
-#' writeLines(
-#'   '{"hosted_key": "k-123", "other_tool": 1}',
-#'   file.path(d, "credentials.json")
-#' )
-#' dlogout()
-#' readLines(file.path(d, "credentials.json"))
-#'
-#' # a damaged file is refused, not overwritten
-#' writeLines("not json", file.path(d, "credentials.json"))
-#' try(dlogout())
-#'
-#' if (is.na(old)) {
-#'   Sys.unsetenv("XDG_CONFIG_HOME")
-#' } else {
-#'   Sys.setenv(XDG_CONFIG_HOME = old)
-#' }
-#' @export
-dlogout <- function() {
-  p <- .bl_credentials_path()
-  had <- FALSE
-  if (file.exists(p)) {
-    had <- .bl_logout_file(p)
-  }
-  message(
-    if (had) {
-      "Logged out: the MORIE data key was removed."
-    } else {
-      "No MORIE data key was stored."
-    }
-  )
-  invisible(had)
-}
-
 #' Report the language-model routes available from this machine
 #'
 #' Shows, in one table, every way \code{\link{llmask}} could reach a language
@@ -851,10 +625,8 @@ llmstat <- function() {
 #' Returns the path of the shared credentials file.
 #'
 #' $XDG_CONFIG_HOME/morie/credentials.json, the file the morie (Python)
-#' and rmorie (R) packages read and write too, so one sign-in serves all.
-#' Reading it is always allowed; it is only ever written by an
-#' explicit sign-in (dlogin()), never by examples or tests,
-#' which point XDG_CONFIG_HOME at a temporary directory.
+#' and rmorie (R) packages use. This package neither reads nor writes it: its
+#' folder is where the settings file llm.json is kept.
 #' @return One path.
 #' @noRd
 .bl_credentials_path <- function() {
@@ -863,54 +635,6 @@ llmstat <- function() {
     base <- file.path(path.expand("~"), ".config")
   }
   file.path(base, "morie", "credentials.json")
-}
-
-#' Reads the shared credentials file, refusing one that is not a JSON object.
-#' @return A named list, empty when the file does not exist.
-#' @noRd
-.bl_read_credentials <- function() {
-  p <- .bl_credentials_path()
-  if (!file.exists(p)) {
-    return(list())
-  }
-  out <- .bl_credentials_object(p)
-  if (is.null(out)) {
-    # the file is shared with morie and rmorie: a file that does not parse is
-    # said, not read as "no key" and then written over by the next login (which
-    # deleted the other entries)
-    stop(
-      .rmbl_fn(),
-      sprintf(
-        paste0(
-          "%s is not a JSON object; fix or remove it (it is shared with ",
-          "morie and rmorie)"
-        ),
-        p
-      ),
-      call. = FALSE
-    )
-  }
-  out
-}
-
-#' The credentials file as a named list, or NULL when it is not a JSON object.
-#' @param p The path of the credentials file.
-#' @param simplify Whether the JSON parser simplifies vectors.
-#' @return A named list, or NULL.
-#' @noRd
-.bl_credentials_object <- function(p, simplify = TRUE) {
-  txt <- .bl_read_text(p)
-  if (!startsWith(trimws(txt), "{")) {
-    return(NULL)
-  } # an array or a scalar is not the credentials object
-  out <- tryCatch(
-    fromjs(txt, simplifyVector = simplify, bigint_as_char = TRUE),
-    error = function(e) NULL
-  )
-  if (!is.list(out)) {
-    return(NULL)
-  }
-  out
 }
 
 #' Reads the credentials file as UTF-8 text.
@@ -935,7 +659,7 @@ llmstat <- function() {
       sprintf(
         "%s is %s bytes: too large to be a credentials file",
         p,
-        format(n, big.mark = ",")
+        .rmbl_ntxt(n)
       ),
       call. = FALSE
     )
@@ -967,14 +691,9 @@ llmstat <- function() {
   # the directory as private as its files: under umask 000 it came out 0777
   # (review of 46de6a9)
   .bl_private_dir(dirname(p))
-  tmp <- tempfile(pattern = ".cred-", tmpdir = dirname(p), fileext = ".tmp")
-  file.create(tmp)
-  Sys.chmod(tmp, mode = "0600")
-  writeLines(txt, tmp, useBytes = TRUE, sep = "")
-  if (!isTRUE(file.rename(tmp, p))) {
-    unlink(tmp)
-    stop(sprintf("could not write %s", p), call. = FALSE)
-  }
+  .rmbl_wfile(p, function(con) {
+    writeLines(txt, con, sep = "", useBytes = TRUE)
+  }, private = TRUE, binary = FALSE)
   invisible(p)
 }
 
@@ -1123,32 +842,6 @@ llmstat <- function() {
   list(entry = list(key = key, start = ks, vstart = vs, end = ve))
 }
 
-#' Checks that the credentials text parses and names no key twice.
-#'
-#' The whole file as the real parser reads it, before a byte is edited: the
-#' member scanner alone accepted bare words, missing commas, trailing garbage
-#' and duplicate keys, wrote the key into such a file and every later read
-#' failed (review of 52a8883, B5). A key listed twice is refused: morie reads
-#' the last and this package edited the first.
-#' @param txt The credentials file's JSON text to check.
-#' @return `TRUE` or `FALSE`.
-#' @noRd
-.bl_credentials_text_ok <- function(txt) {
-  mem <- .bl_json_top_members(txt)
-  if (is.null(mem)) {
-    return(FALSE)
-  }
-  obj <- tryCatch(
-    fromjs(txt, simplifyVector = FALSE, bigint_as_char = TRUE),
-    error = function(e) NULL
-  )
-  if (!is.list(obj) || (length(obj) && is.null(names(obj)))) {
-    return(FALSE)
-  }
-  keys <- vapply(mem, function(m) m$key, "")
-  !anyDuplicated(keys) && length(obj) == length(mem)
-}
-
 #' Set (value a string) or remove (value NULL) one top-level member by editing
 #' the text.
 #' @param txt The credentials file's JSON text to edit in place.
@@ -1222,207 +915,9 @@ llmstat <- function() {
   invisible(d)
 }
 
-#' Stores the data key, its user and its address in the credentials file,
-#' keeping every other byte.
-#' @param key The data key.
-#' @param user The user name the sign-in service gave, or NULL.
-#' @return The path, invisibly.
-#' @noRd
-.bl_store_key <- function(key, user = NULL) {
-  p <- .bl_credentials_path()
-  txt <- if (file.exists(p)) .bl_read_text(p) else "{}"
-  if (!.bl_credentials_text_ok(txt)) {
-    stop(
-      sprintf(
-        paste(
-          "%s is not a JSON object (or not valid JSON, or lists a key",
-          "twice); fix or remove it",
-          "before a key is saved (writing into it would leave a file no",
-          "package can read)"
-        ),
-        p
-      ),
-      call. = FALSE
-    )
-  }
-  # the file is edited as text: this package's three members are set, every
-  # other byte stays
-  new <- .bl_credentials_text_set(txt, "hosted_key", key)
-  if (!is.null(user)) {
-    new <- .bl_credentials_text_set(new, "hosted_user", user)
-  }
-  new <- .bl_credentials_text_set(new, "hosted_base_url", .bl_key_address())
-  back <- if (.bl_credentials_text_ok(new)) {
-    fromjs(new, simplifyVector = FALSE, bigint_as_char = TRUE)
-  } else {
-    NULL
-  }
-  if (!identical(back$hosted_key, key)) {
-    stop(
-      sprintf(
-        paste0(
-          "could not store the key in %s without damaging it; the file ",
-          "was left as it was"
-        ),
-        p
-      ),
-      call. = FALSE
-    )
-  }
-  .bl_write_private_text(p, new)
-}
-
-#' Returns the stored data key when it may be sent to the address in use.
-#' @return The key, or NULL (with a message, once, when it was saved for another
-#'   address).
-#' @noRd
-.bl_hosted_key <- function() {
-  st <- .bl_hosted_key_state()
-  if (identical(st$state, "other_address")) {
-    # said once per session and pair of addresses: route resolution asks more
-    # than once, and the same line came twice (review of 02a38be, L3)
-    said <- paste(st$saved_for, st$now)
-    if (!isTRUE(.bl_said_once[[said]])) {
-      assign(said, TRUE, envir = .bl_said_once)
-      message(sprintf(
-        "the stored data key was issued for %s and is not sent to %s",
-        st$saved_for,
-        st$now
-      ))
-    }
-    return(NULL)
-  }
-  st$key
-}
-
 .bl_said_once <- new.env(parent = emptyenv())
 
-#' The stored hosted key and whether it may be sent: state \code{"none"},
-#' \code{"ok"} or \code{"other_address"} (a key saved for another address than
-#' the one in use), with no message.
-#' @return A list with `state` and `key`, and for `"other_address"` the
-#'   `saved_for` and `now` addresses.
-#' @noRd
-.bl_hosted_key_state <- function() {
-  env <- trimws(Sys.getenv("MORIE_HOSTED_KEY", unset = ""))
-  if (nzchar(env)) {
-    return(list(state = "ok", key = env))
-  }
-  cred <- .bl_read_credentials()
-  key <- cred$hosted_key
-  if (!is.character(key) || length(key) != 1L || !nzchar(key)) {
-    return(list(state = "none", key = NULL))
-  }
-  # the key was issued for the address it was saved with: an address set
-  # afterwards in the environment or the config gets no key, the same rule as
-  # the own and Ollama keys
-  saved_for <- .bl_key_saved_for(cred$hosted_base_url)
-  # the comparison runs whatever the services document says: with the model tier
-  # off it is the data address (a key saved for another server went to
-  # data.rmorie.com when `now` was NULL; review of 29a55d8, G2)
-  now <- tryCatch(.bl_key_address(), error = function(e) NULL)
-  saved_for <- .bl_key_legacy(saved_for, now)
-  if (
-    nzchar(saved_for) &&
-      !identical(sub("/+$", "", saved_for), sub("/+$", "", now %||% ""))
-  ) {
-    return(list(
-      state = "other_address",
-      key = NULL,
-      saved_for = saved_for,
-      now = now %||% ""
-    ))
-  }
-  list(state = "ok", key = key)
-}
-
-# Where pre-0.5.12 logins recorded the key: the retired language-model tier's
-# gateway.
-.bl_legacy_key_addresses <- "https://llm.rmorie.com"
-
-#' The address a stored key belongs to: the model tier's while the services
-#' document has one, else the data service's (the signed document's, never
-#' MORIE_DATA_URL). \code{""} when neither is known.
-#' @return One address without a trailing slash, or `""`.
-#' @noRd
-.bl_key_address <- function() {
-  a <- tryCatch(.bl_hosted_base(), error = function(e) NULL)
-  if (is.null(a)) {
-    a <- .rmbl_services_data()$base_url %||% ""
-  }
-  sub("/+$", "", a)
-}
-
-#' Returns the address of the retired language-model tier, if any.
-#'
-#' The address a stored key was issued for under the retired language-model
-#' tier, or NULL (the signed services document now switches that tier off, and a
-#' key is bound to the data address). MORIE_HOSTED_BASE_URL overrides (\code{""}
-#' on POSIX or \code{"off"} on any platform disables; Windows drops a variable
-#' set to \code{""}).
-#' @return One address, or NULL.
-#' @noRd
-.bl_hosted_base <- function() {
-  saved <- .bl_config_value("MORIE_HOSTED_BASE_URL")
-  if (!"MORIE_HOSTED_BASE_URL" %in% names(Sys.getenv()) && is.null(saved)) {
-    svc <- .rmbl_services_llm()
-    if (!identical(svc$mode, "key") || !nzchar(svc$base_url %||% "")) {
-      return(NULL)
-    }
-    return(svc$base_url)
-  }
-  v <- sub(
-    "/+$",
-    "",
-    trimws(Sys.getenv("MORIE_HOSTED_BASE_URL", unset = saved %||% ""))
-  )
-  if (!nzchar(v) || tolower(v) %in% c("off", "none", "disabled")) {
-    return(NULL)
-  }
-  # the bearer key is sent to this endpoint: https and a public address
-  .rmbl_check_public_url(v, "MORIE_HOSTED_BASE_URL")
-}
-
-#' Returns the address of the sign-in service.
-#'
-#' The sign-in service that issues the data key: the services document's
-#' data.auth_url, else the auth_url of its llm block (documents signed before
-#' the data service issued its own keys).
-#' @return One address.
-#' @noRd
-.bl_hosted_auth <- function() {
-  v <- sub("/+$", "", trimws(Sys.getenv("MORIE_HOSTED_AUTH_URL", unset = "")))
-  if (nzchar(v)) {
-    return(.rmbl_check_public_url(v, "MORIE_HOSTED_AUTH_URL"))
-  } # a code and a key go there
-  for (a in c(.rmbl_services_data()$auth_url, .rmbl_services_llm()$auth_url)) {
-    if (nzchar(a %||% "")) return(a)
-  }
-  file.path(
-    .rmbl_services_data()$base_url %||% "https://data.rmorie.com",
-    "auth"
-  )
-}
-
-#' How to get a key, in one line.
-#' @return One string.
-#' @noRd
-.bl_access_hint <- function() {
-  sprintf(
-    paste(
-      "`%s login` signs in with GitHub or an emailed code; a key you",
-      "were given:",
-      "`%s login --token` and paste it when asked (R: dlogin(token =",
-      ")); or ask at %s"
-    ),
-    .bl_prog(),
-    .bl_prog(),
-    .rmbl_services_data()$request_access %||% "https://www.rmorie.com/access"
-  )
-}
-
-#' The GET seam for public https addresses (a provider model list, the data key
-#' check).
+#' The GET seam for public https addresses (a provider model list).
 #' @param url The public https address to GET, checked first.
 #' @param timeout The timeout in seconds.
 #' @param headers Request headers, or NULL.
@@ -1456,7 +951,8 @@ llmstat <- function() {
     ".]+\\]|",
     "\\[f[cd][0-9a-f]{2}:[0-9a-f:.]*\\])"
   )
-  grepl(paste0("^https?://", host, "(:[0-9]+)?(/|$)"), url, ignore.case = TRUE)
+  grepl(.rmbl_ci(paste0("^https?://", host, "(:[0-9]+)?(/|$)")), url,
+      perl = TRUE)
 }
 
 #' Returns the base address of your own OpenAI-compatible endpoint, if set.
@@ -1464,7 +960,7 @@ llmstat <- function() {
 #' @noRd
 .bl_own_base <- function() {
   v <- sub("/+$", "", .bl_env1("MORIE_LLM_BASE_URL") %||% "")
-  if (!nzchar(v) || tolower(v) %in% c("off", "none", "disabled")) {
+  if (!nzchar(v) || .rmbl_lower(v) %in% c("off", "none", "disabled")) {
     return(NULL)
   }
   if (!grepl("^https?://[^/[:space:]]+", v)) {
@@ -1509,7 +1005,7 @@ llmstat <- function() {
     .bl_config_value("OLLAMA_HOST") %||%
     .bl_config_value("OLLAMA_BASE_URL") %||%
     "http://localhost:11434"
-  if (tolower(v) %in% c("off", "none", "disabled")) {
+  if (.rmbl_lower(v) %in% c("off", "none", "disabled")) {
     return(NULL)
   }
   if (!grepl("^https?://", v)) {
@@ -1736,7 +1232,7 @@ llmstat <- function() {
 #' @return The route, or NULL for the automatic order.
 #' @noRd
 .bl_llm_saved_route <- function() {
-  saved <- tolower(.bl_env1("MORIE_LLM_ROUTE") %||% "auto")
+  saved <- .rmbl_lower(.bl_env1("MORIE_LLM_ROUTE") %||% "auto")
   if (identical(saved, "hosted")) {
     # a route saved before the hosted tier was retired: said once, then the
     # automatic order
@@ -1985,75 +1481,6 @@ llmstat <- function() {
     !is.na(m$content)
 }
 
-#' Asks the data service whether it knows a key.
-#'
-#' Ask the data service whether it knows a key: GET /v1/whoami, or
-#' /manifest.json from a service that predates /v1/whoami (it answers 404
-#' there). The reply, or NULL when nothing answered.
-#' @param base The data service address.
-#' @param key The data key sent as a Bearer token to `/v1/whoami`.
-#' @param timeout The timeout in seconds.
-#' @return The response list, or NULL.
-#' @noRd
-.bl_key_reply <- function(base, key, timeout = 10) {
-  get <- function(p) {
-    tryCatch(
-      .bl_http_get(
-        paste0(base, p),
-        timeout,
-        paste("Authorization: Bearer", key)
-      ),
-      error = function(e) NULL
-    )
-  }
-  res <- get("/v1/whoami")
-  if (identical(as.integer(res$status), 404L)) {
-    res <- get("/manifest.json")
-  }
-  res
-}
-
-#' Checks a pasted key with the data service before it is stored.
-#'
-#' `login --token KEY`: ask the data service before the key replaces a working
-#' one in the shared file (stored as is, a mistyped key left all three packages
-#' reporting \dQuote{key rejected}).
-#' @param token The key.
-#' @return `TRUE`, invisibly.
-#' @noRd
-.bl_check_token <- function(token) {
-  # the signed document's address only: MORIE_DATA_URL is never sent a key under
-  # test (G3)
-  base <- sub("/+$", "", .rmbl_services_data()$base_url %||% "")
-  if (!nzchar(base) || !identical(.rmbl_services_data()$mode, "key")) {
-    return(invisible(TRUE))
-  }
-  res <- .bl_key_reply(base, token)
-  if (is.null(res)) {
-    stop(
-      sprintf(
-        "could not reach %s to check the key; nothing stored (try again)",
-        base
-      ),
-      call. = FALSE
-    )
-  }
-  if (!identical(as.integer(res$status), 200L)) {
-    stop(
-      sprintf(
-        paste0(
-          "the data service did not accept that key (HTTP %d); nothing ",
-          "stored (%s)"
-        ),
-        as.integer(res$status),
-        .bl_access_hint()
-      ),
-      call. = FALSE
-    )
-  }
-  invisible(TRUE)
-}
-
 #' One seam for the HTTP layer so tests can stand in canned replies.
 #' @param url The public address the body is posted to.
 #' @param body The request body as raw bytes.
@@ -2202,29 +1629,17 @@ llmstat <- function() {
   }
   detail <- ""
   if (is.character(msg) && length(msg) == 1L) {
-    detail <- paste0(": ", .rmbl_printable(.bl_redact(msg, secret)))
+    # a reply that repeats the key sent, in any encoding, is not shown at all
+    detail <- paste0(
+      ": ",
+      if (.bl_key_echoed(msg, secret)) {
+        .bl_key_withheld_msg
+      } else {
+        .rmbl_printable(.bl_redact(msg, secret))
+      }
+    )
   }
   stop(sprintf("%s answered %d%s", what, res$status, detail), call. = FALSE)
-}
-
-#' Tells whether a sign-in page may be handed to the browser.
-#'
-#' The sign-in service names the page to open; only a public https address is
-#' handed to the OS browser (the service could otherwise name any scheme).
-#' @param uri The address the sign-in service named.
-#' @return `TRUE` or `FALSE`.
-#' @noRd
-.bl_browsable <- function(uri) {
-  is.character(uri) &&
-    length(uri) == 1L &&
-    grepl("^https://", uri) &&
-    !inherits(
-      tryCatch(
-        .rmbl_check_public_url(uri, "verification_uri"),
-        error = function(e) e
-      ),
-      "error"
-    )
 }
 
 #' Removes keys from a server's error text.
@@ -2255,6 +1670,65 @@ llmstat <- function() {
     perl = TRUE
   )
   gsub("\\bsk-[A-Za-z0-9._-]{6,}", "<key>", msg, perl = TRUE)
+}
+
+#' What is said in place of a server's text that repeated a key.
+#' @noRd
+.bl_key_withheld_msg <- "the error text is withheld: it repeated your key"
+
+#' The forms a key can take in a server's echo of a request.
+#'
+#' As sent, percent-encoded, in hex, and in base64 (standard and URL-safe) at
+#' each of the three alignments a key can have in an encoded dump: the part of
+#' the encoding that depends on the key's bytes alone. A proxy that cuts a
+#' header short echoes part of the key: every run of 12 characters of it counts
+#' too (a shorter key counts whole). All are compared without case and with
+#' every character that is not a letter or a digit removed, so a key split over
+#' lines or by separators is found as well.
+#' @param key One key.
+#' @return A character vector.
+#' @noRd
+.bl_key_forms <- function(key) {
+  raw <- charToRaw(key)
+  b64 <- vapply(0:2, function(o) {
+    enc <- jsb64enc(c(as.raw(rep(0L, o)), raw))
+    keep <- 4L * ((o + length(raw)) %/% 3L)
+    substr(enc, if (o) 5L else 1L, keep)
+  }, "")
+  n <- nchar(key)
+  from <- seq_len(max(1L, n - 11L))
+  c(
+    utils::URLencode(key, reserved = TRUE),
+    paste(as.character(raw), collapse = ""),
+    b64,
+    chartr("+/", "-_", b64),
+    substring(key, from, if (n > 12L) from + 11L else n)
+  )
+}
+
+#' Says whether a server's text repeats a key in any form .bl_key_forms()
+#' knows.
+#' @param text The text.
+#' @param keys The keys sent (NULL, "" and NA are skipped).
+#' @return TRUE or FALSE.
+#' @noRd
+.bl_key_echoed <- function(text, keys) {
+  flat <- function(x) .rmbl_lower(gsub("[^[:alnum:]]+", "", x))
+  if (!is.character(text) || length(text) != 1L || is.na(text)) {
+    return(FALSE)
+  }
+  t <- flat(text)
+  for (k in keys) {
+    if (!is.character(k) || length(k) != 1L || is.na(k) || !nzchar(k)) {
+      next
+    }
+    f <- flat(.bl_key_forms(k))
+    f <- f[nzchar(f)]
+    if (any(vapply(f, grepl, NA, x = t, fixed = TRUE))) {
+      return(TRUE)
+    }
+  }
+  FALSE
 }
 
 #' The command name the user typed (the launchers set RMBL_PROG; rmbl and
@@ -2315,6 +1789,8 @@ llmstat <- function() {
   if (!is.character(model) || length(model) != 1L || is.na(model)) {
     stop("`model` must be one model name", call. = FALSE)
   }
+  # bytes that are not text failed in nchar() and grepl() in base R's words
+  .rmbl_valid_text(model, "model")
   # a model is a name (gpt-4o-mini, claude-sonnet-4-5, llama3.1:8b,
   # mistral-large-latest): words and version numbers joined by - . : /. A UUID,
   # groups of mixed-case letters and digits joined by dashes
@@ -2332,260 +1808,6 @@ llmstat <- function() {
     )
   }
   model
-}
-
-#' The email check, before anything is asked or sent.
-#' @param email The address given.
-#' @return The address in lower case, invisibly.
-#' @noRd
-.bl_check_email <- function(email) {
-  # a closure or a list reached as.character() and failed in R's words (pre-CRAN
-  # audit of 30bed8e)
-  if (!is.character(email)) {
-    stop(
-      .rmbl_fn(),
-      "`email` must be one string, an email address",
-      call. = FALSE
-    )
-  }
-  email <- tolower(trimws(email))
-  if (length(email) != 1L || is.na(email) || !nzchar(email)) {
-    stop(.rmbl_fn(), "an email address is required", call. = FALSE)
-  }
-  if (!grepl("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", email)) {
-    stop(
-      .rmbl_fn(),
-      sprintf("'%s' is not an email address", email),
-      call. = FALSE
-    )
-  }
-  invisible(email)
-}
-
-#' The current version of the data access terms and where to read them, from the
-#' sign-in service.
-#' @param auth The sign-in service address.
-#' @return A list with the terms `version` and `url`.
-#' @noRd
-.bl_terms_info <- function(auth = .bl_hosted_auth()) {
-  base <- sub("/auth$", "", auth)
-  res <- tryCatch(
-    .bl_http_get(file.path(base, "terms.json"), 20L, NULL),
-    error = function(e) NULL
-  )
-  j <- if (!is.null(res) && isTRUE(res$status == 200L)) {
-    tryCatch(
-      .rmbl_json_text(res$body, simplifyVector = FALSE),
-      error = function(e) NULL
-    )
-  }
-  v <- j$version
-  if (
-    !is.character(v) ||
-      length(v) != 1L ||
-      !grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", v)
-  ) {
-    stop(
-      sprintf(
-        paste0(
-          "could not read the data access terms from %s/terms.json; try ",
-          "again, or sign in at %s/"
-        ),
-        base,
-        base
-      ),
-      call. = FALSE
-    )
-  }
-  list(
-    version = v,
-    url = if (is.character(j$url) && length(j$url) == 1L) {
-      j$url
-    } else {
-      file.path(base, "terms")
-    }
-  )
-}
-
-.bl_SUPERVISOR_ROLES <- c(
-  "supervisor",
-  "chair",
-  "director",
-  "coordinator",
-  "other"
-)
-
-#' Collects the profile a new key needs.
-#'
-#' Everything a new key needs said first: the terms accepted (y/N at the
-#' console, or accter = TRUE), the person's name and reason, and for Schedule B
-#' a supervisor, chair, director or coordinator. Arguments win; what is missing
-#' is asked for; a missing required answer stops here, before any request that
-#' could issue a key. The data service checks the same things.
-#' @param accept_terms Whether the data access terms are accepted.
-#' @param name The person's name, or NULL to ask.
-#' @param affiliation The person's affiliation, or NULL to ask.
-#' @param purpose The reason for access, or NULL to ask.
-#' @param restricted Whether Schedule B tables are wanted, or NULL to ask.
-#' @param supervisor_name The supervisor's name, or NULL to ask.
-#' @param supervisor_role The supervisor's role, or NULL to ask.
-#' @param supervisor_email The supervisor's email, or NULL to ask.
-#' @return A named list sent with the sign-in request.
-#' @noRd
-.bl_signin_profile <- function(
-  accept_terms = FALSE,
-  name = NULL,
-  affiliation = NULL,
-  purpose = NULL,
-  restricted = NULL,
-  supervisor_name = NULL,
-  supervisor_role = NULL,
-  supervisor_email = NULL
-) {
-  terms <- .bl_terms_info()
-  if (!isTRUE(accept_terms)) {
-    .bl_signin_terms(terms)
-  }
-  nm <- .bl_ask_given("Your name: ", name)
-  if (nchar(nm) < 2L) {
-    .bl_need("your name", "--name", "name")
-  }
-  af <- .bl_ask_given(
-    "Your university, employer or organisation (Enter to skip): ",
-    affiliation
-  )
-  pu <- .bl_ask_given("Why you need the data (a sentence or two): ", purpose)
-  if (nchar(pu) < 20L) {
-    .bl_need(
-      "the reason you need the data, a sentence or two,",
-      "--reason",
-      "purpose"
-    )
-  }
-  rs <- if (is.null(restricted)) {
-    tolower(.bl_readline(paste(
-      "Also open the restricted tables (ICPSR, NCVS 38604, A2AJ case law)",
-      "under Schedule B? [y/N]: "
-    ))) %in%
-      c("y", "yes")
-  } else {
-    isTRUE(restricted)
-  }
-  out <- list(
-    accept_terms = terms$version,
-    name = nm,
-    affiliation = if (nzchar(af)) af else NULL,
-    purpose = pu,
-    accept_restricted = rs,
-    client = sprintf(
-      "rmoriebricklayer/%s",
-      utils::packageVersion("rmoriebricklayer")
-    )
-  )
-  if (rs) {
-    out <- c(
-      out,
-      .bl_signin_supervisor(supervisor_name, supervisor_role, supervisor_email)
-    )
-  }
-  out
-}
-
-#' Signs in with a one-time code sent by email and stores the key.
-#' @param email The email address.
-#' @param code The code, or NULL to request one and ask for it.
-#' @param profile The profile from `.bl_signin_profile()`.
-#' @return The key, invisibly.
-#' @noRd
-.bl_login_email <- function(email, code = NULL, profile = list()) {
-  auth <- .bl_hosted_auth()
-  email <- tolower(trimws(as.character(email)))
-  if (length(email) != 1L || is.na(email) || !nzchar(email)) {
-    stop(.rmbl_fn(), "an email address is required", call. = FALSE)
-  }
-  if (!grepl("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", email)) {
-    stop(
-      .rmbl_fn(),
-      sprintf("'%s' is not an email address", email),
-      call. = FALSE
-    )
-  }
-  if (is.null(code)) {
-    code <- .bl_login_code(auth, email, profile)
-  }
-  res <- .bl_post_json(
-    sprintf("%s/email/verify", auth),
-    list(email = email, code = trimws(code))
-  )
-  if (res$status != 200L) {
-    .bl_reply_error(res, "the sign-in service")
-  }
-  key <- res$json$api_key
-  if (!is.character(key) || !nzchar(key)) {
-    stop("the sign-in service returned no key", call. = FALSE)
-  }
-  p <- .bl_store_key(key, res$json$user)
-  message(sprintf("Logged in; key stored in %s", p))
-  invisible(key)
-}
-
-#' Signs in with the GitHub device flow and stores the key.
-#' @param open_browser Whether the sign-in page is opened in the browser.
-#' @param poll_max_seconds How long to wait for the approval.
-#' @param profile The profile from `.bl_signin_profile()`.
-#' @return The key, invisibly.
-#' @noRd
-.bl_login_device <- function(
-  open_browser = interactive(),
-  poll_max_seconds = 600,
-  profile = list()
-) {
-  auth <- .bl_hosted_auth()
-  start <- .bl_post_json(file.path(auth, "device", "code"), profile)
-  if (start$status != 200L) {
-    .bl_reply_error(start, "the sign-in service")
-  }
-  info <- start$json
-  message(sprintf(
-    "Sign in at %s and enter the code: %s",
-    info$verification_uri,
-    info$user_code
-  ))
-  if (isTRUE(open_browser) && .bl_browsable(info$verification_uri)) {
-    try(utils::browseURL(info$verification_uri), silent = TRUE)
-  }
-  interval <- as.numeric(if (is.null(info$interval)) 5 else info$interval)
-  deadline <- Sys.time() + poll_max_seconds
-  waited <- 0
-  while (Sys.time() < deadline) {
-    Sys.sleep(interval)
-    waited <- waited + interval
-    if (waited %% 30 < interval) {
-      # a silent wait reads as a hang
-      message(sprintf(
-        paste0(
-          "still waiting for the sign-in to be approved (%ds elapsed; ",
-          "Ctrl-C stops)"
-        ),
-        as.integer(waited)
-      ))
-    }
-    res <- .bl_post_json(
-      file.path(auth, "device", "token"),
-      list(device_code = info$device_code)
-    )
-    if (res$status == 200L && is.character(res$json$api_key)) {
-      p <- .bl_store_key(res$json$api_key, res$json$user)
-      message(sprintf(
-        "Logged in as %s; key stored in %s",
-        if (is.null(res$json$user)) "user" else res$json$user,
-        p
-      ))
-      return(invisible(res$json$api_key))
-    }
-    if (res$status != 428L) .bl_reply_error(res, "the sign-in service")
-  }
-  stop("timed out waiting for the GitHub approval", call. = FALSE)
 }
 
 #' The packages llmask() reads the documentation of, checked as installed.
@@ -2728,48 +1950,6 @@ llmstat <- function() {
   }
 }
 
-#' The address a saved data key was issued for.
-#'
-#' A file without the address (morie writes one): the key goes to the signed
-#' services document's address and nowhere else (the data service, now that
-#' no model is hosted).
-#' @param saved_for The address saved with the key, if any.
-#' @return One address, `""` when none is known.
-#' @noRd
-.bl_key_saved_for <- function(saved_for) {
-  if (
-    !is.character(saved_for) || length(saved_for) != 1L || !nzchar(saved_for)
-  ) {
-    saved_for <- .rmbl_services_llm()$base_url %||% ""
-    if (!nzchar(saved_for)) saved_for <- .rmbl_services_data()$base_url %||% ""
-  }
-  saved_for
-}
-
-#' Moves a key saved for the retired model tier's address to the data
-#' address.
-#'
-#' Credentials written before 0.5.12 name the retired model tier's address:
-#' the same issuer and key store as the data service, so such a key still
-#' goes to the signed document's data address, and to no other (those users
-#' signed in again otherwise; review of 46de6a9, G2 note).
-#' @param saved_for The address the key was saved for.
-#' @param now The address keys go to now, or `NULL`.
-#' @return The address the key counts as saved for.
-#' @noRd
-.bl_key_legacy <- function(saved_for, now) {
-  data_base <- sub("/+$", "", .rmbl_services_data()$base_url %||% "")
-  if (
-    sub("/+$", "", saved_for) %in%
-      .bl_legacy_key_addresses &&
-      nzchar(data_base) &&
-      identical(sub("/+$", "", now %||% ""), data_base)
-  ) {
-    saved_for <- data_base
-  }
-  saved_for
-}
-
 #' The local-Ollama line of the no-route message.
 #' @param prog The command-line program's name.
 #' @return A single string.
@@ -2793,207 +1973,4 @@ llmstat <- function() {
   } else {
     sprintf("local Ollama: no model pulled at %s (`ollama pull NAME`)", ollama)
   }
-}
-
-#' Removes the data key from the credentials file, leaving its other
-#' members as they were (and the file itself when nothing else is left).
-#' @param p The credentials file.
-#' @return Whether the file held a key.
-#' @noRd
-.bl_logout_file <- function(p) {
-  txt <- .bl_read_text(p)
-  if (!.bl_credentials_text_ok(txt)) {
-    stop(
-      sprintf(
-        paste(
-          "%s is not a JSON object (or not valid JSON, or lists a key",
-          "twice); fix or remove it",
-          "(it is shared with morie and rmorie)"
-        ),
-        p
-      ),
-      call. = FALSE
-    )
-  }
-  mem <- .bl_json_top_members(txt)
-  had <- any(vapply(
-    mem,
-    function(m) identical(m$key, "hosted_key"),
-    logical(1)
-  ))
-  for (k in c("hosted_key", "hosted_user", "hosted_base_url")) {
-    txt <- .bl_credentials_text_set(txt, k, NULL)
-  }
-  left <- .bl_json_top_members(txt)
-  if (
-    !.bl_credentials_text_ok(txt) ||
-      "hosted_key" %in% vapply(left, function(m) m$key, "")
-  ) {
-    stop(
-      sprintf(
-        paste0(
-          "could not remove the key from %s without damaging it; the ",
-          "file was left as it was"
-        ),
-        p
-      ),
-      call. = FALSE
-    )
-  }
-  if (length(left)) {
-    .bl_write_private_text(p, txt)
-  } else {
-    unlink(p)
-  }
-  had
-}
-
-#' A sign-in answer: the value given, trimmed, or else the one typed at the
-#' prompt.
-#' @param prompt The prompt shown when the answer must be typed.
-#' @param given The value passed, or `NULL`.
-#' @return A single string.
-#' @noRd
-.bl_ask_given <- function(prompt, given) {
-  g <- if (is.null(given)) NULL else trimws(as.character(given)[1L])
-  if (!is.null(g)) g else .bl_readline(prompt)
-}
-
-#' Stops with the sign-in message for a missing answer.
-#' @param what What is missing.
-#' @param flag The command-line flag that gives it.
-#' @param arg The R argument that gives it.
-#' @return Does not return.
-#' @noRd
-.bl_need <- function(what, flag, arg) {
-  stop(
-    sprintf(
-      "%s is needed for a key: pass %s (R: %s = ) or answer the prompt",
-      what,
-      flag,
-      arg
-    ),
-    call. = FALSE
-  )
-}
-
-#' Shows the data access terms in short and asks for their acceptance.
-#' @param terms The terms, from `.bl_terms_info()`.
-#' @return `NULL`, invisibly; stops when the terms are not accepted.
-#' @noRd
-.bl_signin_terms <- function(terms) {
-  message(
-    "Data access terms, version ",
-    terms$version,
-    " (",
-    terms$url,
-    "). In short:\n",
-    "  - the key is for you alone; keep it private;\n",
-    "  - use the tables for research, teaching, journalism, policy ",
-    "work or analysis;\n",
-    "  - do not redistribute the tables themselves; cite each source ",
-    "as its licence asks;\n",
-    "  - no warranty, and you cover claims that come from your misuse;\n",
-    "  - a register of who holds each key is kept, and may be ",
-    "disclosed where the law requires."
-  )
-  a <- tolower(.bl_readline(sprintf(
-    "Do you accept the data access terms, version %s? [y/N]: ",
-    terms$version
-  )))
-  if (!a %in% c("y", "yes")) {
-    stop(
-      sprintf(
-        paste(
-          "the data access terms were not accepted, so no key was",
-          "issued; read them at %s",
-          "and accept with `%s login --accept-terms` (R: accept_terms = TRUE)"
-        ),
-        terms$url,
-        .bl_prog()
-      ),
-      call. = FALSE
-    )
-  }
-  invisible(NULL)
-}
-
-#' The supervisor a restricted-tables key needs: name, role and email.
-#' @param supervisor_name,supervisor_role,supervisor_email As given, or
-#'   `NULL` to ask.
-#' @return A list with the three, checked.
-#' @noRd
-.bl_signin_supervisor <- function(
-  supervisor_name,
-  supervisor_role,
-  supervisor_email
-) {
-  sn <- .bl_ask_given(
-    paste0(
-      "Your supervisor's, department chair's, director's or ",
-      "coordinator's name: "
-    ),
-    supervisor_name
-  )
-  if (!nzchar(sn)) {
-    .bl_need(
-      paste0(
-        "for the restricted tables, a supervisor's, chair's, director's ",
-        "or coordinator's name"
-      ),
-      "--supervisor-name",
-      "supervisor_name"
-    )
-  }
-  sr <- tolower(.bl_ask_given(
-    sprintf("Their role (%s): ", toString(.bl_SUPERVISOR_ROLES)),
-    supervisor_role
-  ))
-  if (!sr %in% .bl_SUPERVISOR_ROLES) {
-    .bl_need(
-      sprintf("their role, one of %s,", toString(.bl_SUPERVISOR_ROLES)),
-      "--supervisor-role",
-      "supervisor_role"
-    )
-  }
-  se <- tolower(.bl_ask_given("Their email: ", supervisor_email))
-  if (!grepl("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", se)) {
-    .bl_need("their email address", "--supervisor-email", "supervisor_email")
-  }
-  list(supervisor_name = sn, supervisor_role = sr, supervisor_email = se)
-}
-
-#' Asks the sign-in service to email a one-time code, and reads it.
-#' @param auth The sign-in service's address.
-#' @param email The checked email address.
-#' @param profile The sign-in profile.
-#' @return The code typed.
-#' @noRd
-.bl_login_code <- function(auth, email, profile) {
-  res <- .bl_post_json(
-    sprintf("%s/email/code", auth),
-    c(list(email = email), profile)
-  )
-  if (res$status != 200L) {
-    .bl_reply_error(res, "the sign-in service")
-  }
-  message(sprintf(
-    paste0(
-      "A one-time code (like ABCDE-FGHJK) was sent to %s; it is valid ",
-      "for 10 minutes."
-    ),
-    email
-  ))
-  code <- .bl_readline("Enter the code: ")
-  if (!nzchar(code)) {
-    stop(
-      sprintf(
-        "no code entered; finish with `%s login --email %s --code CODE`",
-        .bl_prog(),
-        email
-      ),
-      call. = FALSE
-    )
-  }
-  code
 }

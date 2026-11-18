@@ -402,7 +402,7 @@ advdif2d <- function(
       sprintf(
         "step %d/%s",
         step,
-        format(nsteps, big.mark = ",", scientific = FALSE)
+        .rmbl_ntxt(nsteps)
       )
     )
     cm <- .ad_step(cm, nb, u, v, source, dt)
@@ -458,8 +458,8 @@ lagrprt <- function(
         step - 1L,
         sprintf(
           "step %s/%s",
-          format(step, big.mark = ",", scientific = FALSE),
-          format(nsteps, big.mark = ",", scientific = FALSE)
+          .rmbl_ntxt(step),
+          .rmbl_ntxt(nsteps)
         )
       )
     }
@@ -698,7 +698,7 @@ format.rmbl_particles <- function(x, ...) {
       units = "concentration",
       title = sprintf(
         "Advection-diffusion after %s steps of dt = %s",
-        format(nsteps, big.mark = ",", scientific = FALSE),
+        .rmbl_ntxt(nsteps),
         format(dt)
       )
     ),
@@ -865,7 +865,12 @@ format.rmbl_particles <- function(x, ...) {
 #' @return The class in upper case.
 #' @noRd
 .ad_class <- function(stability) {
-  cls <- toupper(as.character(stability))
+  # bytes that are not text failed in toupper() in base R's words
+  cls <- if (is.character(stability) && !all(validEnc(stability))) {
+    NA_character_
+  } else {
+    .rmbl_upper(as.character(stability))
+  }
   if (
     length(cls) != 1L || is.na(cls) || !cls %in% c("A", "B", "C", "D", "E", "F")
   ) {
@@ -929,21 +934,24 @@ format.rmbl_particles <- function(x, ...) {
       call. = FALSE
     )
   }
+  # coordinates are numbers: text that is none went through as.numeric()
+  # with its coercion warning before the NA it made was refused
+  num <- function(v) tryCatch(as.numeric(v), warning = function(w) bad())
   m <- if (is.list(r) && !is.data.frame(r)) {
     if (!length(r) || any(lengths(r) != 3L)) {
       bad()
     }
-    do.call(rbind, lapply(r, as.numeric))
+    do.call(rbind, lapply(r, num))
   } else if (is.matrix(r) || is.data.frame(r)) {
     if (ncol(r) != 3L) {
       bad()
     }
-    matrix(as.numeric(as.matrix(r)), ncol = 3)
+    matrix(num(as.matrix(r)), ncol = 3)
   } else {
     if (!length(r) || length(r) %% 3L != 0L) {
       bad()
     }
-    matrix(as.numeric(r), ncol = 3, byrow = TRUE)
+    matrix(num(r), ncol = 3, byrow = TRUE)
   }
   if (!nrow(m) || anyNA(m)) {
     bad()
@@ -1075,18 +1083,18 @@ format.rmbl_particles <- function(x, ...) {
       "to run it anyway, or use a coarser grid, fewer steps or a",
       "shorter total time"
     ),
-    format(work, big.mark = ",", scientific = FALSE),
+    .rmbl_ntxt(work),
     nx,
     ny,
-    format(nsteps, big.mark = ",", scientific = FALSE),
-    format(substeps, big.mark = ",", scientific = FALSE),
+    .rmbl_ntxt(nsteps),
+    .rmbl_ntxt(substeps),
     if (substeps > 1) {
       sprintf(" from a stability number of %s", format(stab, digits = 4))
     } else {
       ""
     },
-    format(maxwork, big.mark = ",", scientific = FALSE),
-    format(round(minutes, 1), big.mark = ",")
+    .rmbl_ntxt(maxwork),
+    .rmbl_ntxt(round(minutes, 1))
   )
 }
 
@@ -1174,9 +1182,9 @@ format.rmbl_particles <- function(x, ...) {
           "pass maxwork = Inf",
           "to run it anyway"
         ),
-        format(n, big.mark = ","),
-        format(nsteps, big.mark = ",", scientific = FALSE),
-        format(maxwork, big.mark = ",", scientific = FALSE)
+        .rmbl_ntxt(n),
+        .rmbl_ntxt(nsteps),
+        .rmbl_ntxt(maxwork)
       ),
       call. = FALSE
     )
@@ -1297,10 +1305,10 @@ format.rmbl_particles <- function(x, ...) {
           "maxwork = Inf to allocate it",
           "anyway"
         ),
-        format(grid[5L], big.mark = ","),
-        format(grid[6L], big.mark = ","),
-        format(grid[5L] * grid[6L], big.mark = ",", scientific = FALSE),
-        format(maxwork, big.mark = ",", scientific = FALSE)
+        .rmbl_ntxt(grid[5L]),
+        .rmbl_ntxt(grid[6L]),
+        .rmbl_ntxt(grid[5L] * grid[6L]),
+        .rmbl_ntxt(maxwork)
       ),
       call. = FALSE
     )

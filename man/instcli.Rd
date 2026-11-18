@@ -23,7 +23,7 @@ The path of the first launcher written (normally
 }
 \description{
 Writes small launcher scripts into a directory on your PATH so that
-\code{rmoriebricklayer login}, \code{rmbl ask ...} and the other verbs of
+\code{rmoriebricklayer doctor}, \code{rmbl ask ...} and the other verbs of
 \code{\link{blcli}} work from any shell. Run it once after
 installing or upgrading the package. Nothing outside \code{dir} is
 touched, and only when you call this.
@@ -32,7 +32,8 @@ touched, and only when you call this.
 On Unix-alikes each launcher is a \code{/bin/sh} script (mode 0755) that
 sets \code{RMBL_PROG} to its own name and runs
 \code{Rscript -e "rmoriebricklayer::blcli()"} with the shell's
-arguments, exiting with the function's status (130 on Ctrl-C). The library
+arguments, exiting with the function's status (130 on Ctrl-C, also one
+that lands while R is still starting or as it quits). The library
 this copy of the package is installed in is pinned inside R with
 \code{.libPaths()}, so an \code{R_LIBS} set in the shell or in
 \code{~/.Renviron} cannot make the command run another copy. An existing

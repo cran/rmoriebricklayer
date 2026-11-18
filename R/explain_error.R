@@ -167,6 +167,17 @@ explerr <- function(msg = geterrmessage(), pkgs = NULL, n = 3L) {
     return(.bl_explain_rows(msg, pkgs))
   }
   msg <- .bl_ee_msg_text(msg)
+  # an error message may hold bytes that are not text (a path in another
+  # encoding): they are shown as <xx> rather than refused, so the error can
+  # still be explained (audit of 21478080, P3)
+  # validUTF8(), not validEnc(): in the C locale every byte is valid text to
+  # validEnc(), and the pattern matching below then stops on the bytes
+  if (is.character(msg)) {
+    msg <- enc2utf8(msg)
+    if (!all(validUTF8(msg))) {
+      msg <- .rmbl_esc8(msg)
+    }
+  }
   n <- .bl_ee_n(n)
   pk <- .bl_ee_packages(pkgs)
   .msg <- .bl_ee_clean(msg)
@@ -224,7 +235,7 @@ explerr <- function(msg = geterrmessage(), pkgs = NULL, n = 3L) {
 
 #' Which templates match the message exactly: the template as a regular
 #' expression, its variable parts as wildcards, after the name of the function
-#' that refused ("anltab: ") that a shared check puts first.
+#' that refused ("anytab: ") that a shared check puts first.
 #' @param tab The message table.
 #' @param .msg The cleaned message.
 #' @return A logical vector.
@@ -244,7 +255,12 @@ explerr <- function(msg = geterrmessage(), pkgs = NULL, n = 3L) {
   vapply(
     rx,
     function(r) {
-      isTRUE(tryCatch(grepl(r, .msg, perl = TRUE), error = function(e) FALSE))
+      # a pattern that meets PCRE's match limit on a long message does not
+      # match, and says nothing
+      isTRUE(tryCatch(
+        suppressWarnings(grepl(r, .msg, perl = TRUE)),
+        error = function(e) FALSE
+      ))
     },
     NA
   )
@@ -522,7 +538,7 @@ explerr <- function(msg = geterrmessage(), pkgs = NULL, n = 3L) {
 #'   numbers left out.
 #' @noRd
 .bl_ee_words <- function(x) {
-  w <- tolower(unlist(strsplit(x, "[^[:alnum:]_]+")))
+  w <- .rmbl_lower(unlist(strsplit(x, "[^[:alnum:]_]+")))
   unique(w[nchar(w) >= 3L & !w %in% .bl_ee_stop & !grepl("^[0-9]+$", w)])
 }
 
@@ -715,8 +731,7 @@ explerr <- function(msg = geterrmessage(), pkgs = NULL, n = 3L) {
         f
       )
       unlink(old) # one table kept: the versions installed now
-      saveRDS(tab, f)
-      Sys.chmod(f, "0600")
+      .rmbl_wfile(f, serialize(tab, NULL), private = TRUE)
     },
     error = function(e) NULL,
     warning = function(w) NULL

@@ -20,7 +20,10 @@
 #' places, or a bundle and its log line) is not a reuse.
 #'
 #' @param path A directory (every `capsule_bundle.json` under it) or one bundle
-#'   file.
+#'   file. A directory is searched as [cpschk()] searches it: a link to a
+#'   folder inside it is followed, each real folder once, and a loop is not;
+#'   a folder that cannot be read, or a link to any other folder outside
+#'   it, is refused, named, since a signature behind it would not be seen.
 #' @param seenlog Seen-log files to read as well, or NULL. A file that does not
 #'   exist yet is an empty log; a directory, or a log with a malformed line, is
 #'   refused.
@@ -57,7 +60,7 @@
 #' options(op)
 #' @export
 xmssidxseen <- function(path = ".", seenlog = NULL) {
-  path <- .rmbl_string1(path, "path")
+  path <- .rmbl_fspath(.rmbl_string1(path, "path"))
   if (!file.exists(path)) {
     stop(
       .rmbl_fn(),
@@ -69,7 +72,21 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
   if (!is.null(seenlog) && (!is.character(seenlog) || anyNA(seenlog))) {
     stop(.rmbl_fn(), "`seenlog` must be file paths, or NULL", call. = FALSE)
   }
-  rows <- lapply(.rmbl_xmss_bundle_files(path), .rmbl_xmss_bundle_row)
+  .rmbl_xmss_seen(path, seenlog)
+}
+
+#' The XMSS signatures under a path and in seen logs, as xmssidxseen()
+#' returns them, for the package's own callers: called through
+#' xmssidxseen(), a folder cpschk() could not search was refused as
+#' "xmssidxseen: ...", a function the user had not called.
+#' @param path A directory or a bundle file, checked.
+#' @param seenlog Seen logs, or NULL.
+#' @param strict As for .bl_find(): cpschk() reports a link it did not
+#'   follow as a row of its own.
+#' @return The data frame.
+#' @noRd
+.rmbl_xmss_seen <- function(path, seenlog = NULL, strict = TRUE) {
+  rows <- lapply(.rmbl_xmss_bundle_files(path, strict), .rmbl_xmss_bundle_row)
   rows <- c(rows, lapply(seenlog, .rmbl_xmss_seen_read))
   .rmbl_xmss_seen_df(rows)
 }
@@ -84,7 +101,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
 #' @return 16 hex characters.
 #' @noRd
 .rmbl_xmss_fpr <- function(public) {
-  substr(tolower(csha256(charToRaw(tolower(public)))), 1L, 16L)
+  substr(.rmbl_lower(csha256(charToRaw(.rmbl_lower(public)))), 1L, 16L)
 }
 
 #' A digest of one XMSS signature (its wire form), to tell two signatures at one
@@ -93,7 +110,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
 #' @return 16 hex characters.
 #' @noRd
 .rmbl_xmss_sigd <- function(wire) {
-  substr(tolower(csha256(charToRaw(tolower(wire)))), 1L, 16L)
+  substr(.rmbl_lower(csha256(charToRaw(.rmbl_lower(wire)))), 1L, 16L)
 }
 
 #' The host fingerprint of a state's writer: SHA-256 of the host name and the
@@ -111,7 +128,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
     error = function(e) ""
   )
   substr(
-    tolower(csha256(charToRaw(paste0(
+    .rmbl_lower(csha256(charToRaw(paste0(
       "rmoriebricklayer xmss writer\n",
       Sys.info()[["nodename"]],
       "\n",
@@ -373,7 +390,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
   txt <- if (is.null(kf)) {
     keytxt
   } else {
-    paste(readLines(kf, warn = FALSE), collapse = "\n")
+    paste(.rmbl_rlines(kf), collapse = "\n")
   }
   kj <- .rmbl_xmss_key_json(txt, "the key")
   key <- kj$key
@@ -386,7 +403,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
   )
   st <- if (!is.null(sf) && file.exists(sf) && file.size(sf) > 0) {
     tryCatch(
-      .rmbl_json_text(readLines(sf, warn = FALSE), simplifyVector = FALSE),
+      .rmbl_json_text(.rmbl_rlines(sf), simplifyVector = FALSE),
       error = function(e) NULL
     )
   } else {
@@ -522,7 +539,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
   }
   i <- sec$index %||%
     (strtoi(
-      substr(tolower(csha256(charToRaw(paste0(sec$name, fpr)))), 1L, 7L),
+      substr(.rmbl_lower(csha256(charToRaw(paste0(sec$name, fpr)))), 1L, 7L),
       16L
     ) %%
       kk)
@@ -649,7 +666,7 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
 #' @return A data frame (key, index, sig, where), or NULL.
 #' @noRd
 .rmbl_xmss_seen_read <- function(f) {
-  if (dir.exists(f)) {
+  if (.rmbl_isdir(f)) {
     stop(
       .rmbl_fn(),
       "the XMSS seen-log ",
@@ -661,7 +678,8 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
   if (!file.exists(f)) {
     return(NULL)
   }
-  l <- readLines(f, warn = FALSE)
+  .rmbl_file1(f, "seenlog")
+  l <- .rmbl_rlines(f)
   l <- l[nzchar(l) & !startsWith(l, "#")]
   p <- strsplit(l, "\t", fixed = TRUE)
   ok <- vapply(
@@ -704,16 +722,14 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
 #' @return `f`, invisibly.
 #' @noRd
 .rmbl_xmss_seen_append <- function(f, df) {
-  if (!file.exists(f)) {
-    cat(
-      paste0(
-        "# rmoriebricklayer xmss seen-log 1: key fingerprint, index, ",
-        "signature digest, where\n"
-      ),
-      file = f
+  head <- if (!file.exists(f)) {
+    paste0(
+      "# rmoriebricklayer xmss seen-log 1: key fingerprint, index, ",
+      "signature digest, where\n"
     )
   }
-  cat(
+  .rmbl_wappend(f, c(
+    head,
     paste0(
       df$key,
       "\t",
@@ -721,30 +737,24 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
       "\t",
       df$sig,
       "\t",
-      gsub("[\t\r\n]", " ", df$where),
+      gsub("[\t\r\n]", " ", df$where, useBytes = TRUE),
       "\n",
       collapse = ""
-    ),
-    file = f,
-    append = TRUE
-  )
+    )
+  ))
   invisible(f)
 }
 
 #' The capsule bundles under a path: the path itself when it is a file.
 #' @param path A directory or a bundle file.
+#' @param strict TRUE to warn of a link out of the folder, as .bl_find()
+#'   does.
 #' @return The bundle files' paths.
 #' @noRd
-.rmbl_xmss_bundle_files <- function(path) {
+.rmbl_xmss_bundle_files <- function(path, strict = TRUE) {
   if (dir.exists(path)) {
-    f <- list.files(
-      path,
-      pattern = "^capsule_bundle[.]json$",
-      recursive = TRUE,
-      full.names = TRUE,
-      all.files = TRUE
-    )
-    f[!grepl("(^|/)([.]git|[.]rmbl-cache)/", f)]
+    # walked as cpschk() walks it: a link loop is not followed (.bl_find())
+    .bl_find(path, "capsule_bundle.json", strict)
   } else {
     path
   }
@@ -755,8 +765,10 @@ xmssidxseen <- function(path = ".", seenlog = NULL) {
 #' @return A one-row data frame, or NULL when it holds no XMSS signature.
 #' @noRd
 .rmbl_xmss_bundle_row <- function(f) {
+  # a bundle is held to the 32 MiB cpsbndlrd() reads, by its bytes on disk
+  f <- .rmbl_file1(f, "path", max = 32 * 2^20)
   b <- tryCatch(
-    .rmbl_json_text(readLines(f, warn = FALSE), simplifyVector = FALSE),
+    .rmbl_json_text(.rmbl_rlines(f), simplifyVector = FALSE),
     error = function(e) NULL
   )
   a <- if (is.list(b) && is.list(b$attestation)) b$attestation

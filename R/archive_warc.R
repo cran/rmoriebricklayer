@@ -2,10 +2,10 @@
 #
 # Captures written as WARC/1.1 files with a CDXJ index, in the layout of a pywb
 # collection (<dir>/archive/<capture_id>.warc, <dir>/indexes/index.cdxj). pywb
-# and warcio read it as is, archive.rmorie.com stores the same records, and
-# fetchvrf() reads a capture back from it when the source, the Wayback Machine
-# and the archive are all out of reach. Written from the WARC 1.1 specification
-# and pywb's documented CDXJ format; no code is copied from either.
+# and warcio read it as is, and fetchvrf() reads a capture back from it when
+# the source, the Wayback Machine and the mirrors are all out of reach.
+# Written from the WARC 1.1 specification and pywb's documented CDXJ format;
+# no code is copied from either.
 
 #' Encodes bytes as RFC 4648 Base32 with padding.
 #'
@@ -41,7 +41,7 @@
 #' @return One string.
 #' @noRd
 .bl_surt <- function(url) {
-  u <- sub("#.*$", "", tolower(url))
+  u <- sub("#.*$", "", .rmbl_lower(url))
   m <- regmatches(
     u,
     regexec("^([a-z][a-z0-9+.-]*)://([^/?]*)([^?]*)(\\?(.*))?$", u)
@@ -64,7 +64,7 @@
   if (nzchar(q)) {
     q <- paste0(
       "?",
-      paste(sort(strsplit(q, "&", fixed = TRUE)[[1L]]), collapse = "&")
+      paste(.rmbl_bsort(strsplit(q, "&", fixed = TRUE)[[1L]]), collapse = "&")
     )
   }
   paste0(
@@ -173,9 +173,7 @@
     http
   )
   metadata <- .bl_warc_meta(url, resp_id, wdate, capture_id, sha_hex, meta)
-  con <- file(warc, "wb")
-  on.exit(close(con), add = TRUE)
-  writeBin(c(warcinfo, response, metadata), con)
+  .rmbl_wfile(warc, c(warcinfo, response, metadata))
   rec <- list(
     url = url,
     mime = mime,
@@ -207,9 +205,9 @@
 #' @noRd
 .bl_warc_http <- function(headers, mime, status, body) {
   headers <- headers[
-    !tolower(names(headers)) %in% c("transfer-encoding", "content-length")
+    !.rmbl_lower(names(headers)) %in% c("transfer-encoding", "content-length")
   ]
-  if (!any(tolower(names(headers)) == "content-type")) {
+  if (!any(.rmbl_lower(names(headers)) == "content-type")) {
     headers <- c(headers, "Content-Type" = mime)
   }
   headers <- c(headers, "Content-Length" = as.character(length(body)))
@@ -304,7 +302,7 @@
   old <- if (file.exists(index)) readLines(index, warn = FALSE) else character()
   all <- unique(c(old, lines))
   keys <- sub("^(\\S+ \\S+) .*$", "\\1", all)
-  writeLines(all[order(keys, method = "radix")], index, useBytes = TRUE)
+  .rmbl_wlines(all[order(keys, method = "radix")], index)
   invisible(index)
 }
 
@@ -373,7 +371,7 @@
   a <- .bl_crlf2(rec, 1L)
   b <- .bl_crlf2(rec, a + 4L)
   body <- rec[(b + 4L):(length(rec) - 4L)]
-  writeBin(body, dest)
+  .rmbl_wfile(dest, body)
   if (!identical(sha256file(dest), r$sha256)) {
     stop(
       sprintf("the WARC copy in %s does not match its index", dir),

@@ -176,6 +176,14 @@ siutxt <- function(html) {
 siuprs <- function(html) {
   .rmbl_no_fn(html = html)
   .bl_siu_check_html(html)
+  # bytes that are not UTF-8 in a page (not a path) are written out as
+  # <xx>: R's string functions warned on each, in base R's words
+  bad <- !validUTF8(html) & grepl("<", html, fixed = TRUE, useBytes = TRUE)
+  if (any(bad)) {
+    html[bad] <- .rmbl_esc8(html[bad])
+  }
+  # what is left is a path or a URL, which must be text
+  .rmbl_valid_text(html, "html")
   if (length(html) > 1L) {
     # several reports: one row each
     return(.bl_siu_rows(html))
@@ -430,13 +438,17 @@ siuso <- function(text) {
       file.exists(html)
   ) {
     .rmbl_notdir(html, "html", "siuprs")
+    # a regular file within the 2 MiB a report page is held to
+    .rmbl_file1(html, "html", max = 2^21)
+    # the bytes on disk: readLines() of a path inflates a compressed file past
+    # the cap
     html <- paste(
-      readLines(html, warn = FALSE, encoding = "UTF-8"),
+      .rmbl_rlines(html, encoding = "UTF-8"),
       collapse = "\n"
     )
   } else if (
     !grepl("[<\n]", html) &&
-      grepl("\\.html?$|[/\\\\]", html, ignore.case = TRUE)
+      grepl(.rmbl_ci("\\.html?$|[/\\\\]"), html, perl = TRUE, useBytes = TRUE)
   ) {
     # a mistyped path is not an empty report
     stop("`html`: no such file: ", html, call. = FALSE)

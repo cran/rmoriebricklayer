@@ -115,6 +115,12 @@ test_that("a bundle that runs and gives the expected counts is verified", {
   expect_match(a$checks$detail[5L], "1 launcher(s)", fixed = TRUE)
   out <- capture.output(res <- withVisible(print(a)))
   expect_false(res$visible)
+  # the run's own results are not labelled as the audit's checks (BL-L9)
+  expect_true(any(grepl(
+    "Results in the run.*3 \\(2 PASS, 0 DIFFER, 1 INFO\\)",
+    out
+  )))
+  expect_false(any(grepl("^\\W*Checks\\b", out)))
   if (blind()) {
     expect_match(out[1L], "Bundle audit: NOT VERIFIED", fixed = TRUE)
     expect_true(any(grepl("cannot detect escaped processes", out,
@@ -433,8 +439,9 @@ test_that("the run's environment keeps only what R needs", {
 
 test_that("the default time limit is 30 minutes", {
   got <- new.env()
-  stub <- function(rscript, args, home, tmout, log) {
+  stub <- function(rscript, args, home, tmout, log, wd) {
     got$tmout <- tmout
+    got$wd <- wd
     got$home <- home
     list(status = 0L, mode = "process group")
   }
@@ -443,6 +450,7 @@ test_that("the default time limit is 30 minutes", {
   withr::local_options(rmbl.bundle.timeout = NULL)
   expect_identical(.bndlchk_run(root, NULL, FALSE)$status, 0L)
   expect_identical(got$tmout, 1800L)
+  expect_identical(got$wd, normalizePath(root, winslash = "/"))
   expect_false(dir.exists(got$home))
   withr::local_options(rmbl.bundle.timeout = 60)
   .bndlchk_run(root, NULL, FALSE)
@@ -527,8 +535,9 @@ test_that("the Windows way, and no bash or env on the PATH", {
              file.path(root, "setup_and_run.R"))
   withr::local_envvar(RMBL_KEY = "fake", GITHUB_TOKEN = "fake")
   got <- new.env()
-  local_mocked_bindings(.rmbl_wjob = function(cmd, log, tmout) {
+  local_mocked_bindings(.rmbl_wjob = function(cmd, log, tmout, wd) {
     got$cmd <- cmd
+    got$wd <- wd
     got$env <- names(Sys.getenv())
     got$home <- Sys.getenv("HOME")
     got$tmout <- tmout
@@ -541,6 +550,8 @@ test_that("the Windows way, and no bash or env on the PATH", {
   expect_false(any(c("RMBL_KEY", "GITHUB_TOKEN") %in% got$env))
   expect_false(got$home == Sys.getenv("HOME"))
   expect_identical(got$tmout, 1800L)
+  # the run starts in the bundle's folder; this session's stays where it was
+  expect_identical(got$wd, normalizePath(root, winslash = "/"))
   expect_identical(Sys.getenv("RMBL_KEY"), "fake")
 
   local_mocked_bindings(Sys.which = function(names) "", .package = "base")
@@ -801,6 +812,17 @@ test_that("a container check with podman runs the starter bundle", {
   skip_on_os("windows")
   pm <- Sys.which("podman")
   skip_if(!nzchar(pm), "no podman")
+  # any podman command creates its storage under the home folder: with none
+  # there (a fresh home, as R CMD check may have) the image cannot be there
+  # either, and asking would leave ~/.local/share/containers behind
+  data <- Sys.getenv(
+    "XDG_DATA_HOME",
+    file.path(path.expand("~"), ".local", "share")
+  )
+  skip_if(
+    !dir.exists(file.path(data, "containers", "storage")),
+    "no podman storage in this home"
+  )
   have <- suppressWarnings(system2(pm, c("image", "exists", .bndlchk_image()),
                                    stdout = FALSE, stderr = FALSE))
   skip_if(!identical(as.integer(have), 0L), "the pinned image is not here")
@@ -863,4 +885,23 @@ test_that("user services a run starts are found, stopped and fail the check", {
   writeLines(c("#!/bin/sh", "exit 1"), sc)
   expect_identical(.bndlchk_units(sc), character())
   expect_identical(.bndlchk_units(""), character())
+})
+
+test_that("mkbndlchk() needs no suggested package to set its environment", {
+  # withr is only suggested: three unconditional withr:: calls stopped every
+  # run without it ("there is no package called 'withr'")
+  withr::local_envvar(RMBL_T1 = "old", RMBL_T2 = NA)
+  f <- function() {
+    .rmbl_local_env(c(RMBL_T1 = NA, RMBL_T2 = "new"))
+    c(Sys.getenv("RMBL_T1", NA), Sys.getenv("RMBL_T2", NA))
+  }
+  expect_identical(f(), c(NA_character_, "new"))
+  expect_identical(Sys.getenv("RMBL_T1", NA), "old")
+  expect_identical(Sys.getenv("RMBL_T2", NA), NA_character_)
+  ns <- asNamespace("rmoriebricklayer")
+  uses <- Filter(function(n) {
+    g <- get(n, envir = ns)
+    is.function(g) && any(grepl("withr::", deparse(g), fixed = TRUE))
+  }, ls(ns, all.names = TRUE))
+  expect_identical(uses, character())
 })
